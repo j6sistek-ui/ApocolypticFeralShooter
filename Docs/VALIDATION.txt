@@ -1,0 +1,54 @@
+AFS LOCAL TEST SANDBOX - 2026-10-22
+
+IMPLEMENTED
+PostApo test level with Vexa, black/red personal glider, ScifiHoverbike and Doomsday
+pickup truck. Three separate rides; each supports entry/exit. Original vendor
+vehicle Blueprints and their supplied mappings are retained.
+
+Glider: spring pad slides, stepping mount, foot IK, rigid wing movement, FPS
+thrust/strafe/look, ascend/descend, neutral altitude hold, hop, boost and coast.
+Rifle: L2 aim uses a two-handed upper-body pose over the in-flight pose; R2 fires
+camera-to-target then muzzle-to-target traces. FPS renders its own rifle so the
+full-body riding/recoil pose cannot obstruct the camera. F5 shows full Vexa.
+
+ZombieMale_AAB uses local copies of Zombie Animation Pack walking/idle clips.
+20 zombies wander or approach with simple obstacle avoidance (no pathfinding).
+They cannot attack or hurt Vexa. Body hits deal 35; headshots deal 100 against
+100 health. BloodShot Niagara, ragdoll death, kill counter, 12-second corpse
+cleanup and replenishment to 20 are enabled. Ammo is unlimited.
+
+VERIFIED
+AFSEditor builds on installed UE5.8.4/MSVC. Authored C++ passes clang-format.
+Python script syntax passes using the preinstalled bundled runtime.
+Rendered D3D12 Play sessions exercised mount/dismount, ascent, stable height,
+forward/strafe, aim/fire, hoverbike drive/exit, and truck drive/exit back to Vexa.
+Measured first vehicle pass: bike 7.75 m; truck 8.62 m. Foot IK matches pad
+targets with the designed 8.5 cm ankle offset. Visual captures reviewed.
+Fresh zombie run: 20 alive initially; three body hits kill one; one headshot
+kills another; four blood impacts emitted; count restored to 20. Applying 9999
+damage to Vexa returns zero. Visible blood and collapsed zombie reviewed.
+Final integrated controller-input/vehicle results are in the delivery receipts.
+
+PRESERVATION
+192 Vexa dependency source files retain their SHA256 hashes. 222 truck files
+match both original source and copied destination. Original black/red GLB is
+unchanged. Blender source art was not saved over. AFS configuration recovery
+copies, import manifests, source verification and native Blender rig are retained
+in the Codex workspace. Purchased assets remain local and outside Git.
+The source-only local checkpoint is not a complete native asset backup.
+
+KNOWN LIMITS / WARNINGS
+This is a local editor test, not a packaged release or SpaceSurvival integration.
+Physical controller feel, long sessions and representative performance remain
+unverified. FPS hand placement is not authored; full Vexa is in the external view.
+R3 barrel rolls, target lock, ammo/reloading and multiplayer are deferred.
+High-altitude dismount falls to the ground; R resets Vexa and the glider.
+Zombie steering is local obstacle avoidance; complex paths may leave some stuck.
+Native engine headers produce deprecation warnings; installed MSVC is newer than
+the engine's preferred version. Supplied hoverbike pose assets report stale
+source GUIDs. Vexa's inherited UDIM textures warn that only the first tile is
+built with virtual texturing off; original configuration is retained. These
+warnings did not prevent the recorded gameplay, but this is not release QA.
+Four missing vendor/demo dependency references were already absent at source.
+Docker is unavailable; a minimal container syntax workflow is supplied. Native
+Unreal requires the installed Windows engine; no host packages were installed.

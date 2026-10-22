@@ -1,0 +1,93 @@
+{
+  "FileVersion": 3,
+  "EngineAssociation": "5.8",
+  "Category": "",
+  "Description": "",
+  "Plugins": [
+    {
+      "Name": "Bridge",
+      "Enabled": false
+    },
+    {
+      "Name": "Fab",
+      "Enabled": false
+    },
+    {
+      "Name": "MeshPainting",
+      "Enabled": false
+    },
+    {
+      "Name": "InterchangeTests",
+      "Enabled": false
+    },
+    {
+      "Name": "GLTFExporter",
+      "Enabled": false
+    },
+    {
+      "Name": "InterchangeEditor",
+      "Enabled": false,
+      "SupportedTargetPlatforms": [
+        "Win64",
+        "Linux",
+        "Mac"
+      ]
+    },
+    {
+      "Name": "Interchange",
+      "Enabled": false,
+      "SupportedTargetPlatforms": [
+        "Win64",
+        "Linux",
+        "Mac"
+      ]
+    },
+    {
+      "Name": "SkeletalMeshModelingTools",
+      "Enabled": false
+    },
+    {
+      "Name": "ChaosEditor",
+      "Enabled": false
+    },
+    {
+      "Name": "Dataflow",
+      "Enabled": false
+    },
+    {
+      "Name": "MetaHumanSDK",
+      "Enabled": false
+    },
+    {
+      "Name": "ModelingToolsEditorMode",
+      "Enabled": true
+    },
+    {
+      "Name": "PythonScriptPlugin",
+      "Enabled": true
+    },
+    {
+      "Name": "EditorScriptingUtilities",
+      "Enabled": true
+    },
+    {
+      "Name": "XRBase",
+      "Enabled": true
+    },
+    {
+      "Name": "ChaosVehiclesPlugin",
+      "Enabled": true
+    },
+    {
+      "Name": "EnhancedInput",
+      "Enabled": true
+    }
+  ],
+  "Modules": [
+    {
+      "Name": "HoverFlight",
+      "Type": "Runtime",
+      "LoadingPhase": "Default"
+    }
+  ]
+}

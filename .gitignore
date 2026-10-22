@@ -1,0 +1,21 @@
+# Source-only prototype review. Purchased content and local configuration stay private.
+/*
+!/.gitignore
+!/.clang-format
+!/AGENTS.md
+!/README.md
+!/Dockerfile
+!/AFS.uproject
+!/Source/
+!/Scripts/
+!/Docs/
+Source/**
+!Source/**/*.h
+!Source/**/*.cpp
+!Source/**/*.cs
+!Source/**/
+Scripts/__pycache__/
+*.pyc
+Docs/*
+!Docs/CONTROLS.txt
+!Docs/VALIDATION.txt

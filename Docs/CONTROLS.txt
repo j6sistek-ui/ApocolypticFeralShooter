@@ -1,0 +1,33 @@
+AFS FREE FLIGHT TEST
+
+VEXA / GLIDER
+Left stick / WASD: forward, reverse, left/right strafe.
+Right stick / mouse: turn and look. Right stick forward pitches down; back pitches up.
+Pitch plus forward/reverse thrust climbs/dives. Neutral vertical commands hold altitude.
+R1 / E: ascend. L1 / Q: descend. Release to hold height when no pitch/thrust climb is active.
+Hold X (0.65 seconds): mount nearby glider/bike/truck, or dismount glider.
+A / Space: jump on foot; hop rider and glider together when mounted.
+L3 held / Shift: boost. B / Ctrl: briefly coast in the current movement direction.
+L2 held / right mouse: gun aim and in-flight aiming animation.
+R2 held / left mouse: fire rifle. Three body hits or one headshot kills a zombie.
+Zombies respawn to maintain 20; blood impacts and ragdoll deaths show hits/kills.
+Ammo is unlimited. Vexa is invulnerable, and zombies have no attack damage.
+F5 / Menu: toggle FPS and external review camera.
+R: reset Vexa and glider to the test start.
+
+SUPPLIED HOVERBIKE CONTROLS
+Left stick / WASD / arrow keys: throttle/reverse and steering.
+A / Space: handbrake. Shift: supplied boost. F: lights.
+Mouse / right stick: camera. Mouse wheel: zoom. V: change camera.
+E or hold X: exit and return to Vexa.
+
+DOOMSDAY TRUCK (SUPPLIED CONTROLS)
+R2 / W / Up: throttle. L2 / S / Down: brake and reverse.
+Left stick / A-D: steering. L1 / Space: handbrake.
+Right stick / mouse: look. View / Tab: toggle camera. Menu / Backspace: reset truck.
+Hold Y (controller) or hold X (keyboard): exit and return to Vexa.
+The vendor's controller X throttle and A brake bindings remain intact.
+
+Deferred: ammo/reloading, target locking, R3 barrel roll, multiplayer,
+production tuning, and integration into the main game.
+The FPS view uses a separate rifle; the full Vexa body/aim pose is shown in F5 review view.
