@@ -12,7 +12,13 @@ class HOVERFLIGHT_API UHoverAuthoring : public UBlueprintFunctionLibrary
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static FString DescribeBlueprint(UBlueprint *Blueprint);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
+    static TMap<FString, FString> DescribeObjectProperties(UObject *Object);
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
+    static bool PreserveMeshUserData(USkeletalMesh *Source, USkeletalMesh *Target);
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static bool IntegrateParkourBlueprint(UBlueprint *Blueprint);
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
+    static bool RepairParkourTransitions(UBlueprint *Blueprint);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static bool BuildRideBlend(class UBlendSpace *Blend, const TArray<class UAnimSequence *> &Clips,
                                const TArray<FVector> &Coordinates);
@@ -24,6 +30,8 @@ class HOVERFLIGHT_API UHoverAuthoring : public UBlueprintFunctionLibrary
     static void IsolateTestInput(APlayerController *Controller);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static void SetPlaytestFixedStep(bool bEnabled);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static AActor *SpawnTestPlatform(FVector Location);
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
+    static TArray<FVector> FindLightingReviewLocations(UWorld *World, FVector Origin);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static FString ConfigurePrototypeEffect(UNiagaraSystem *Effect, float SpriteScale, bool LocalSpace);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static void CapturePlaytest(const FString &Filename);

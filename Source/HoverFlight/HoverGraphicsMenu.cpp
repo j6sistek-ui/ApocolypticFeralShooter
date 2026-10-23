@@ -7,6 +7,7 @@
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
+#include "Kismet/GameplayStatics.h"
 
 void UHoverGraphicsMenu::NativeOnInitialized()
 {
@@ -41,10 +42,13 @@ void UHoverGraphicsMenu::NativeOnInitialized()
         Rows->AddChildToVerticalBox(Label)->SetPadding(FMargin(0, 8));
         return Label;
     };
-    AddText(TEXT("GRAPHICS"), 30, FLinearColor::White);
-    AddText(TEXT("Game paused. Choose your image quality and frame generation."), 16, FLinearColor(.7f, .76f, .84f));
+    AddText(TEXT("TEST SETTINGS"), 30, FLinearColor::White);
+    AddText(TEXT("Game paused. Choose graphics or a test environment."), 16, FLinearColor(.7f, .76f, .84f));
     ModeText = AddText(TEXT(""), 23, FLinearColor::White);
     FramesText = AddText(TEXT(""), 23, FLinearColor::White);
+    LevelText = AddText(TEXT(""), 23, FLinearColor::White);
+    AddText(TEXT("Changing level starts a fresh test with Vexa, all three vehicles and zombies."), 16,
+            FLinearColor(.7f, .76f, .84f));
     AddText(TEXT("DLAA keeps full resolution. DLSS Quality is a good starting point for more speed."), 16,
             FLinearColor(.7f, .76f, .84f));
     NoteText = AddText(TEXT(""), 16, FLinearColor(.9f, .78f, .5f));
@@ -57,13 +61,14 @@ void UHoverGraphicsMenu::Open(UHoverGraphicsSettings *InSettings)
 {
     Settings = InSettings;
     Pending = Settings->GetOptions();
+    PendingLevel = UGameplayStatics::GetCurrentLevelName(this).Contains(TEXT("Cyber")) ? 1 : 0;
     SelectedRow = 0;
     Refresh();
 }
 
 void UHoverGraphicsMenu::Navigate(int32 Direction)
 {
-    SelectedRow = (SelectedRow + Direction + 2) % 2;
+    SelectedRow = (SelectedRow + Direction + 3) % 3;
     Refresh();
 }
 
@@ -75,12 +80,14 @@ void UHoverGraphicsMenu::Adjust(int32 Direction)
         const int32 Index = FMath::Max(0, Options.Find(Pending.Upscaling));
         Pending.Upscaling = Options[(Index + Direction + Options.Num()) % Options.Num()];
     }
-    else
+    else if (SelectedRow == 1)
     {
         const auto Options = Settings->GetFrameGenerationOptions();
         const int32 Index = FMath::Max(0, Options.Find(Pending.FrameGeneration));
         Pending.FrameGeneration = Options[(Index + Direction + Options.Num()) % Options.Num()];
     }
+    else
+        PendingLevel = 1 - PendingLevel;
     Refresh();
 }
 
@@ -94,5 +101,9 @@ void UHoverGraphicsMenu::Refresh()
                         *UHoverGraphicsSettings::FrameGenerationName(Pending.FrameGeneration))));
     ModeText->SetColorAndOpacity(FSlateColor(SelectedRow == 0 ? FLinearColor(.3f, .8f, 1) : FLinearColor::White));
     FramesText->SetColorAndOpacity(FSlateColor(SelectedRow == 1 ? FLinearColor(.3f, .8f, 1) : FLinearColor::White));
+    LevelText->SetText(
+        FText::FromString(FString::Printf(TEXT("%s Test level:  < %s >"), SelectedRow == 2 ? TEXT(">") : TEXT("  "),
+                                          PendingLevel ? TEXT("Cyber City") : TEXT("Post-apocalypse"))));
+    LevelText->SetColorAndOpacity(FSlateColor(SelectedRow == 2 ? FLinearColor(.3f, .8f, 1) : FLinearColor::White));
     NoteText->SetText(FText::FromString(Settings->GetAvailabilityNote()));
 }

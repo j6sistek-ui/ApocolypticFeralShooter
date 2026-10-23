@@ -38,8 +38,7 @@ class HOVERFLIGHT_API UHoverBodyPhysics : public UAnimInstance
     UPROPERTY(BlueprintReadOnly) TArray<float> MeasuredAlphas;
 
   private:
-    FVector PreviousVelocity = FVector::ZeroVector;
-    float FilteredAcceleration = 0;
+    float AirborneBlend = 0;
 };
 
 UCLASS()

@@ -14,12 +14,14 @@ class HOVERFLIGHT_API AHoverTestController : public APlayerController
 #if WITH_EDITOR
     bool bTestInputOnly = false;
     bool bInjectingTestKey = false;
+    TSet<FName> TestHeldKeys;
 #endif
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     virtual bool InputKey(const FInputKeyEventArgs &Params) override;
     virtual void PlayerTick(float DeltaSeconds) override;
     UFUNCTION(Exec) void HoverGraphics();
+    UFUNCTION(Exec) void HoverLoadLevel(int32 Level);
     UFUNCTION(BlueprintPure) bool IsGraphicsMenuOpen() const
     {
         return GraphicsMenu != nullptr;

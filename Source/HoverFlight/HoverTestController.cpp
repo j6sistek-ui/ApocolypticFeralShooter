@@ -21,6 +21,7 @@
 #include "InputKeyEventArgs.h"
 #include "PhysicsEngine/PhysicsThrusterComponent.h"
 #include "PhysicsEngine/BodyInstance.h"
+#include "Misc/PackageName.h"
 
 void AHoverTestController::BeginPlay()
 {
@@ -62,6 +63,9 @@ void AHoverTestController::CloseGraphicsMenu(bool bApply)
 {
     if (!GraphicsMenu)
         return;
+    const int32 Level = GraphicsMenu->GetSelectedLevel();
+    const bool ChangeLevel =
+        bApply && Level != (UGameplayStatics::GetCurrentLevelName(this).Contains(TEXT("Cyber")) ? 1 : 0);
     if (bApply)
         GraphicsSettings->Apply(GraphicsMenu->GetSelection());
     GraphicsMenu->RemoveFromParent();
@@ -73,6 +77,20 @@ void AHoverTestController::CloseGraphicsMenu(bool bApply)
     SetIgnoreMoveInput(false);
     SetIgnoreLookInput(false);
     SetPause(false);
+    if (ChangeLevel)
+        HoverLoadLevel(Level);
+}
+
+void AHoverTestController::HoverLoadLevel(int32 Level)
+{
+    const FName Map(Level == 1 ? TEXT("/Game/HoverPrototype/Maps/L_CyberCity")
+                               : TEXT("/Game/JustBStudios/PostApo/Levels/PostApo"));
+    if (!FPackageName::DoesPackageExist(Map.ToString()))
+    {
+        ClientMessage(TEXT("That test level is not installed yet."));
+        return;
+    }
+    UGameplayStatics::OpenLevel(this, Map, true, TEXT("game=/Script/HoverFlight.HoverGameMode"));
 }
 
 bool AHoverTestController::InputKey(const FInputKeyEventArgs &Params)
@@ -107,7 +125,12 @@ bool AHoverTestController::InputKey(const FInputKeyEventArgs &Params)
             (Key == EKeys::Gamepad_FaceButton_Bottom || Key == EKeys::Gamepad_FaceButton_Right))
         {
             FInputKeyEventArgs Jump = Params;
-            Jump.Key = Key == EKeys::Gamepad_FaceButton_Bottom ? EKeys::SpaceBar : EKeys::LeftShift;
+            if (Key == EKeys::Gamepad_FaceButton_Right)
+            {
+                P->SetParkourCrouch(Params.Event != IE_Released);
+                return true;
+            }
+            Jump.Key = EKeys::SpaceBar;
             Super::InputKey(Jump);
         }
         return Super::InputKey(Params);
@@ -406,11 +429,16 @@ void AHoverTestController::PlayerTick(float DT)
     if (Pilot && !bSpawnAttempted)
     {
         bSpawnAttempted = true;
+        auto RideStart = [this](FName Tag, FVector Offset) {
+            TArray<AActor *> Starts;
+            UGameplayStatics::GetAllActorsWithTag(this, Tag, Starts);
+            return Starts.IsEmpty() ? Pilot->GetActorLocation() + Offset : Starts[0]->GetActorLocation();
+        };
         UClass *Class =
             LoadClass<APawn>(nullptr, TEXT("/Game/ScifiHoverbike/Vehicles/Blueprint/BP_Hoverbike.BP_Hoverbike_C"));
         if (Class)
         {
-            FVector Location = Pilot->GetActorLocation() + FVector(550, 120, 80);
+            FVector Location = RideStart(TEXT("AFS_BikeStart"), FVector(550, 120, 80));
             FHitResult Floor;
             FCollisionQueryParams Params(SCENE_QUERY_STAT(BikeSpawn), false, Pilot);
             if (GetWorld()->LineTraceSingleByChannel(Floor, Location + FVector(0, 0, 500),
@@ -429,7 +457,7 @@ void AHoverTestController::PlayerTick(float DT)
             nullptr, TEXT("/Game/Crossroad_Pickup/Blueprints/BP_Crossroad_Pickup.BP_Crossroad_Pickup_C"));
         if (TruckClass)
         {
-            FVector Location = Pilot->GetActorLocation() + FVector(350, -650, 150);
+            FVector Location = RideStart(TEXT("AFS_TruckStart"), FVector(350, -650, 150));
             FHitResult Floor;
             FCollisionQueryParams Params(SCENE_QUERY_STAT(TruckSpawn), false, Pilot);
             if (GetWorld()->LineTraceSingleByChannel(Floor, Location + FVector(0, 0, 500),

@@ -137,16 +137,25 @@ void UHoverBodyPhysics::NativeUpdateAnimation(float DT)
     Super::NativeUpdateAnimation(DT);
     auto *Pilot = Cast<AHoverPilot>(TryGetPawnOwner());
     const FVector Velocity = Pilot ? Pilot->GetVelocity() : FVector::ZeroVector;
-    const float Acceleration = DT > 0 ? (Velocity - PreviousVelocity).Size() / DT : 0;
-    PreviousVelocity = Velocity;
-    FilteredAcceleration = FMath::FInterpTo(FilteredAcceleration, Acceleration, DT, 5);
-    const float Target = !bPhysicsEnabled              ? 0
-                         : Pilot && Pilot->IsMounted() ? FMath::Clamp((FilteredAcceleration - 400.f) / 1400.f, 0.f, .7f)
-                                                       : 1;
+    const bool Airborne = Pilot && (Pilot->IsMounted() || Pilot->GetCharacterMovement()->IsFalling());
+    AirborneBlend = FMath::FInterpTo(AirborneBlend, Airborne ? 1.f : 0.f, DT, 8.f);
+    // Avoid continually switching flight springs off/on at the acceleration
+    // threshold. Preserve the accepted grounded settings, damp flight impulses.
+    const float Target = !bPhysicsEnabled ? 0.f : Airborne ? .45f : 1.f;
     PhysicsAlpha = FMath::FInterpTo(PhysicsAlpha, Target, DT, 5);
     for (TFieldIterator<FStructProperty> It(GetClass()); It; ++It)
         if (It->Struct == FAnimNode_SpringBone::StaticStruct())
-            It->ContainerPtrToValuePtr<FAnimNode_SpringBone>(this)->Alpha = PhysicsAlpha;
+        {
+            auto *Spring = It->ContainerPtrToValuePtr<FAnimNode_SpringBone>(this);
+            const bool Glute = Spring->SpringBone.BoneName.ToString().StartsWith(TEXT("glute"));
+            Spring->Alpha = PhysicsAlpha;
+            Spring->SpringStiffness = FMath::Lerp(Glute ? 160.f : 220.f, Glute ? 100.f : 140.f, AirborneBlend);
+            Spring->SpringDamping = FMath::Lerp(Glute ? 10.f : 12.f, Glute ? 22.f : 25.f, AirborneBlend);
+            Spring->MaxDisplacement = FMath::Lerp(Glute ? 6.5f : 3.5f, Glute ? 3.f : 2.f, AirborneBlend);
+            // A long render frame during fast flight is ordinary travel, not a
+            // teleport. Avoid resetting and restarting the spring every frame.
+            Spring->ErrorResetThresh = FMath::Max(250., Velocity.Size() * DT * 2. + 50.);
+        }
 }
 void UHoverBodyPhysics::NativePostEvaluateAnimation()
 {

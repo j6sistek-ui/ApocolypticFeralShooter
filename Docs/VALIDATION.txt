@@ -1,5 +1,34 @@
 AFS LOCAL TEST SANDBOX - 2026-10-22
 
+FLIGHT/CITY FOLLOW-UP - 2026-10-23
+31/31 rendered behavior checks pass: 5/9m/s walk/run, 9m/s diagonal/camera turns,
+run-crouch slide then 4m/s crouch, capsule60->100 on release, grounded jump,
+21.6m/s flight, 3m ollie peak/1.66m settle, 18m/s climb, 24m/s descent,
+stronger35-degree bank turn, and coast to rest. Two-way controller menu travel
+retains Vexa, three rides and invulnerability. Vehicles use explicit clear street
+starts in Cyber City. Full35/18-degree turn trajectory was sampled, not just visuals.
+Local Cyber City wrapper and atmosphere copies preserve all2163 vendor source files.
+PostApo sun/shade captures verify bounded exposure adaptation without skin changes.
+City final street capture has readable Vexa/road/vehicle detail and retained neon.
+Selected outfit retains both garments and all original chain faces. Reweighting
+restored6615 belt vertices exactly and assigned736 hanging vertices by whole links.
+An owner mesh save added empty AnimCurveMetaData only; geometry/material/default
+comparison matched and the metadata was copied into the repaired mesh. Owner
+DefaultEditor preview settings and project descriptor remain preserved.
+Grounded body Spring Controller settings are unchanged. Airborne damping/limits
+and stable alpha reduce rapid jump/flight corrections;30Hz captured motion and
+actual rendered bone offsets were reviewed. This is not physical-controller approval.
+Reproduction: run Scripts/VerifyFlightCity.py and Scripts/VerifyCityTravel.py in
+separate offscreen editor sessions, then Scripts/AssessFlightCity.py. Reports are
+under Saved/Automation/FlightCity. Original development evidence is in the
+workspace outputs/AFS_Test/FlightCity and work/flight_city folders.
+Known limits: the intermittent0xc0000005 editor-shutdown failure recurred after
+successful city gameplay/report completion. City virtual-shadow-map non-Nanite
+marking overflow warns of possible performance cost. Owner feel/visual approval,
+representative performance, packaged build and long-session testing remain open.
+Zombie Engine is a subsequent Cyber City-only phase; this checkpoint still uses
+the existing invulnerable20-zombie test range in both levels.
+
 IMPLEMENTED
 PostApo test level with Vexa, black/red personal glider, ScifiHoverbike and Doomsday
 pickup truck. Three separate rides; each supports entry/exit. Original vendor

@@ -22,6 +22,10 @@ class HOVERFLIGHT_API UHoverGraphicsMenu : public UUserWidget
     {
         return SelectedRow;
     }
+    int32 GetSelectedLevel() const
+    {
+        return PendingLevel;
+    }
 
   protected:
     virtual void NativeOnInitialized() override;
@@ -31,7 +35,9 @@ class HOVERFLIGHT_API UHoverGraphicsMenu : public UUserWidget
     UPROPERTY() TObjectPtr<UTextBlock> ModeText;
     UPROPERTY() TObjectPtr<UTextBlock> FramesText;
     UPROPERTY() TObjectPtr<UTextBlock> NoteText;
+    UPROPERTY() TObjectPtr<UTextBlock> LevelText;
     FHoverGraphicsOptions Pending;
     int32 SelectedRow = 0;
+    int32 PendingLevel = 0;
     void Refresh();
 };

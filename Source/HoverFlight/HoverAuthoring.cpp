@@ -1,4 +1,6 @@
 #include "HoverAuthoring.h"
+#include "Engine/DirectionalLight.h"
+#include "EngineUtils.h"
 #include "HoverTestController.h"
 #include "HoverPilot.h"
 #include "GameFramework/PlayerInput.h"
@@ -134,6 +136,51 @@ bool UHoverAuthoring::IntegrateParkourBlueprint(UBlueprint *Blueprint)
 #endif
 }
 
+bool UHoverAuthoring::RepairParkourTransitions(UBlueprint *Blueprint)
+{
+#if WITH_EDITOR
+    if (!Blueprint || !Blueprint->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/")))
+        return false;
+    TArray<UEdGraph *> Graphs;
+    Blueprint->GetAllGraphs(Graphs);
+    for (auto *Graph : Graphs)
+    {
+        const auto Nodes = Graph->Nodes;
+        for (UEdGraphNode *Node : Nodes)
+        {
+            if (auto *Debug = Node->FindPin(TEXT("DrawDebugType")))
+            {
+                Debug->BreakAllPinLinks();
+                Debug->DefaultValue = TEXT("None");
+            }
+            auto *Key = Cast<UK2Node_InputKey>(Node);
+            if (!Key || Key->InputKey != EKeys::LeftShift)
+                continue;
+            for (const TCHAR *Event : {TEXT("Pressed"), TEXT("Released")})
+            {
+                auto *Pin = Key->FindPin(Event);
+                if (!Pin)
+                    continue;
+                Pin->BreakAllPinLinks();
+                FGraphNodeCreator<UK2Node_CallFunction> Creator(*Graph);
+                auto *Call = Creator.CreateNode();
+                Call->SetFromFunction(AHoverPilot::StaticClass()->FindFunctionByName(
+                    GET_FUNCTION_NAME_CHECKED(AHoverPilot, SetParkourCrouch)));
+                Creator.Finalize();
+                Call->FindPin(TEXT("Held"))->DefaultValue =
+                    FString(Event) == TEXT("Pressed") ? TEXT("true") : TEXT("false");
+                Pin->MakeLinkTo(Call->GetExecPin());
+            }
+        }
+    }
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+    FKismetEditorUtilities::CompileBlueprint(Blueprint);
+    return Blueprint->Status != BS_Error;
+#else
+    return false;
+#endif
+}
+
 FString UHoverAuthoring::DescribeBlueprint(UBlueprint *Blueprint)
 {
     FString Result;
@@ -212,9 +259,18 @@ void UHoverAuthoring::TestKey(APlayerController *Controller, FName Key, float Va
 #if WITH_EDITOR
     // A held physical button emits one press edge. Replaying Pressed each frame
     // restarts Blueprint slide timelines and can compound capsule scaling.
-    if (Controller && !bAnalog && Controller->IsInputKeyDown(FKey(Key)) == (Value > 0))
-        return;
     auto *TestController = Cast<AHoverTestController>(Controller);
+    if (TestController && !bAnalog)
+    {
+        // Consumed menu/crouch buttons never enter PlayerInput's held-key map.
+        // Track injected edges independently so their release is still delivered.
+        if (TestController->TestHeldKeys.Contains(Key) == (Value > 0))
+            return;
+        if (Value > 0)
+            TestController->TestHeldKeys.Add(Key);
+        else
+            TestController->TestHeldKeys.Remove(Key);
+    }
     if (TestController)
         TestController->bInjectingTestKey = true;
     if (Controller)
@@ -232,6 +288,7 @@ void UHoverAuthoring::IsolateTestInput(APlayerController *Controller)
     if (auto *PC = Cast<AHoverTestController>(Controller))
     {
         PC->bTestInputOnly = true;
+        PC->TestHeldKeys.Reset();
         if (PC->PlayerInput)
             PC->PlayerInput->FlushPressedKeys();
     }
@@ -261,6 +318,50 @@ AActor *UHoverAuthoring::SpawnTestPlatform(FVector Location)
     }
 #endif
     return nullptr;
+}
+
+TArray<FVector> UHoverAuthoring::FindLightingReviewLocations(UWorld *World, FVector Origin)
+{
+    TArray<FVector> Result;
+#if WITH_EDITOR
+    if (!World)
+        return Result;
+    TActorIterator<ADirectionalLight> Sun(World);
+    if (!Sun)
+        return Result;
+    const FVector ToSun = -Sun->GetActorForwardVector();
+    FCollisionQueryParams Params(SCENE_QUERY_STAT(LightingReview));
+    if (auto *PC = World->GetFirstPlayerController())
+        Params.AddIgnoredActor(PC->GetPawn());
+    FVector Locations[2];
+    bool Found[2] = {false, false};
+    for (float Distance : {0.f, 350.f, 700.f, 1100.f, 1600.f, 2400.f, 3200.f})
+        for (int32 I = 0; I < 16; ++I)
+        {
+            const FVector Point =
+                Origin + FVector(FMath::Cos(I * PI / 8) * Distance, FMath::Sin(I * PI / 8) * Distance, 0);
+            FHitResult Floor, Shade;
+            if (!World->LineTraceSingleByChannel(Floor, Point + FVector(0, 0, 300), Point - FVector(0, 0, 2500),
+                                                 ECC_Visibility, Params) ||
+                Floor.ImpactNormal.Z < .8f)
+                continue;
+            const FVector Location = Floor.ImpactPoint + FVector(0, 0, 105);
+            if (World->OverlapBlockingTestByChannel(Location, FQuat::Identity, ECC_Pawn,
+                                                    FCollisionShape::MakeCapsule(35, 100), Params))
+                continue;
+            const FVector Start = Location + FVector(0, 0, 50);
+            const int32 Index =
+                World->LineTraceSingleByChannel(Shade, Start, Start + ToSun * 10000, ECC_Visibility, Params) ? 1 : 0;
+            if (!Found[Index])
+            {
+                Locations[Index] = Location;
+                Found[Index] = true;
+            }
+            if (Found[0] && Found[1])
+                return {Locations[0], Locations[1]};
+        }
+#endif
+    return Result;
 }
 
 FString UHoverAuthoring::ConfigurePrototypeEffect(UNiagaraSystem *Effect, float SpriteScale, bool LocalSpace)
@@ -322,6 +423,37 @@ void UHoverAuthoring::CapturePlaytest(const FString &Filename)
 #if WITH_EDITOR
     FScreenshotRequest::RequestScreenshot(Filename, true, false);
 #endif
+}
+
+bool UHoverAuthoring::PreserveMeshUserData(USkeletalMesh *Source, USkeletalMesh *Target)
+{
+#if WITH_EDITOR
+    if (!Source || !Target || !Target->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/Appearance/")))
+        return false;
+    if (const auto *Data = Source->GetAssetUserDataArray())
+        for (auto *Entry : *Data)
+            Target->AddAssetUserData(DuplicateObject(Entry, Target));
+    Target->MarkPackageDirty();
+    return true;
+#else
+    return false;
+#endif
+}
+
+TMap<FString, FString> UHoverAuthoring::DescribeObjectProperties(UObject *Object)
+{
+    TMap<FString, FString> Result;
+#if WITH_EDITOR
+    if (Object)
+        for (TFieldIterator<FProperty> It(Object->GetClass()); It; ++It)
+            if (!It->HasAnyPropertyFlags(CPF_Transient))
+            {
+                FString Value;
+                It->ExportText_InContainer(0, Value, Object, Object, Object, PPF_None);
+                Result.Add(It->GetName(), Value);
+            }
+#endif
+    return Result;
 }
 
 FString UHoverAuthoring::InspectCharacterMesh(USkeletalMesh *Mesh)

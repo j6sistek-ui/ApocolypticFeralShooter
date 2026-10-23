@@ -21,10 +21,10 @@ bool FHoverMotionTest::RunTest(const FString &Parameters)
             const float Height = HoverMotion::OllieHeight(float(I) / Rate);
             Peak = FMath::Max(Peak, Height);
             TestTrue(TEXT("Ollie stays above its start and has no position jump"),
-                     Height >= 0 && FMath::Abs(Height - Previous) < 30.f);
+                     Height >= 0 && FMath::Abs(Height - Previous) < 45.f);
             Previous = Height;
         }
-        TestTrue(TEXT("Ollie pops above the final hover height"), Peak > 219.f && Peak <= 220.01f);
+        TestTrue(TEXT("Ollie visibly pops above the final hover height"), Peak > 299.f && Peak <= 300.01f);
         TestTrue(TEXT("Ollie settles to the existing height at every sample rate"),
                  FMath::IsNearlyEqual(Previous, 166.f, .01f));
         FVector Banked = Forward;
@@ -33,6 +33,8 @@ bool FHoverMotionTest::RunTest(const FString &Parameters)
         TestTrue(TEXT("A right bank bends travel right without deleting momentum"),
                  Banked.Y > 400 && FMath::Abs(Banked.Size() - Forward.Size()) < .1f);
         TestTrue(TEXT("Bank has no turn authority while stationary"), HoverMotion::BankYawRate(28.f, 0) == 0);
+        TestTrue(TEXT("Enhanced bank materially tightens a normal-speed turn"),
+                 HoverMotion::BankYawRate(35.f, 2160.f) > HoverMotion::BankYawRate(18.f, 2160.f) * 1.8f);
         TestTrue(TEXT("Reverse travel changes the bank turn sign"), HoverMotion::BankYawRate(28.f, -1800) < 0);
         FVector V = Forward;
         for (int32 I = 0; I < Rate * 3; ++I)

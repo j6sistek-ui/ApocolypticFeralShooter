@@ -27,7 +27,9 @@ On foot, a local copy of ParkourMovementPack's original Blueprint movement graph
 controls movement, wall running, jump buffering and coyote time. Walking is capped at
 500 cm/s and held-L3 running at900 cm/s. The template's1000 cm/s² acceleration,
 2.5 gravity scale and1102.5 cm/s jump velocity remain. A feeds its buffered Space
-jump event; B feeds its Shift crouch/slide. CLS selects and retargets locomotion
+jump event; held B/Shift uses floor-preserving native crouch. Pressing it while running
+retains a short decelerating slide before crouch speed; releasing checks headroom.
+CLS selects and retargets locomotion
 poses through a hidden mannequin while Parkour retains movement and special actions.
 Third-person Vexa faces travel unless aiming. F7 / D-pad Right toggles the original
 poses and CLS on the same pawn; glider, weapon and vehicle controls remain available.
@@ -44,10 +46,14 @@ bones animate the back chain. The local post-process Blueprint
 `/Game/HoverPrototype/Appearance/ABP_Vexa_BodyPhysics` contains the four original
 Xandra Spring Controllers, mapped to chest_l/r and glute_l/r. Glute stiffness160,
 damping10 and a6.5 cm limit give slower followthrough; chest uses220/12 and3.5 cm.
-A flight acceleration deadband ignores small corrections. The prior native body
+Grounded settings remain unchanged. Airborne motion blends to softer, more damped
+springs and a steady0.45 strength, avoiding acceleration-threshold flicker. Teleport
+reset distance accounts for normal travel during slow frames. The prior native body
 spring offsets are bypassed when this Blueprint is present. The fitted visible
 body copies the final pose, then applies persistent chain pendulum motion.
 The chain reacts to movement and animated spine acceleration and settles after stops.
+Whole hanging links follow the chain bones; belt vertices retain their source skin
+weights so belt pieces do not flap with the hanging chain.
 
 The selected local outfit combines the Cloth-02 top and Cloth-05 bottoms in matching
 ivory, with all original chains retained. Face, torso and limb skin materials share
@@ -61,7 +67,8 @@ searching `SK_Vexa_SelectedOutfit` in the Content Browser.
 
 The local `HoverPrototype/Appearance` material graph contains complete virtual
 UDIM textures; original materials and SpaceSurvival remain intact. The PostApo
-runtime lighting lowers exposure/bloom, removes film grain and preserves its
+runtime lighting allows bounded exposure adaptation in shaded streets, reduces bloom,
+removes film grain and preserves its
 Lumen final-gather quality. The data asset exposes Balanced Test Lighting,
 Test Exposure Bias and Test Bloom Intensity. Turning this treatment off restores
 the authored map on the next Play session. Local renderer configuration enables
@@ -71,9 +78,11 @@ See `Docs/CONTROLS.txt` for the input map and `Docs/VALIDATION.txt` for evidence
 and current limits. On the glider R2 supplies thrust, left-stick forward/back controls
 climb/dive and left/right steers. Right stick aims/looks independently of travel.
 Hold L1 while steering to increase bank from 18 to 35 degrees. R1 fires and L2 aims.
-A performs an ollie-like hop: a 2.20 m peak settles to the existing 1.66 m height gain,
+A performs an ollie-like hop: a3.00 m peak settles to the existing1.66 m height gain,
 with board tilt and a small shockwave. Released thrust coasts with damped pitch and
-wing reactions. L3 boost reaches 56 m/s and has a draining/recharging meter.
+wing reactions. Base speed is21.6 m/s; climb reaches18 m/s and descent24 m/s.
+L1 bank now adds substantially stronger heading and velocity curvature.
+L3 boost reaches56 m/s and has a draining/recharging meter.
 Vexa is invulnerable; R resets the player and glider to the test start.
 
 The data asset also exposes booster, muzzle and landing effect references. Local effect
@@ -92,7 +101,10 @@ elapsed time on slow frames; the spring-loaded pads substep independently.
 Landing shockwaves are intentionally brief. Landings request a light
 controller pulse, whose physical feel still needs owner review.
 
-Press D-pad Up or F6 for the graphics menu. D-pad/arrows select and adjust, A/Enter
+Press D-pad Up or F6 for test settings. The Test level row switches between Post-apocalypse
+and Cyber City (`/Game/HoverPrototype/Maps/L_CyberCity`), starting a fresh test session
+with Vexa and all three vehicles. Switching levels discards the current test session.
+D-pad/arrows select and adjust, A/Enter
 applies and saves, B/F6 cancels. DLAA, DLSS quality modes and supported frame-generation
 multipliers are available. Frame generation requires Standalone Game; editor Play saves
 that preference without activating it. Reflex enables automatically with frame generation.

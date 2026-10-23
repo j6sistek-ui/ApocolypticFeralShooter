@@ -283,6 +283,12 @@ void AHoverPilot::HoverMount()
                    *BoardBody->GetPhysicsLinearVelocity().ToString());
             return;
         }
+        GroundSlideTime = 0;
+        bGroundCrouchHeld = false;
+        UnCrouch();
+        Movement->UnCrouch(false);
+        if (bIsCrouched)
+            return;
         FVector MountPoint = BoardActor->GetActorLocation() + FVector(0, 0, 132);
         FHitResult Hit;
         const FVector Before = GetActorLocation();
@@ -440,7 +446,15 @@ void AHoverPilot::UpdateInput(float DT)
     PC->SetControlRotation(Look);
     bBoostHeld = Down(EKeys::Gamepad_LeftThumbstick) || Down(EKeys::LeftShift);
     if (!bMounted)
-        GetCharacterMovement()->MaxWalkSpeed = Down(EKeys::Gamepad_LeftThumbstick) ? 900.f : 500.f;
+    {
+        auto *Move = GetCharacterMovement();
+        const bool Sprint = Down(EKeys::Gamepad_LeftThumbstick);
+        Move->MaxWalkSpeed = Sprint ? 900.f : 500.f;
+        // Per-axis controller dead zones reduce diagonal magnitude. A deliberate
+        // held sprint retains its gait through a turn; partial walking stays analog.
+        Move->MinAnalogWalkSpeed =
+            Sprint && !bIsCrouched && FVector2D(ForwardInput, SideInput).Size() > .6f ? 900.f : 0.f;
+    }
     const bool Hold = Down(EKeys::Gamepad_FaceButton_Left) || Down(EKeys::X);
     if (Hold && !bHoldConsumed)
     {
@@ -462,7 +476,7 @@ void AHoverPilot::UpdateInput(float DT)
         if (bMounted && HopTime <= 0)
         {
             HopStartZ = GetActorLocation().Z;
-            HopTime = 1.10f;
+            HopTime = 1.20f;
             bHeightHolding = false;
             ImpactPulse(BoardActor->GetActorLocation() - FVector(0, 0, 8), FVector::UpVector, .28f, .15f, .40f);
         }
@@ -506,6 +520,31 @@ void AHoverPilot::UpdateInput(float DT)
                                       : PC->GetInputAnalogKeyState(EKeys::Gamepad_RightTriggerAxis) > .2f;
     if ((FirePressed || Down(EKeys::LeftMouseButton)) && FireCooldown <= 0 && TransitionTime <= 0)
         FireShot();
+}
+
+void AHoverPilot::SetParkourCrouch(bool Held)
+{
+    if (bMounted)
+        return;
+    auto *Move = GetCharacterMovement();
+    Move->GetNavAgentPropertiesRef().bCanCrouch = true;
+    Move->SetCrouchedHalfHeight(60.f);
+    Move->MaxWalkSpeedCrouched = 400.f;
+    if (Held && !bGroundCrouchHeld && Move->IsMovingOnGround() && GetVelocity().Size2D() > 600.f)
+    {
+        GroundSlideTime = .65f;
+        GroundSlideSpeed = FMath::Min(GetVelocity().Size2D(), 900.f);
+    }
+    bGroundCrouchHeld = Held;
+    // CharacterMovement lowers the capsule while preserving its floor contact,
+    // and checks headroom on release. The old template resized around its centre.
+    if (Held && Move->IsMovingOnGround())
+        Crouch();
+    else if (!Held)
+    {
+        GroundSlideTime = 0;
+        UnCrouch();
+    }
 }
 
 void AHoverPilot::UpdateFlight(float DT)
@@ -577,31 +616,33 @@ void AHoverPilot::UpdateFlight(float DT)
         TargetAltitude = GetActorLocation().Z;
         return;
     }
-    const float Speed = bBoost ? 5600.f : 1800.f;
+    const float Speed = bBoost ? 5600.f : 2160.f;
     FVector Direction = GetActorForwardVector() * ForwardInput;
     Direction = Direction.GetClampedToMaxSize(1.f);
     const FVector PreviousVelocity = Move->Velocity;
     FVector Desired = HoverMotion::HorizontalVelocity(PreviousVelocity, Direction, Speed, DT, bBoost);
     Desired = HoverMotion::ApplyBank(Desired, BoardBank * (ForwardSpeed < 0 ? -1.f : 1.f), DT);
-    HoverMotion::Spring(FlightPitch, FlightPitchVelocity, PitchInput * 35.f, DT, 7.f);
+    HoverMotion::Spring(FlightPitch, FlightPitchVelocity, PitchInput * 45.f, DT, 7.f);
     const float Pitch = FlightPitch;
     const float AlongSpeed = FVector::DotProduct(Desired, GetActorForwardVector());
-    const float VerticalCommand = FMath::Abs(PitchInput) > .05f ? FMath::Sin(FMath::DegreesToRadians(Pitch)) *
-                                                                      FMath::Max(800.f, FMath::Abs(AlongSpeed))
-                                                                : 0.f;
+    const float VerticalCommand = FMath::Abs(PitchInput) > .05f
+                                      ? FMath::Sin(FMath::DegreesToRadians(Pitch)) /
+                                            FMath::Sin(FMath::DegreesToRadians(45.f)) *
+                                            (PitchInput > 0 ? 1800.f : 2400.f) * (bBoost ? 1.25f : 1.f)
+                                      : 0.f;
     HopTilt = 0;
     if (HopTime > 0)
     {
         HopTime = FMath::Max(0.f, HopTime - DT);
-        const float T = 1.10f - HopTime;
+        const float T = 1.20f - HopTime;
         Desired.Z = (HopStartZ + HoverMotion::OllieHeight(T) - GetActorLocation().Z) / FMath::Max(DT, .001f);
-        HopTilt = T < .4f ? 9.f * FMath::Sin(PI * T / .4f) : -3.f * FMath::Sin(PI * (T - .4f) / .7f);
+        HopTilt = T < .42f ? 11.f * FMath::Sin(PI * T / .42f) : -4.f * FMath::Sin(PI * (T - .42f) / .78f);
         TargetAltitude = HopStartZ + 166.f;
         bHeightHolding = HopTime <= 0;
     }
     else if (FMath::Abs(VerticalCommand) > 1)
     {
-        Desired.Z = FMath::FInterpConstantTo(PreviousVelocity.Z, VerticalCommand, DT, 2200.f);
+        Desired.Z = FMath::FInterpConstantTo(PreviousVelocity.Z, VerticalCommand, DT, 3600.f);
         bHeightHolding = false;
         TargetAltitude = GetActorLocation().Z;
     }
@@ -610,12 +651,12 @@ void AHoverPilot::UpdateFlight(float DT)
         if (!bHeightHolding)
         {
             // Account for the remaining vertical stopping distance before holding.
-            TargetAltitude = GetActorLocation().Z + PreviousVelocity.Z * FMath::Abs(PreviousVelocity.Z) / 4400.f;
+            TargetAltitude = GetActorLocation().Z + PreviousVelocity.Z * FMath::Abs(PreviousVelocity.Z) / 7200.f;
             bHeightHolding = true;
         }
         Desired.Z = FMath::FInterpConstantTo(
-            PreviousVelocity.Z, FMath::Clamp((TargetAltitude - GetActorLocation().Z) * 3.f, -1200.f, 1200.f), DT,
-            2200.f);
+            PreviousVelocity.Z, FMath::Clamp((TargetAltitude - GetActorLocation().Z) * 3.f, -2400.f, 2400.f), DT,
+            3600.f);
     }
     if (SlideTime > 0)
     {
@@ -629,11 +670,11 @@ void AHoverPilot::UpdateFlight(float DT)
     const FVector Acceleration = (Move->Velocity - PreviousVelocity) / FMath::Max(DT, .001f);
     const float ForwardForce =
         FMath::Clamp(FVector::DotProduct(Acceleration, GetActorForwardVector()) / 3000.f, -1.f, 1.f);
-    const float Travel = FMath::Clamp(AlongSpeed / 1800.f, -1.f, 1.f);
+    const float Travel = FMath::Clamp(AlongSpeed / 2160.f, -1.f, 1.f);
     const float MomentumPitchWeight = 1.f - FMath::Clamp(FMath::Abs(Pitch) / 20.f, 0.f, 1.f);
     HoverMotion::Spring(
         BoardPitch, PitchVelocity,
-        FMath::Clamp(Pitch * .8f + HopTilt - (Travel * 6.f + ForwardForce * 8.f) * MomentumPitchWeight, -35.f, 35.f),
+        FMath::Clamp(Pitch * .85f + HopTilt - (Travel * 6.f + ForwardForce * 8.f) * MomentumPitchWeight, -42.f, 42.f),
         DT);
     HoverMotion::Spring(BoardBank, BankVelocity, SideInput * (18.f + BankInput * 17.f), DT);
     HoverMotion::Spring(WingSweep, WingVelocity,
@@ -1028,11 +1069,26 @@ void AHoverPilot::Tick(float DT)
     FireCooldown = FMath::Max(0.f, FireCooldown - DT);
     StatusTime = FMath::Max(0.f, StatusTime - DT);
     UpdateInput(DT);
+    auto *GroundMove = GetCharacterMovement();
+    if (GroundSlideTime > 0 && !bMounted && GroundMove->IsMovingOnGround() && bGroundCrouchHeld)
+    {
+        GroundSlideTime = FMath::Max(0.f, GroundSlideTime - DT);
+        GroundMove->MaxWalkSpeedCrouched = FMath::Lerp(400.f, GroundSlideSpeed, GroundSlideTime / .65f);
+        GroundMove->GroundFriction = 1.f;
+        GroundMove->BrakingDecelerationWalking = 800.f;
+    }
+    else if (!bMounted && GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight() < 70.f)
+    {
+        GroundSlideTime = 0;
+        GroundMove->MaxWalkSpeedCrouched = 400.f;
+        GroundMove->GroundFriction = 8.f;
+        GroundMove->BrakingDecelerationWalking = 2048.f;
+    }
     if (LocomotionBridge && LocomotionBridge->bEnabled && !bMounted && GetCharacterMovement()->IsMovingOnGround() &&
         GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight() >= 70)
     {
         const bool InputHeld = FMath::Abs(ForwardInput) + FMath::Abs(SideInput) > .05f;
-        GetCharacterMovement()->GroundFriction = InputHeld ? 2.f : 8.f;
+        GetCharacterMovement()->GroundFriction = InputHeld ? 4.5f : 8.f;
         GetCharacterMovement()->BrakingDecelerationWalking = InputHeld ? 350.f : 2048.f;
     }
     UpdateFlight(DT);
@@ -1068,7 +1124,7 @@ void AHoverHUD::DrawHUD()
     const auto *Pilot = Cast<AHoverPilot>(GetOwningPawn());
     if (!Canvas)
         return;
-    DrawText(TEXT("D-pad Up / F6: graphics"), FLinearColor(.7f, .85f, 1.f), 24, 16);
+    DrawText(TEXT("D-pad Up / F6: graphics + test level"), FLinearColor(.7f, .85f, 1.f), 24, 16);
     for (TActorIterator<AHoverZombieRange> It(GetWorld()); It; ++It)
     {
         DrawText(FString::Printf(TEXT("INVULNERABLE | Zombies: %d | Kills: %d"), It->GetAliveCount(), It->GetKills()),
@@ -1106,7 +1162,7 @@ void AHoverHUD::DrawHUD()
         Pilot->IsMounted()
             ? FString::Printf(TEXT("A / Space hop   L3 / Shift boost   B / Ctrl coast   F5 view   %.0f m/s"),
                               Pilot->GetSpeedMps())
-            : FString::Printf(TEXT("A / Space jump   Hold L3 run   B / Shift slide   F5 / Menu view   %.0f m/s"),
+            : FString::Printf(TEXT("A / Space jump   Hold L3 run   Hold B / Shift crouch   F5 / Menu view   %.0f m/s"),
                               Pilot->GetSpeedMps());
     DrawText(MovementHelp, FLinearColor(.8f, .85f, .9f), 32, Canvas->ClipY - 44);
     if (Pilot->HoldProgress() > 0 && Pilot->HoldProgress() < 1)
@@ -1141,6 +1197,20 @@ void AHoverGameMode::BeginPlay()
             auto &Settings = It->Settings;
             Settings.bOverride_AutoExposureBias = true;
             Settings.AutoExposureBias = Defaults->TestExposureBias;
+            // The source map fixes min=max, leaving shaded streets unexposed.
+            // Allow bounded adaptation while retaining the daylight ceiling.
+            Settings.bOverride_AutoExposureMinBrightness = true;
+            Settings.AutoExposureMinBrightness = -1.5f;
+            Settings.bOverride_AutoExposureMaxBrightness = true;
+            Settings.AutoExposureMaxBrightness = 1.f;
+            Settings.bOverride_AutoExposureSpeedUp = true;
+            Settings.AutoExposureSpeedUp = 2.f;
+            Settings.bOverride_AutoExposureSpeedDown = true;
+            Settings.AutoExposureSpeedDown = 1.f;
+            Settings.bOverride_LocalExposureShadowContrastScale = true;
+            Settings.LocalExposureShadowContrastScale = .75f;
+            Settings.bOverride_LocalExposureHighlightContrastScale = true;
+            Settings.LocalExposureHighlightContrastScale = .8f;
             Settings.bOverride_BloomIntensity = true;
             Settings.BloomIntensity = Defaults->TestBloomIntensity;
             Settings.bOverride_FilmGrainIntensity = true;

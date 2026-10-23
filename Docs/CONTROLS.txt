@@ -1,9 +1,11 @@
 AFS FREE FLIGHT TEST
 
-GRAPHICS (ALL RIDES AND WALKING)
-D-pad Up / F6: open graphics and pause the game.
+TEST SETTINGS (ALL RIDES AND WALKING)
+D-pad Up / F6: open graphics/level selection and pause the game.
 D-pad / arrow up-down: choose row; left-right: change the pending option.
 A / Enter: apply, save and resume. B / F6: cancel and resume.
+Test level: Post-apocalypse or Cyber City. Applying a different level starts a fresh
+session with Vexa, glider, bike and truck; current positions/kills are not carried over.
 Image choices: Native TSR, DLAA, DLSS Quality/Balanced/Performance/Ultra Performance.
 Only supported GPU modes appear. DLAA keeps full resolution; DLSS trades resolution for speed.
 Frame generation: Off, supported fixed multipliers, or Dynamic. Reflex turns on with FG.
@@ -23,7 +25,8 @@ Glider exit needs clear walkable ground within 1.5 m of the pads and speed below
 The unoccupied glider has gravity and collision; wait for it to settle before mounting.
 A / Space: jump on foot; mounted ollie pops up then settles, with a small pulse.
 On glider, L3 held / Shift: boost; the meter drains and recharges after a delay.
-On foot, hold B / Shift for the Parkour template's crouch/slide; release to stand.
+On foot, hold B / Shift to crouch; from a run it starts a short decelerating slide.
+Release to stand when there is headroom. Capsule floor contact stays fixed.
 F7 / D-pad Right while grounded toggles CLS poses and the original locomotion.
 Both use the same Parkour movement, wall jump, glider, guns and vehicles.
 Release glider thrust to coast to a stop. B / Ctrl: brief coast assist.
@@ -55,7 +58,7 @@ The vendor's controller X throttle and A brake bindings remain intact.
 Deferred: ammo/reloading, target locking, R3 barrel roll, multiplayer,
 production tuning, and integration into the main game.
 Walking tap-B crouch / hold-B prone remains separate queued work; the current
-Parkour binding is hold B to crouch/slide and release to stand.
+current binding is hold B to crouch/slide and release to stand.
 The earlier B-dive request still needs its intended movement mode clarified.
 The FPS view uses a separate rifle; the full Vexa body/aim pose is shown in F5 review view.
 

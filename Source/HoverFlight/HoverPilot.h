@@ -91,6 +91,7 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     UFUNCTION(Exec) void HoverView();
     UFUNCTION(Exec) void HoverReset();
     UFUNCTION(Exec) void HoverStatus();
+    UFUNCTION(BlueprintCallable) void SetParkourCrouch(bool Held);
     UFUNCTION(BlueprintPure) int32 GetShotsFired() const
     {
         return ShotsFired;
@@ -158,6 +159,8 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     float GroundDirection = 0, GroundYawRate = 0;
     float BodyYaw = 0;
     float HoldTime = 0, TransitionTime = 0, HopTime = 0, SlideTime = 0;
+    float GroundSlideTime = 0, GroundSlideSpeed = 0;
+    bool bGroundCrouchHeld = false;
     float TargetAltitude = 0, FireCooldown = 0, AimExitTime = 0, StatusTime = 0;
     float LockAlpha = 0, LockVelocity = 0, BoardPitch = 0, BoardBank = 0;
     float PitchVelocity = 0, BankVelocity = 0, WingSweep = 0, WingVelocity = 0, RiderLean = 0, LeanVelocity = 0;
