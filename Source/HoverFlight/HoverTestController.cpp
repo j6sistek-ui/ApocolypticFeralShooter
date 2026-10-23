@@ -90,7 +90,10 @@ void AHoverTestController::HoverLoadLevel(int32 Level)
         ClientMessage(TEXT("That test level is not installed yet."));
         return;
     }
-    UGameplayStatics::OpenLevel(this, Map, true, TEXT("game=/Script/HoverFlight.HoverGameMode"));
+    UGameplayStatics::OpenLevel(this, Map, true,
+                                Level == 1
+                                    ? TEXT("game=/Game/HoverPrototype/ZombieEngine/BP_CyberWaves.BP_CyberWaves_C")
+                                    : TEXT("game=/Script/HoverFlight.HoverGameMode"));
 }
 
 bool AHoverTestController::InputKey(const FInputKeyEventArgs &Params)

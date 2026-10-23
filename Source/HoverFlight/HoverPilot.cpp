@@ -1,4 +1,5 @@
 #include "HoverPilot.h"
+#include "HoverCyberCity.h"
 #include "HoverLocomotionBridge.h"
 #include "HoverTestController.h"
 #include "HoverAnimInstance.h"
@@ -449,7 +450,9 @@ void AHoverPilot::UpdateInput(float DT)
     {
         auto *Move = GetCharacterMovement();
         const bool Sprint = Down(EKeys::Gamepad_LeftThumbstick);
-        Move->MaxWalkSpeed = Sprint ? 900.f : 500.f;
+        const auto *CyberMode = Cast<AHoverCyberCityGameMode>(GetWorld()->GetAuthGameMode());
+        const float PowerUpSpeed = CyberMode ? CyberMode->GetSpeedBonus() : 1.f;
+        Move->MaxWalkSpeed = (Sprint ? 900.f : 500.f) * PowerUpSpeed;
         // Per-axis controller dead zones reduce diagonal magnitude. A deliberate
         // held sprint retains its gait through a turn; partial walking stays analog.
         Move->MinAnalogWalkSpeed =
@@ -935,6 +938,8 @@ void AHoverPilot::FireShot()
         Tracer->Launch(Muzzle, Hit.bBlockingHit ? Hit.ImpactPoint : Target);
     if (auto *Zombie = Cast<AHoverZombie>(Hit.GetActor()))
         UGameplayStatics::ApplyPointDamage(Zombie, 35.f, ShotDirection, Hit, GetController(), this, nullptr);
+    else if (auto *CyberZombie = Cast<AHoverCyberZombie>(Hit.GetActor()))
+        UGameplayStatics::ApplyPointDamage(CyberZombie, 35.f, ShotDirection, Hit, GetController(), this, nullptr);
     else if (Hit.bBlockingHit && Assets->SurfaceImpact)
         ImpactPulse(Hit.ImpactPoint + Hit.ImpactNormal * 2, Hit.ImpactNormal, .25f, 0, .65f, Assets->SurfaceImpact);
     if (Assets->ShotSound)
@@ -1125,6 +1130,11 @@ void AHoverHUD::DrawHUD()
     if (!Canvas)
         return;
     DrawText(TEXT("D-pad Up / F6: graphics + test level"), FLinearColor(.7f, .85f, 1.f), 24, 16);
+    if (auto *Waves = GetWorld()->GetAuthGameMode<AHoverCyberCityGameMode>())
+        DrawText(FString::Printf(TEXT("INVULNERABLE | Kills: %d | Gold: %d%s"), Waves->GetTotalZombiesKilled(),
+                                 Waves->GetGold(),
+                                 Waves->GetSpeedBonus() > 1.f ? TEXT(" | SPEED PICKUP 1.5x") : TEXT("")),
+                 FLinearColor(.8f, 1.f, .8f), 24, 38);
     for (TActorIterator<AHoverZombieRange> It(GetWorld()); It; ++It)
     {
         DrawText(FString::Printf(TEXT("INVULNERABLE | Zombies: %d | Kills: %d"), It->GetAliveCount(), It->GetKills()),

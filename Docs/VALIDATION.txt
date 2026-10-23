@@ -1,5 +1,46 @@
 AFS LOCAL TEST SANDBOX - 2026-10-22
 
+ZOMBIE ENGINE / CYBER CITY - 2026-10-23 (current integration)
+Main promotion build passed in51.91seconds. Fresh main rendered Play exited0,
+errors=[], actual three-shot kill, pickups/wave2/pause/invulnerability and complete
+CyberCity->PostApo->CyberCity travel passed. Combined delivery assessment25/25:
+main wave/travel run plus hash-identical experimental vehicle/spawn assets and
+their rendered checks. Final captures include the actual wave HUD after reload.
+The first main firing test teleported into the truck, which correctly blocked
+shots; the corrected script uses a temporary clear platform after street chase
+and melee verification. It does not change or save the gameplay map.
+649files promoted with hashes and a D-drive rollback snapshot;628original Zombie
+Engine files unchanged. Descriptor keeps owner settings plus the required plugin.
+The city now uses the copied Zombie Engine wave state machine, navigation/behavior
+tree, attack/hit/death montages, damage UI, wave HUD, loot and difficulty scaling.
+Local adapters target Vexa and possessed vehicles, retain CLS/Parkour, and keep the
+player invulnerable. Local ZombieMale body/clothing copies use a compatible copied
+skeleton; source character and ZESP assets are unchanged. The original PostApo
+game mode,20-zombie range and three rides remain outside the wave integration.
+The local plugin requires three compatibility source edits: AnimNotify's UE5.8
+event-reference signature and initialized explosion UObject pointers. Its descriptor
+targets5.8. Original plugin sources remain intact in the ZombieEngine project.
+
+Rendered experimental checks: wave1 ten zombies; actual R2 rifle kill in three
+shots; melee attack animation/notifies with zero applied player damage; speed
+pickup1.5x and expiry; Nuke kills the remaining nine; automatic wave2 twelve
+zombies with110health on settled instances. The settings menu pauses wave timers.
+Return to PostApo verifies HoverGameMode,20 original zombies,zero Cyber zombies,
+all three rides and zero player damage. No physical-controller claim is made.
+Eight final spawn points each have a complete runtime navigation route; all eight
+street-level captures were reviewed. Two disconnected candidates were relocated.
+Visibility,14m minimum distance,100m maximum distance and3m pawn occupancy gates
+prevent unfair entrances; no eligible point pauses spawning instead of vendor
+PlayerStart fallback. Spawn review exits0 with no script errors or handled ensure.
+Wave HUD is visually verified using CapturePlaytest, which includes Slate/UMG;
+CaptureWorldFrame reads the scene backbuffer and omits that overlay.
+Scripts/VerifyCyberWaves.py, VerifyCyberVehicles.py and ReviewCyberSpawns.py reproduce
+the checks in separate rendered offscreen editor sessions. Reports go under
+Saved/Automation/ZombieEngine. Main-project promotion and fresh reload evidence
+are recorded in the delivery receipt; do not infer them from experimental results.
+Owner play acceptance, packaging, performance and long-session testing remain open.
+Existing editor-shutdown and vendor warnings remain tracked separately.
+
 FLIGHT/CITY FOLLOW-UP - 2026-10-23
 31/31 rendered behavior checks pass: 5/9m/s walk/run, 9m/s diagonal/camera turns,
 run-crouch slide then 4m/s crouch, capsule60->100 on release, grounded jump,
@@ -26,8 +67,8 @@ Known limits: the intermittent0xc0000005 editor-shutdown failure recurred after
 successful city gameplay/report completion. City virtual-shadow-map non-Nanite
 marking overflow warns of possible performance cost. Owner feel/visual approval,
 representative performance, packaged build and long-session testing remain open.
-Zombie Engine is a subsequent Cyber City-only phase; this checkpoint still uses
-the existing invulnerable20-zombie test range in both levels.
+At this earlier FlightCity checkpoint both levels used the20-zombie range;
+the subsequent Cyber City integration above supersedes that city-only behavior.
 
 IMPLEMENTED
 PostApo test level with Vexa, black/red personal glider, ScifiHoverbike and Doomsday

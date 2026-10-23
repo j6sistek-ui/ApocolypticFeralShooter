@@ -33,9 +33,12 @@ Release glider thrust to coast to a stop. B / Ctrl: brief coast assist.
 L2 held / right mouse: first-person ADS; release restores the selected view.
 On foot R2 / left mouse fires. On glider R1 / left mouse fires; R2 is thrust.
 Unscoped third-person fire raises the visible gun. The Ballista has a centred reflex sight.
-Three body hits or one headshot kills a zombie.
-Zombies respawn to maintain 20; blood impacts and ragdoll deaths show hits/kills.
-Ammo is unlimited. Vexa is invulnerable, and zombies have no attack damage.
+PostApo: three body hits or one headshot kills a zombie; population replenishes to20.
+Cyber City: Zombie Engine waves grow in health/count/speed; wave-one body kills take
+three shots and headshots remain lethal. The top-right panel shows wave progress.
+Walk/drive over dropped pickups: Nuke clears live zombies; Speed lasts15seconds.
+Ammo is unlimited. Vexa and occupied vehicles are invulnerable. City zombies still
+play attacks, hit reactions and deaths; the original PostApo range is unchanged.
 F5 / Menu: toggle FPS and external review camera.
 R: reset Vexa and glider to the test start.
 

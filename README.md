@@ -3,9 +3,26 @@
 An isolated Unreal5.8 prototype using Vexa, the black/red personal glider, the
 installed post-apocalyptic environment, the supplied sci-fi rifle and the drivable
 ScifiHoverbike and Doomsday pickup truck. The board spans left-to-right beneath the rider's feet.
-Twenty zombies spawn across the surrounding area, wander or approach, and respawn after
+In PostApo, twenty zombies spawn across the surrounding area, wander or approach, and respawn after
 being shot. They cannot hurt Vexa. Rifle body hits deal 35 damage; headshots kill immediately.
 BloodShot Niagara impacts and ragdoll deaths provide hit feedback; ammo is unlimited.
+
+Cyber City uses Zombie Engine's escalating waves, behavior tree, attack/hit/death
+animations, damage numbers, loot and wave display. The local adapter keeps Vexa,
+CLS/Parkour, the Ballista and all three rides. Zombies target the currently possessed
+player or vehicle; Vexa and occupied rides remain invulnerable. Wave one has ten
+zombies; later waves grow in count, health and speed. Nuke and timed speed pickups
+work with the AFS player. Gold is a test counter; no shop or inventory is added.
+The original PostApo test range is unchanged.
+
+Eight curated entrances use the construction area, shop alcoves, service streets
+and courtyard. Their navigation routes connect to the starting street. Spawns wait
+when an entrance is within14m, openly visible ahead, occupied, or more than100m
+away. When none is suitable, spawning waits instead of falling back to PlayerStart.
+The local map uses `/Game/HoverPrototype/ZombieEngine/BP_CyberWaves`; its data assets
+expose wave and zombie tuning. The copied ZombieEngineStudio plugin is required
+and enabled locally, with isolated UE5.8 compatibility fixes. Licensed plugin
+source, binaries and content remain outside Git; preserve the native installation.
 
 Build with `Scripts/Build.ps1`, open `AFS.uproject`, and press Play. The default
 map is `/Game/JustBStudios/PostApo/Levels/PostApo`. If the editor has another level

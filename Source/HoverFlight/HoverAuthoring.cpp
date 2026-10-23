@@ -14,6 +14,7 @@
 #include "NiagaraSystem.h"
 #include "Animation/BlendSpace.h"
 #include "Animation/AnimSequence.h"
+#include "Animation/Skeleton.h"
 #include "NiagaraEmitter.h"
 #include "NiagaraEmitterHandle.h"
 #include "NiagaraScript.h"
@@ -45,8 +46,112 @@
 #include "K2Node_InputAxisEvent.h"
 #include "K2Node_IfThenElse.h"
 #include "K2Node_CallFunction.h"
+#include "NavMesh/NavMeshBoundsVolume.h"
+#include "NavMesh/RecastNavMesh.h"
+#include "NavigationSystem.h"
+#include "Builders/CubeBuilder.h"
+#include "ActorFactories/ActorFactory.h"
+#include "Components/BrushComponent.h"
 #include "EdGraphSchema_K2.h"
 #endif
+
+AActor *UHoverAuthoring::SpawnPlaytestActor(TSubclassOf<AActor> ActorClass, FTransform Transform)
+{
+#if WITH_EDITOR
+    if (auto *World = GetPlaytestWorld(); World && ActorClass)
+    {
+        FActorSpawnParameters Params;
+        Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+        return World->SpawnActor<AActor>(ActorClass, Transform, Params);
+    }
+#endif
+    return nullptr;
+}
+
+bool UHoverAuthoring::SetCyberZombieSkeleton(USkeletalMesh *Mesh, USkeleton *Skeleton)
+{
+#if WITH_EDITOR
+    if (!Mesh || !Skeleton || !Mesh->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/ZombieEngine/")) ||
+        !Skeleton->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/ZombieEngine/")))
+        return false;
+    for (int32 Bone = 0; Bone < Mesh->GetRefSkeleton().GetNum(); ++Bone)
+        if (Skeleton->GetReferenceSkeleton().FindBoneIndex(Mesh->GetRefSkeleton().GetBoneName(Bone)) == INDEX_NONE)
+            return false;
+    Mesh->Modify();
+    Mesh->SetSkeleton(Skeleton);
+    Mesh->PostEditChange();
+    Mesh->MarkPackageDirty();
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool UHoverAuthoring::AddCityNavigation(UWorld *World, FVector Center, FVector Size)
+{
+#if WITH_EDITOR
+    if (!World || !World->GetName().Contains(TEXT("CyberCity")))
+        return false;
+    ANavMeshBoundsVolume *Bounds = nullptr;
+    for (TActorIterator<ANavMeshBoundsVolume> It(World); It; ++It)
+        if (It->ActorHasTag(TEXT("AFS_CityNavigation")))
+            Bounds = *It;
+    if (!Bounds)
+        if (auto *Factory = GEditor->FindActorFactoryForActorClass(ANavMeshBoundsVolume::StaticClass()))
+            Bounds =
+                Cast<ANavMeshBoundsVolume>(Factory->CreateActor(nullptr, World->GetCurrentLevel(), FTransform(Center)));
+    if (!Bounds)
+        return false;
+    Bounds->Tags.AddUnique(TEXT("AFS_CityNavigation"));
+    Bounds->SetActorLabel(TEXT("AFS Cyber City Navigation"));
+    auto *Builder = NewObject<UCubeBuilder>();
+    Builder->X = Size.X;
+    Builder->Y = Size.Y;
+    Builder->Z = Size.Z;
+    if (!Builder->Build(World, Bounds))
+        return false;
+    Bounds->GetBrushComponent()->BuildSimpleBrushCollision();
+    Bounds->GetBrushComponent()->UpdateBounds();
+    Bounds->PostEditMove(true);
+    Bounds->SetActorLocation(Center);
+    if (auto *Navigation = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World))
+    {
+        Navigation->OnNavigationBoundsUpdated(Bounds);
+        Navigation->GetDefaultNavDataInstance(FNavigationSystem::Create);
+        Navigation->Build();
+    }
+    for (TActorIterator<ARecastNavMesh> It(World); It; ++It)
+        if (auto *Property = FindFProperty<FEnumProperty>(It->GetClass(), TEXT("RuntimeGeneration")))
+            Property->GetUnderlyingProperty()->SetIntPropertyValue(Property->ContainerPtrToValuePtr<void>(*It),
+                                                                   static_cast<int64>(ERuntimeGenerationType::Dynamic));
+    return true;
+#else
+    return false;
+#endif
+}
+
+TArray<FVector> UHoverAuthoring::FindCompleteCityPath(UWorld *World, FVector Start, FVector End)
+{
+    TArray<FVector> Points;
+#if WITH_EDITOR
+    if (auto *Navigation = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World))
+        if (auto *Data = Navigation->GetDefaultNavDataInstance())
+        {
+            FNavLocation From, To;
+            if (Navigation->ProjectPointToNavigation(Start, From, FVector(400, 400, 600)) &&
+                Navigation->ProjectPointToNavigation(End, To, FVector(400, 400, 600)))
+            {
+                FPathFindingQuery Query(nullptr, *Data, From.Location, To.Location);
+                Query.SetAllowPartialPaths(false);
+                auto Result = Navigation->FindPathSync(Query);
+                if (Result.IsSuccessful() && Result.Path.IsValid() && !Result.Path->IsPartial())
+                    for (const auto &Point : Result.Path->GetPathPoints())
+                        Points.Add(Point.Location);
+            }
+        }
+#endif
+    return Points;
+}
 
 bool UHoverAuthoring::BuildRideBlend(UBlendSpace *Blend, const TArray<UAnimSequence *> &Clips,
                                      const TArray<FVector> &Coordinates)
