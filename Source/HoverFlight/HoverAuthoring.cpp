@@ -1,5 +1,6 @@
 #include "HoverAuthoring.h"
 #include "HoverTestController.h"
+#include "HoverPilot.h"
 #include "GameFramework/PlayerInput.h"
 #include "Engine/Blueprint.h"
 #include "UObject/UnrealType.h"
@@ -8,6 +9,8 @@
 #include "UnrealClient.h"
 #if WITH_EDITOR
 #include "NiagaraSystem.h"
+#include "Animation/BlendSpace.h"
+#include "Animation/AnimSequence.h"
 #include "NiagaraEmitter.h"
 #include "NiagaraEmitterHandle.h"
 #include "NiagaraScript.h"
@@ -33,7 +36,102 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "Kismet2/BlueprintEditorUtils.h"
+#include "Kismet2/KismetEditorUtilities.h"
+#include "K2Node_Event.h"
+#include "K2Node_InputKey.h"
+#include "K2Node_InputAxisEvent.h"
+#include "K2Node_IfThenElse.h"
+#include "K2Node_CallFunction.h"
+#include "EdGraphSchema_K2.h"
 #endif
+
+bool UHoverAuthoring::BuildRideBlend(UBlendSpace *Blend, const TArray<UAnimSequence *> &Clips,
+                                     const TArray<FVector> &Coordinates)
+{
+#if WITH_EDITOR
+    if (!Blend || !Blend->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/")) || Clips.Num() != Coordinates.Num())
+        return false;
+    Blend->Modify();
+    if (Clips.IsEmpty() || !Clips[0])
+        return false;
+    Blend->SetSkeleton(Clips[0]->GetSkeleton());
+    while (Blend->GetNumberOfBlendSamples())
+        Blend->DeleteSample(Blend->GetNumberOfBlendSamples() - 1);
+    auto *Property = FindFProperty<FStructProperty>(Blend->GetClass(), TEXT("BlendParameters"));
+    if (!Property)
+        return false;
+    for (int32 I = 0; I < 2; ++I)
+    {
+        auto *Parameter = Property->ContainerPtrToValuePtr<FBlendParameter>(Blend, I);
+        Parameter->DisplayName = I == 0 ? TEXT("Turn") : TEXT("Forward / reverse");
+        Parameter->Min = -1;
+        Parameter->Max = 1;
+        Parameter->GridNum = 2;
+        Parameter->bSnapToGrid = false;
+    }
+    for (int32 I = 0; I < Clips.Num(); ++I)
+        if (!Clips[I] || Blend->AddSample(Clips[I], Coordinates[I]) == INDEX_NONE)
+            return false;
+    Blend->TargetWeightInterpolationSpeedPerSec = 5;
+    Blend->ValidateSampleData();
+    Blend->ResampleData();
+    Blend->PostEditChange();
+    Blend->MarkPackageDirty();
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool UHoverAuthoring::IntegrateParkourBlueprint(UBlueprint *Blueprint)
+{
+#if WITH_EDITOR
+    if (!Blueprint || !Blueprint->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/Parkour/")))
+        return false;
+    TArray<UEdGraph *> Graphs;
+    Blueprint->GetAllGraphs(Graphs);
+    for (auto *Graph : Graphs)
+    {
+        const auto OriginalNodes = Graph->Nodes;
+        for (UEdGraphNode *Node : OriginalNodes)
+        {
+            auto *Event = Cast<UK2Node_Event>(Node);
+            const bool GateEvent = Event && Event->EventReference.GetMemberName() != TEXT("ReceiveBeginPlay");
+            if (!GateEvent && !Node->IsA<UK2Node_InputKey>() && !Node->IsA<UK2Node_InputAxisEvent>())
+                continue;
+            for (auto *Pin : Node->Pins)
+            {
+                if (Pin->Direction != EGPD_Output || Pin->PinType.PinCategory != UEdGraphSchema_K2::PC_Exec ||
+                    Pin->LinkedTo.IsEmpty())
+                    continue;
+                FGraphNodeCreator<UK2Node_CallFunction> CallCreator(*Graph);
+                auto *Call = CallCreator.CreateNode();
+                Call->SetFromFunction(
+                    AHoverPilot::StaticClass()->FindFunctionByName(GET_FUNCTION_NAME_CHECKED(AHoverPilot, IsOnFoot)));
+                CallCreator.Finalize();
+                FGraphNodeCreator<UK2Node_IfThenElse> BranchCreator(*Graph);
+                auto *Branch = BranchCreator.CreateNode();
+                BranchCreator.Finalize();
+                const auto Links = Pin->LinkedTo;
+                Pin->BreakAllPinLinks();
+                Pin->MakeLinkTo(Branch->GetExecPin());
+                Call->GetReturnValuePin()->MakeLinkTo(Branch->GetConditionPin());
+                for (auto *Link : Links)
+                    Branch->GetThenPin()->MakeLinkTo(Link);
+                Branch->NodePosX = Node->NodePosX + 220;
+                Branch->NodePosY = Node->NodePosY;
+                Call->NodePosX = Branch->NodePosX;
+                Call->NodePosY = Branch->NodePosY + 160;
+            }
+        }
+    }
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+    FKismetEditorUtilities::CompileBlueprint(Blueprint);
+    return Blueprint->Status != BS_Error;
+#else
+    return false;
+#endif
+}
 
 FString UHoverAuthoring::DescribeBlueprint(UBlueprint *Blueprint)
 {

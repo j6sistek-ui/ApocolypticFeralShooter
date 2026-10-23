@@ -11,7 +11,9 @@ the container does not validate native gameplay. Build with Scripts/Build.ps1. F
 C++ using clang-format and the checked-in style. Inspect the actual rider, pad contact, gun,
 and bike in a rendered play session after changes affecting them.
 
-Preserve the existing vehicle Blueprints and their controls. Scope is free flight, mounting,
+Preserve the existing vehicle Blueprints. The owner authorized a runtime mapping copy
+for bike RT throttle, LT brake/reverse, B boost and corrected right-stick camera;
+keyboard and truck bindings remain vendor controls. Scope is free flight, mounting,
 dismounting, rifle aiming/shooting, the supplied bike and Doomsday pickup truck, plus
 respawning zombies with blood impacts and death. Vexa is invulnerable; zombies cannot
 damage her. No main-game integration, inventory, network play, or production release is implied.

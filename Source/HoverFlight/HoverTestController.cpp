@@ -1,5 +1,7 @@
 #include "HoverTestController.h"
 #include "HoverPilot.h"
+#include "HoverAnimInstance.h"
+#include "InputModifiers.h"
 #include "Animation/AnimInstance.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/World.h"
@@ -9,6 +11,7 @@
 #include "UObject/UnrealType.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
+#include "InputAction.h"
 #include "ChaosWheeledVehicleMovementComponent.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
 #include "HoverGraphicsMenu.h"
@@ -84,6 +87,15 @@ bool AHoverTestController::InputKey(const FInputKeyEventArgs &Params)
             HoverGraphics();
             return true;
         }
+        // The template's jump buffer is bound to Space; feed the same event
+        // for controller A instead of bypassing it with a second jump implementation.
+        if (auto *P = Cast<AHoverPilot>(GetPawn());
+            P && P->bParkourMovement && P->IsOnFoot() && Key == EKeys::Gamepad_FaceButton_Bottom)
+        {
+            FInputKeyEventArgs Jump = Params;
+            Jump.Key = EKeys::SpaceBar;
+            Super::InputKey(Jump);
+        }
         return Super::InputKey(Params);
     }
     // Intercept before pawn/vendor input, including axes and trigger input while paused.
@@ -103,6 +115,53 @@ bool AHoverTestController::InputKey(const FInputKeyEventArgs &Params)
             CloseGraphicsMenu(false);
     }
     return true;
+}
+
+void AHoverTestController::UpdateBikeMappings()
+{
+    auto *Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer());
+    auto *Source = LoadObject<UInputMappingContext>(
+        nullptr, TEXT("/Game/ScifiHoverbike/Vehicles/Inputs/Mappings/"
+                      "IMC_ExampleVehicleInputMappingContext.IMC_ExampleVehicleInputMappingContext"));
+    if (!Subsystem || !Source)
+        return;
+    if (GetPawn() != Bike)
+    {
+        if (BikeMappings)
+            Subsystem->RemoveMappingContext(BikeMappings);
+        return;
+    }
+    if (!BikeMappings)
+    {
+        BikeMappings = DuplicateObject<UInputMappingContext>(Source, this);
+        for (int32 I = BikeMappings->GetMappings().Num() - 1; I >= 0; --I)
+        {
+            auto &Mapping = BikeMappings->GetMapping(I);
+            if (Mapping.Key == EKeys::Gamepad_LeftY || Mapping.Key == EKeys::Gamepad_FaceButton_Bottom)
+                BikeMappings->UnmapKey(Mapping.Action, Mapping.Key);
+            else if (Mapping.Key == EKeys::Gamepad_RightX)
+                Mapping.Modifiers.RemoveAll(
+                    [](const UInputModifier *M) { return M && M->IsA<UInputModifierNegate>(); });
+        }
+        for (const auto &Mapping : Source->GetMappings())
+            if (Mapping.Action && Mapping.Action->GetName() == TEXT("Input_AxisVehicleThrottle"))
+            {
+                BikeMappings->MapKey(Mapping.Action, EKeys::Gamepad_RightTriggerAxis);
+                auto &Reverse = BikeMappings->MapKey(Mapping.Action, EKeys::Gamepad_LeftTriggerAxis);
+                Reverse.Modifiers.Add(NewObject<UInputModifierNegate>(BikeMappings));
+                break;
+            }
+        for (const auto &Mapping : Source->GetMappings())
+            if (Mapping.Action && Mapping.Action->GetName() == TEXT("Input_ActionVehicleBoost"))
+            {
+                BikeMappings->MapKey(Mapping.Action, EKeys::Gamepad_FaceButton_Right);
+                break;
+            }
+    }
+    if (Subsystem->HasMappingContext(Source))
+        Subsystem->RemoveMappingContext(Source);
+    if (!Subsystem->HasMappingContext(BikeMappings))
+        Subsystem->AddMappingContext(BikeMappings, 1);
 }
 
 bool AHoverTestController::IsNearTruck() const
@@ -224,7 +283,16 @@ void AHoverTestController::DressDriver()
         for (int32 J = 0; J < Part.Materials.Num(); ++J)
             C->SetMaterial(J, Part.Materials[J]);
         if (I != 0)
-            C->SetLeaderPoseComponent(Leader);
+        {
+            if (C->GetBoneIndex(TEXT("afs_chain_01")) != INDEX_NONE)
+            {
+                C->SetAnimInstanceClass(UHoverAccessoryAnimInstance::StaticClass());
+                C->AddTickPrerequisiteComponent(Leader);
+                C->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+            }
+            else
+                C->SetLeaderPoseComponent(Leader);
+        }
         for (const auto &Morph : Part.Morphs)
             C->SetMorphTarget(Morph.Key, Morph.Value);
     }
@@ -245,6 +313,7 @@ void AHoverTestController::PlayerTick(float DT)
         return;
     if (auto *P = Cast<AHoverPilot>(GetPawn()))
         Pilot = P;
+    UpdateBikeMappings();
     if (Pilot && !bSpawnAttempted)
     {
         bSpawnAttempted = true;

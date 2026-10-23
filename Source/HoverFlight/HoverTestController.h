@@ -55,6 +55,8 @@ class HOVERFLIGHT_API AHoverTestController : public APlayerController
     UPROPERTY() TObjectPtr<AHoverPilot> Pilot;
     UPROPERTY() TObjectPtr<APawn> Bike;
     UPROPERTY() TObjectPtr<APawn> Truck;
+    UPROPERTY() TObjectPtr<class UInputMappingContext> BikeMappings;
+    void UpdateBikeMappings();
     UPROPERTY() TObjectPtr<AActor> DressedDriver;
     float ExitHold = 0;
     bool bExitConsumed = true, bSpawnAttempted = false;

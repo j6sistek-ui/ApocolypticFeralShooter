@@ -13,15 +13,17 @@ Use Play > Standalone Game or the supplied Open_AFS_Standalone.cmd launcher for 
 DLAA/DLSS image modes also work in editor Play. No restart is needed to change menu options.
 
 VEXA / GLIDER
-Left stick / WASD: forward, reverse, left/right strafe.
+Left stick / WASD: camera-relative movement. On foot in third person, Vexa turns
+toward travel; while aiming she strafes. On the glider these directions provide thrust.
 Right stick / mouse: turn and look. Right stick forward pitches down; back pitches up.
 Pitch plus forward/reverse travel climbs/dives. Level the pitch to settle and hold altitude.
-L1 / Q: bank left. R1 / E: bank right. Release smoothly levels the board.
+L1 / Q: bank and curve left. R1 / E: bank and curve right. Release levels the board.
 Hold X (0.65 seconds): mount nearby glider/bike/truck, or safely dismount glider.
 Glider exit needs clear walkable ground within 1.5 m of the pads and speed below 3 m/s.
 The unoccupied glider has gravity and collision; wait for it to settle before mounting.
 A / Space: jump on foot; hop rider and glider together when mounted.
-L3 held / Shift: boost; the meter drains while boosting and recharges after a delay.
+On glider, L3 held / Shift: boost; the meter drains and recharges after a delay.
+On foot, Shift retains the parkour template's crouch/slide behavior.
 Release thrust to coast; opposite thrust brakes before reversing. B / Ctrl: brief coast assist.
 L2 held / right mouse: gun aim and in-flight aiming animation.
 R2 held / left mouse: fire rifle, including unscoped third-person fire with a visible gun.
@@ -32,8 +34,10 @@ F5 / Menu: toggle FPS and external review camera.
 R: reset Vexa and glider to the test start.
 
 SUPPLIED HOVERBIKE CONTROLS
-Left stick / WASD / arrow keys: throttle/reverse and steering.
-A / Space: handbrake. Shift: supplied boost. F: lights.
+Controller: RT accelerate; LT brake, then continue holding to reverse.
+Left stick left/right: steer. B: supplied boost. Right stick: camera.
+Keyboard: WASD / arrows retain throttle/reverse/steering, Space handbrake,
+Shift boost and F lights.
 Mouse / right stick: camera. Mouse wheel: zoom. V: change camera.
 E or hold X: exit and return to Vexa.
 

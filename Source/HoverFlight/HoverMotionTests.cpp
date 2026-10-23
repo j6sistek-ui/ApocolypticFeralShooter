@@ -14,6 +14,13 @@ bool FHoverMotionTest::RunTest(const FString &Parameters)
     TestTrue(TEXT("Braking is stronger than coasting, without instant reversal"), Brake.X > 0 && Brake.X < Coast.X);
     for (int32 Rate : {30, 60, 120})
     {
+        FVector Banked = Forward;
+        for (int32 I = 0; I < Rate; ++I)
+            Banked = HoverMotion::ApplyBank(Banked, 28.f, 1.f / Rate);
+        TestTrue(TEXT("A right bank bends travel right without deleting momentum"),
+                 Banked.Y > 400 && FMath::Abs(Banked.Size() - Forward.Size()) < .1f);
+        TestTrue(TEXT("Bank has no turn authority while stationary"), HoverMotion::BankYawRate(28.f, 0) == 0);
+        TestTrue(TEXT("Reverse travel changes the bank turn sign"), HoverMotion::BankYawRate(28.f, -1800) < 0);
         FVector V = Forward;
         for (int32 I = 0; I < Rate * 3; ++I)
             V = HoverMotion::HorizontalVelocity(V, FVector::ZeroVector, 1800, 1.f / Rate, false);

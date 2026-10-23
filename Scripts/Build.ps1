@@ -1,4 +1,4 @@
-param([string]$EngineRoot = 'C:\Program Files\EpicGames2\UE_5.8')
+param([string]$EngineRoot = 'C:\Program Files\Epic Games\UE_5.8')
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $projectFile = Join-Path $projectRoot 'AFS.uproject'

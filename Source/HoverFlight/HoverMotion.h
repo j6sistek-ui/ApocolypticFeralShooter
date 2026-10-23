@@ -3,6 +3,20 @@
 
 namespace HoverMotion
 {
+// A bank bends the existing velocity, rather than replacing it with a new heading.
+// Positive UE roll is right bank. At low speed the turn authority fades away.
+inline float BankYawRate(float BankDegrees, float ForwardSpeed)
+{
+    const float Speed = FMath::Abs(ForwardSpeed);
+    return FMath::RadiansToDegrees(980.f * FMath::Tan(FMath::DegreesToRadians(BankDegrees)) /
+                                   FMath::Max(Speed, 700.f)) *
+           FMath::Clamp(Speed / 700.f, 0.f, 1.f) * FMath::Sign(ForwardSpeed);
+}
+inline FVector ApplyBank(FVector Velocity, float BankDegrees, float DeltaSeconds)
+{
+    const float Yaw = BankYawRate(BankDegrees, Velocity.Size2D());
+    return Velocity.RotateAngleAxis(Yaw * DeltaSeconds, FVector::UpVector);
+}
 // Exact critically damped response for a constant target during this time step.
 inline void Spring(float &Value, float &Velocity, float Target, float DeltaSeconds, float Frequency = 9.f)
 {

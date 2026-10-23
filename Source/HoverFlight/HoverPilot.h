@@ -41,10 +41,13 @@ class HOVERFLIGHT_API UHoverPilotAssets : public UDataAsset
     UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> RideLeft;
     UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> RideRight;
     UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> RideDown;
+    UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> RideReverse;
+    UPROPERTY(EditAnywhere) TObjectPtr<class UBlendSpace> RideBlend;
     UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> AimStart;
     UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> AimEnd;
     UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> Fire;
     UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> RifleAim;
+    UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> RideGunPose;
     UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> Walk;
     UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> Stand;
     UPROPERTY(EditAnywhere) TObjectPtr<class UBlendSpace> Locomotion;
@@ -70,6 +73,11 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     virtual void Tick(float DeltaSeconds) override;
     virtual void Landed(const FHitResult &Hit) override;
     virtual void SetupPlayerInputComponent(UInputComponent *Input) override;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly) bool bParkourMovement = false;
+    UFUNCTION(BlueprintPure) bool IsOnFoot() const
+    {
+        return !bMounted;
+    }
     UFUNCTION(Exec) void HoverMount();
     UFUNCTION(Exec) void HoverView();
     UFUNCTION(Exec) void HoverReset();
@@ -86,6 +94,7 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     {
         return bAiming;
     }
+    UFUNCTION(BlueprintPure) FVector GetMuzzlePosition() const;
     UFUNCTION(BlueprintPure) float GetBoostCharge() const
     {
         return BoostCharge;
@@ -116,7 +125,7 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     {
         return GetVelocity().Size() / 100.f;
     }
-    UPROPERTY(VisibleAnywhere) TObjectPtr<UCameraComponent> Camera;
+    UPROPERTY(VisibleAnywhere) TObjectPtr<UCameraComponent> FirstPersonCamera;
     UPROPERTY(VisibleAnywhere) TObjectPtr<USpringArmComponent> ReviewArm;
     UPROPERTY(VisibleAnywhere) TObjectPtr<UCameraComponent> ReviewCamera;
     UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> ViewGun;
@@ -136,6 +145,7 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     FRotator StartRotation;
     float ForwardInput = 0, SideInput = 0, BankInput = 0, TurnInput = 0;
     float GroundDirection = 0, GroundYawRate = 0;
+    float BodyYaw = 0;
     float HoldTime = 0, TransitionTime = 0, HopTime = 0, SlideTime = 0;
     float TargetAltitude = 0, FireCooldown = 0, AimExitTime = 0, StatusTime = 0;
     float LockAlpha = 0, LockVelocity = 0, BoardPitch = 0, BoardBank = 0;
@@ -152,6 +162,7 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     bool bWasReset = false, bHeightHolding = false;
     FString StatusMessage;
     int32 ShotsFired = 0;
+    UPROPERTY() TObjectPtr<class UMaterialInstanceDynamic> ParkourSpeedlines;
     void UpdateInput(float DeltaSeconds);
     void UpdateFlight(float DeltaSeconds);
     void UpdateAppearance(float DeltaSeconds);

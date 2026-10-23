@@ -173,3 +173,76 @@ The setup/refinement scripts author local assets; do not rerun setup over an
 already configured Appearance graph. Retain native Content and local Config files
 alongside the source checkpoint. This remains editor test evidence, not packaged
 performance, long-session, physical-controller or owner visual acceptance.
+
+MOTION COMPARISON PASS - 2026-10-23 UTC (supersedes earlier movement tuning)
+Owner rejected the earlier walking direction, glider poses, chain response,
+secondary-motion frequency, bike mapping and muzzle appearance. This pass preserves
+the old complete project at D:/AFS_Comparisons/Before_Parkour_2026-10-23/AFS.
+All 3385 preserved files match their SHA256 manifest. A separate rendered Play
+smoke loads the old HoverPilot, six parts, 600cm/s movement, bike and truck and exits0.
+
+Native build16 succeeds. clang-format, git diff --check and all13 Python AST checks
+pass. Docker Desktop's Linux daemon is unavailable; the installed Unreal Python
+was used without installing packages. Native AFS.HoverMotion.MomentumAndDirection
+passes bank/coast/damping cases at30/60/120Hz. Installed engine Niagara deprecated
+GetAssetRegistryTags/GetMovementBase headers and the nonpreferred installed compiler
+version still produce toolchain warnings; no engine/vendor source was changed.
+
+VerifyMotionRevision.py (49s), VerifyMotionGlider.py (71s) and
+VerifyMotionVehicles.py (48s) record unsaved D3D12 Play worlds with isolated
+injected controller input. AssessMotionRevision.py passes all54 behavior checks.
+The final character5 and glider7 processes both exit0 after explicit EndPlay.
+Vehicle3 validates the unchanged final bike mapping implementation; the later HUD
+text change advertises those bindings. Recorded observations:
+- Parkour numeric movement defaults match the source Blueprint. Maximum3000cm/s,
+  acceleration1000, gravity2.5, jump1102.5; jump height245cm. The source graph is
+  duplicated locally with on-foot execution gates, never edited in the vendor asset.
+- Forward/back/left/right travel and body headings are0/180/-90/+90 degrees.
+  Aiming keeps the body facing the camera while strafing; foot cycles animate.
+  AFS camera/aim controls and Vexa animations remain integrated. The template has
+  no character animation set. Its wall-run/coyote-time/jump-buffer graphs remain,
+  but wall-running and edge-jump maneuvers were not validated by this flat-platform test.
+- Fitted five-part Vexa defaults match the local data asset. The combined torso/legs
+  bakes original leg morphs. Blender repaired48-vertex waist rings and welded50 vertices;
+  two chain bones drive1229 vertices. Neutral before/after and rendered body were inspected.
+- Chain response reaches18degrees and settles. Walking secondary displacement reaches
+  2.17cm; steady-flight displacement is below0.001cm. Response is damped at~1.8Hz,
+  with2cm chest/3.2cm glute limits and meaningful acceleration/foot-contact excitation.
+- Sustained forward/reverse tilt is signed. Right-stick climb/dive changes pitch and
+  actual vertical velocity. L1/R1 banking curves heading/travel by about-16.7/+15.9degrees
+  across the sampled intervals. Release coasts, opposite input brakes, boost reaches56m/s,
+  drains and recharges. High exit is blocked; low exit succeeds; released board drops49cm
+  and settles, can remount and land. Boosters activate in travel and stop when unoccupied.
+- Dedicated turn/movement blends and a held reverse pose remove looping transition
+  crouches. Steady dive pelvis range0.85cm. Hip placement fits the current pose to leg
+  reach before foot IK, without stretching. Mesh evaluation follows current board targets;
+  maximum sampled ankle-target error is effectively zero (floating-point precision).
+- Grounded aim foot-height change0.062cm. Hipfire and in-flight fire show the gun and
+  increase shot counts. Muzzle pulse attaches to the barrel tip; tracers move visually
+  while damage remains hitscan. Held aim pose avoids repeated arm-lowering between shots.
+- Bike RT forward735cm/s, LT braking82cm/s then held reverse-1195cm/s, B boost1576cm/s,
+  right-stick camera+30degrees. Bike holdX and truck holdY exits succeed. Runtime mapping
+  copies preserve original vendor Blueprint/input assets. Balanced lighting remains active.
+
+Slow captures exposed the old0.05s Tick cap dropping elapsed time. Timers/input/motion
+now use world elapsed time; the pad spring substeps at120Hz. Earlier test failures from
+sampling release before the hold completed, or measuring board drop after it had already
+fallen, were corrected to observe completed behavior. Earlier taller-pose foot lift was
+fixed by fitting hips to leg reach, not by allowing bone stretch or relaxing tolerances.
+
+Open stability issue: some earlier automated editor processes completed gameplay and
+closed their log, then Windows reported0xc0000005 in ntdll.dll. Explicit EndPlay before
+exit did not eliminate every occurrence (Character4 still failed); subsequent final
+character/glider and preserved comparison exits passed. Root cause/manual-session impact
+remain UNCONFIRMED. ClickUp86bcq51u2 tracks this; do not claim it fixed from a passing rerun.
+Vendor stale bike PoseAsset warnings and retained original Xandra UDIM warnings remain
+in their existing backlog; active local Vexa material copies retain full coverage.
+
+SpaceSurvival192 source assets plus8 motion-source hashes,222 truck sources/destination,
+the original glider/gun,35 original shader assets and9 Parkour vendor files are preserved.
+Owner AFS.uproject matches the pre-pass snapshot and is excluded from the source commit.
+MotionRevisionPass contains the local native snapshot, repaired Blender/FBX, assessment,
+captures, source checkpoint and short review montage. It is not a packaged game.
+No physical-controller/owner visual acceptance, representative performance or long-session
+claim. Supplied rifle/footstep audio and Ballista ZIPs are cataloged only. Walking sprint,
+B crouch/prone, other gliders, jetpack and earlier log-only audio/effect work remain queued.

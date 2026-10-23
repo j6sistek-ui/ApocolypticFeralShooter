@@ -23,11 +23,25 @@ assets are deliberately excluded from source control; a source checkout alone
 does not contain a playable installation. The locally authored assets must be
 retained alongside the code.
 
-On foot, an eight-direction idle/walk/jog blend follows actual movement speed;
-stationary camera turns use stepping animations. Vexa retains her source body/face
-morphs, physics overrides, contact shadows and 600 cm/s walk/jump defaults. Chest
-and glute springs run on foot and on the personal glider, limited to 2 cm. The
-supplied bike keeps its own riding animation graph and receives Vexa's appearance.
+On foot, a local copy of ParkourMovementPack's original Blueprint movement graph
+controls movement, wall running, jump buffering and coyote time. Its movement settings
+are retained, including 3000 cm/s maximum speed, 1000 cm/s² acceleration, 2.5 gravity
+scale and 1102.5 cm/s jump velocity. This intentionally fast comparison replaces the
+previous 600 cm/s movement. Controller movement feeds the template's original axes;
+A feeds its Space jump event. Third-person Vexa faces travel unless aiming; the AFS
+camera toggle and aiming controls remain available. Locomotion animation speed follows
+travel speed. The template supplies movement logic, not Vexa animations.
+
+The pre-change runnable project is preserved at
+`D:/AFS_Comparisons/Before_Parkour_2026-10-23/AFS`, with a SHA256 manifest beside it.
+Use `Open_Before_Parkour.cmd` in its parent directory to compare the old behavior.
+
+Vexa retains her face/body shape, material and physics overrides. The local fitted
+torso/legs mesh bakes her existing leg morphs and joins the waist boundary. Two new
+bones animate the back chain. Chest/glute motion uses a damped 1.8 Hz response with
+foot-contact impulses and a threshold that ignores small flight corrections; limits
+are 2 cm chest and 3.2 cm glutes. The supplied bike keeps its riding graph and receives
+the fitted body/chain. Original SpaceSurvival meshes remain unchanged.
 
 The local `HoverPrototype/Appearance` material graph contains complete virtual
 UDIM textures; original materials and SpaceSurvival remain intact. The PostApo
@@ -39,14 +53,24 @@ virtual textures and Lumen hardware ray tracing; restart after changing these.
 
 See `Docs/CONTROLS.txt` for the input map and `Docs/VALIDATION.txt` for evidence
 and current limits. Right-stick pitch drives climb/dive along the direction of travel;
-L1/R1 bank left/right. Released thrust coasts, opposing thrust brakes before reverse,
+L1/R1 bank left/right and bend the moving flight path. Sustained forward/reverse
+travel tilts the board in opposite directions; acceleration and braking add a damped
+pitch reaction. Released thrust coasts, opposing thrust brakes before reverse,
 and board/rider/wing reactions use signed motion with damped transitions. Leveling pitch
 settles vertical motion into altitude hold. L3 boost has a draining/recharging meter.
 Vexa is invulnerable; R resets the player and glider to the test start.
 
 The data asset also exposes booster, muzzle and landing effect references. Local effect
 copies preserve vendor originals. Niagara thrust follows direction and boost strength;
-landing shockwaves and muzzle pulses are intentionally brief. Landings request a light
+the compact effect reduces heat distortion. A brief muzzle-attached pulse and short
+moving tracer replace the previous broad flash. Hits remain hitscan; the tracer is
+visual feedback, not simulated ballistic damage. The glider uses dedicated continuous
+turn/movement blends, a held reverse pose and an upper-body gun/recoil layer.
+The hips adjust to both legs' reach before foot IK, keeping the feet on the pads
+through taller poses without stretching the legs. Animation evaluates after the
+pilot updates the board and foot targets. Input, motion and boost timers retain
+elapsed time on slow frames; the spring-loaded pads substep independently.
+Landing shockwaves are intentionally brief. Landings request a light
 controller pulse, whose physical feel still needs owner review.
 
 Press D-pad Up or F6 for the graphics menu. D-pad/arrows select and adjust, A/Enter

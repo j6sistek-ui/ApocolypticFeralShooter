@@ -11,6 +11,11 @@ class HOVERFLIGHT_API UHoverAuthoring : public UBlueprintFunctionLibrary
   public:
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static FString DescribeBlueprint(UBlueprint *Blueprint);
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
+    static bool IntegrateParkourBlueprint(UBlueprint *Blueprint);
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
+    static bool BuildRideBlend(class UBlendSpace *Blend, const TArray<class UAnimSequence *> &Clips,
+                               const TArray<FVector> &Coordinates);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static void StartPlaytest();
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static UWorld *GetPlaytestWorld();
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
