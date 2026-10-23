@@ -36,6 +36,7 @@ class HOVERFLIGHT_API UHoverPilotAssets : public UDataAsset
     UPROPERTY(EditAnywhere) TArray<FHoverBodyPart> BodyParts;
     UPROPERTY(EditAnywhere) TObjectPtr<USkeletalMesh> Glider;
     UPROPERTY(EditAnywhere) TObjectPtr<UStaticMesh> Gun;
+    UPROPERTY(EditAnywhere, Category = "Weapon") TObjectPtr<UStaticMesh> GunOptic;
     UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> RideIdle;
     UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> RideMove;
     UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> RideLeft;
@@ -61,6 +62,12 @@ class HOVERFLIGHT_API UHoverPilotAssets : public UDataAsset
     UPROPERTY(EditAnywhere) TObjectPtr<UNiagaraSystem> BoosterEffect;
     UPROPERTY(EditAnywhere) TObjectPtr<UFXSystemAsset> ShockwaveEffect;
     UPROPERTY(EditAnywhere) TObjectPtr<UFXSystemAsset> MuzzleEffect;
+    UPROPERTY(EditAnywhere, Category = "Weapon") FVector GunMuzzle = FVector(0, 46, 2);
+    UPROPERTY(EditAnywhere, Category = "Weapon") FVector GunForward = FVector::RightVector;
+    UPROPERTY(EditAnywhere, Category = "Weapon") FVector GunGrip = FVector(0, -20, -3);
+    UPROPERTY(EditAnywhere, Category = "Weapon") FVector GunSight = FVector(0, 0, 12);
+    UPROPERTY(EditAnywhere, Category = "Weapon") TObjectPtr<UFXSystemAsset> SurfaceImpact;
+    UPROPERTY(EditAnywhere, Category = "Weapon") TObjectPtr<class USoundBase> ShotSound;
 };
 
 UCLASS()
@@ -74,6 +81,8 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     virtual void Landed(const FHitResult &Hit) override;
     virtual void SetupPlayerInputComponent(UInputComponent *Input) override;
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly) bool bParkourMovement = false;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly) bool bCLSLocomotion = false;
+    UPROPERTY() TObjectPtr<class UHoverLocomotionBridge> LocomotionBridge;
     UFUNCTION(BlueprintPure) bool IsOnFoot() const
     {
         return !bMounted;
@@ -141,9 +150,11 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     UPROPERTY() TObjectPtr<UAnimSequence> CurrentAnimation;
     TMap<FName, FTransform> BoardRest;
     FVector StartLocation, ParkedLocation;
+    float WeaponAimAlpha = 0;
     FVector MountFrom, MountTo, MountFeet[2];
     FRotator StartRotation;
-    float ForwardInput = 0, SideInput = 0, BankInput = 0, TurnInput = 0;
+    float ForwardInput = 0, SideInput = 0, BankInput = 0, TurnInput = 0, PitchInput = 0;
+    float FlightPitch = 0, FlightPitchVelocity = 0, HopStartZ = 0, HopTilt = 0;
     float GroundDirection = 0, GroundYawRate = 0;
     float BodyYaw = 0;
     float HoldTime = 0, TransitionTime = 0, HopTime = 0, SlideTime = 0;
@@ -193,5 +204,6 @@ class HOVERFLIGHT_API AHoverGameMode : public AGameModeBase
     GENERATED_BODY()
   public:
     AHoverGameMode();
+    virtual void InitGame(const FString &MapName, const FString &Options, FString &ErrorMessage) override;
     virtual void BeginPlay() override;
 };

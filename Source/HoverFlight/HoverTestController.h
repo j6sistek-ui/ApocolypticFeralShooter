@@ -57,6 +57,10 @@ class HOVERFLIGHT_API AHoverTestController : public APlayerController
     UPROPERTY() TObjectPtr<APawn> Truck;
     UPROPERTY() TObjectPtr<class UInputMappingContext> BikeMappings;
     void UpdateBikeMappings();
+    void SetBikeParked(bool bParked);
+    bool bBikeParkingLock = false;
+    bool bBikeLockX = false, bBikeLockY = false, bBikeLockYaw = false;
+    uint8 BikeSavedDOF = 0;
     UPROPERTY() TObjectPtr<AActor> DressedDriver;
     float ExitHold = 0;
     bool bExitConsumed = true, bSpawnAttempted = false;

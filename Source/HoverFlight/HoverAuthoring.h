@@ -22,6 +22,7 @@ class HOVERFLIGHT_API UHoverAuthoring : public UBlueprintFunctionLibrary
     static void TestKey(APlayerController *Controller, FName Key, float Value, bool bAnalog = false);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static void IsolateTestInput(APlayerController *Controller);
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static void SetPlaytestFixedStep(bool bEnabled);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static AActor *SpawnTestPlatform(FVector Location);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static FString ConfigurePrototypeEffect(UNiagaraSystem *Effect, float SpriteScale, bool LocalSpace);

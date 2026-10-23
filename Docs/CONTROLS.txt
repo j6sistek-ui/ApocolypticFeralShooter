@@ -13,20 +13,23 @@ Use Play > Standalone Game or the supplied Open_AFS_Standalone.cmd launcher for 
 DLAA/DLSS image modes also work in editor Play. No restart is needed to change menu options.
 
 VEXA / GLIDER
-Left stick / WASD: camera-relative movement. On foot in third person, Vexa turns
-toward travel; while aiming she strafes. On the glider these directions provide thrust.
-Right stick / mouse: turn and look. Right stick forward pitches down; back pitches up.
-Pitch plus forward/reverse travel climbs/dives. Level the pitch to settle and hold altitude.
-L1 / Q: bank and curve left. R1 / E: bank and curve right. Release levels the board.
+On foot: left stick / WASD moves relative to the camera; Vexa turns into travel.
+Hold L3 to run: walk 5 m/s, run 9 m/s. While aiming she strafes.
+Glider: R2 / E thrust; LS / WASD forward-back climbs/dives, left-right steers.
+Right stick / mouse: aim/look only, independent of glider heading and climb.
+L1 / Q held while steering increases bank for a tighter turn. Release levels it.
 Hold X (0.65 seconds): mount nearby glider/bike/truck, or safely dismount glider.
 Glider exit needs clear walkable ground within 1.5 m of the pads and speed below 3 m/s.
 The unoccupied glider has gravity and collision; wait for it to settle before mounting.
-A / Space: jump on foot; hop rider and glider together when mounted.
+A / Space: jump on foot; mounted ollie pops up then settles, with a small pulse.
 On glider, L3 held / Shift: boost; the meter drains and recharges after a delay.
-On foot, Shift retains the parkour template's crouch/slide behavior.
-Release thrust to coast; opposite thrust brakes before reversing. B / Ctrl: brief coast assist.
-L2 held / right mouse: gun aim and in-flight aiming animation.
-R2 held / left mouse: fire rifle, including unscoped third-person fire with a visible gun.
+On foot, hold B / Shift for the Parkour template's crouch/slide; release to stand.
+F7 / D-pad Right while grounded toggles CLS poses and the original locomotion.
+Both use the same Parkour movement, wall jump, glider, guns and vehicles.
+Release glider thrust to coast to a stop. B / Ctrl: brief coast assist.
+L2 held / right mouse: first-person ADS; release restores the selected view.
+On foot R2 / left mouse fires. On glider R1 / left mouse fires; R2 is thrust.
+Unscoped third-person fire raises the visible gun. The Ballista has a centred reflex sight.
 Three body hits or one headshot kills a zombie.
 Zombies respawn to maintain 20; blood impacts and ragdoll deaths show hits/kills.
 Ammo is unlimited. Vexa is invulnerable, and zombies have no attack damage.
@@ -39,7 +42,8 @@ Left stick left/right: steer. B: supplied boost. Right stick: camera.
 Keyboard: WASD / arrows retain throttle/reverse/steering, Space handbrake,
 Shift boost and F lights.
 Mouse / right stick: camera. Mouse wheel: zoom. V: change camera.
-E or hold X: exit and return to Vexa.
+E or hold X: exit and return to Vexa. Exit clears throttle, steering and boost,
+and applies parking brakes and drag; re-entering releases parking controls.
 
 DOOMSDAY TRUCK (SUPPLIED CONTROLS)
 R2 / W / Up: throttle. L2 / S / Down: brake and reverse.
@@ -50,6 +54,12 @@ The vendor's controller X throttle and A brake bindings remain intact.
 
 Deferred: ammo/reloading, target locking, R3 barrel roll, multiplayer,
 production tuning, and integration into the main game.
-Walking L3 sprint and B crouch/hold-prone/stand are separate queued work.
+Walking tap-B crouch / hold-B prone remains separate queued work; the current
+Parkour binding is hold B to crouch/slide and release to stand.
 The earlier B-dive request still needs its intended movement mode clarified.
 The FPS view uses a separate rifle; the full Vexa body/aim pose is shown in F5 review view.
+
+PRESERVED COMPARISONS
+D:/AFS_Comparisons/CLS_MM_2026-10-23/Before_Parkour/AFS is the preserved original.
+The standalone ClsComparisonGameMode retains the old two-pawn experiment.
+Normal AFS Play uses the combined CLS poses + Parkour movement pawn.

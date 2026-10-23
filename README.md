@@ -24,13 +24,15 @@ does not contain a playable installation. The locally authored assets must be
 retained alongside the code.
 
 On foot, a local copy of ParkourMovementPack's original Blueprint movement graph
-controls movement, wall running, jump buffering and coyote time. Its movement settings
-are retained, including 3000 cm/s maximum speed, 1000 cm/s² acceleration, 2.5 gravity
-scale and 1102.5 cm/s jump velocity. This intentionally fast comparison replaces the
-previous 600 cm/s movement. Controller movement feeds the template's original axes;
-A feeds its Space jump event. Third-person Vexa faces travel unless aiming; the AFS
-camera toggle and aiming controls remain available. Locomotion animation speed follows
-travel speed. The template supplies movement logic, not Vexa animations.
+controls movement, wall running, jump buffering and coyote time. Walking is capped at
+500 cm/s and held-L3 running at900 cm/s. The template's1000 cm/s² acceleration,
+2.5 gravity scale and1102.5 cm/s jump velocity remain. A feeds its buffered Space
+jump event; B feeds its Shift crouch/slide. CLS selects and retargets locomotion
+poses through a hidden mannequin while Parkour retains movement and special actions.
+Third-person Vexa faces travel unless aiming. F7 / D-pad Right toggles the original
+poses and CLS on the same pawn; glider, weapon and vehicle controls remain available.
+The local CLS data component cannot overwrite Parkour movement settings. Grounded
+CLS motion uses lower friction while input is held, restoring braking on release.
 
 The pre-change runnable project is preserved at
 `D:/AFS_Comparisons/Before_Parkour_2026-10-23/AFS`, with a SHA256 manifest beside it.
@@ -38,10 +40,24 @@ Use `Open_Before_Parkour.cmd` in its parent directory to compare the old behavio
 
 Vexa retains her face/body shape, material and physics overrides. The local fitted
 torso/legs mesh bakes her existing leg morphs and joins the waist boundary. Two new
-bones animate the back chain. Chest/glute motion uses a damped 1.8 Hz response with
-foot-contact impulses and a threshold that ignores small flight corrections; limits
-are 2 cm chest and 3.2 cm glutes. The supplied bike keeps its riding graph and receives
-the fitted body/chain. Original SpaceSurvival meshes remain unchanged.
+bones animate the back chain. The local post-process Blueprint
+`/Game/HoverPrototype/Appearance/ABP_Vexa_BodyPhysics` contains the four original
+Xandra Spring Controllers, mapped to chest_l/r and glute_l/r. Glute stiffness160,
+damping10 and a6.5 cm limit give slower followthrough; chest uses220/12 and3.5 cm.
+A flight acceleration deadband ignores small corrections. The prior native body
+spring offsets are bypassed when this Blueprint is present. The fitted visible
+body copies the final pose, then applies persistent chain pendulum motion.
+The chain reacts to movement and animated spine acceleration and settles after stops.
+
+The selected local outfit combines the Cloth-02 top and Cloth-05 bottoms in matching
+ivory, with all original chains retained. Face, torso and limb skin materials share
+a warmer tan-brown SkinColour override. The original fabric top and pants are removed from this
+copy. Garments have skin weights matched to Vexa; they are not Chaos cloth simulation.
+Original geometry, previous fitted versions and separate editable garments remain
+in the D-drive/workspace backups. The supplied bike retains its riding graph and
+receives the fitted body/chain. Original SpaceSurvival meshes remain unchanged.
+Find the playable Blueprint by searching `BP_Vexa_CLS_Parkour`, and the outfit by
+searching `SK_Vexa_SelectedOutfit` in the Content Browser.
 
 The local `HoverPrototype/Appearance` material graph contains complete virtual
 UDIM textures; original materials and SpaceSurvival remain intact. The PostApo
@@ -52,18 +68,21 @@ the authored map on the next Play session. Local renderer configuration enables
 virtual textures and Lumen hardware ray tracing; restart after changing these.
 
 See `Docs/CONTROLS.txt` for the input map and `Docs/VALIDATION.txt` for evidence
-and current limits. Right-stick pitch drives climb/dive along the direction of travel;
-L1/R1 bank left/right and bend the moving flight path. Sustained forward/reverse
-travel tilts the board in opposite directions; acceleration and braking add a damped
-pitch reaction. Released thrust coasts, opposing thrust brakes before reverse,
-and board/rider/wing reactions use signed motion with damped transitions. Leveling pitch
-settles vertical motion into altitude hold. L3 boost has a draining/recharging meter.
+and current limits. On the glider R2 supplies thrust, left-stick forward/back controls
+climb/dive and left/right steers. Right stick aims/looks independently of travel.
+Hold L1 while steering to increase bank from 18 to 35 degrees. R1 fires and L2 aims.
+A performs an ollie-like hop: a 2.20 m peak settles to the existing 1.66 m height gain,
+with board tilt and a small shockwave. Released thrust coasts with damped pitch and
+wing reactions. L3 boost reaches 56 m/s and has a draining/recharging meter.
 Vexa is invulnerable; R resets the player and glider to the test start.
 
 The data asset also exposes booster, muzzle and landing effect references. Local effect
 copies preserve vendor originals. Niagara thrust follows direction and boost strength;
-the compact effect reduces heat distortion. A brief muzzle-attached pulse and short
-moving tracer replace the previous broad flash. Hits remain hitscan; the tracer is
+the compact effect reduces heat distortion. The supplied Ballista replaces the first rifle and has a local removable reflex
+sight. Hold L2 for centred first-person ADS, even from third person; release restores
+the selected camera. Its larger muzzle pulse is attached to the measured barrel tip,
+and a straight tracer follows the barrel axis. Solid hits produce dust/debris, and
+CP Rifle1 audio004 provides the shot sound. The original gun assets remain intact. Hits remain hitscan; the tracer is
 visual feedback, not simulated ballistic damage. The glider uses dedicated continuous
 turn/movement blends, a held reverse pose and an upper-body gun/recoil layer.
 The hips adjust to both legs' reach before foot IK, keeping the feet on the pads
@@ -94,3 +113,9 @@ docker run --rm afs-script-check
 Native builds and rendered play checks use the existing Windows Unreal toolchain.
 No packages are installed on the host. This is a local gameplay prototype, not a
 packaged release or SpaceSurvival integration.
+
+A separate reversible development copy lives at
+D:/AFS_Comparisons/CLS_MM_2026-10-23/After_CLS_MM/AFS.
+Normal Play now uses CLS poses with Parkour gameplay. The earlier two-pawn
+ClsComparisonGameMode remains available for the preserved experiment. Both candidates
+use the same speed caps. Matched rendered clips are comparison evidence, not an FPS benchmark.

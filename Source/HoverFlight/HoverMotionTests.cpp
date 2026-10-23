@@ -14,6 +14,19 @@ bool FHoverMotionTest::RunTest(const FString &Parameters)
     TestTrue(TEXT("Braking is stronger than coasting, without instant reversal"), Brake.X > 0 && Brake.X < Coast.X);
     for (int32 Rate : {30, 60, 120})
     {
+        float Peak = 0;
+        float Previous = 0;
+        for (int32 I = 0; I <= Rate * 2; ++I)
+        {
+            const float Height = HoverMotion::OllieHeight(float(I) / Rate);
+            Peak = FMath::Max(Peak, Height);
+            TestTrue(TEXT("Ollie stays above its start and has no position jump"),
+                     Height >= 0 && FMath::Abs(Height - Previous) < 30.f);
+            Previous = Height;
+        }
+        TestTrue(TEXT("Ollie pops above the final hover height"), Peak > 219.f && Peak <= 220.01f);
+        TestTrue(TEXT("Ollie settles to the existing height at every sample rate"),
+                 FMath::IsNearlyEqual(Previous, 166.f, .01f));
         FVector Banked = Forward;
         for (int32 I = 0; I < Rate; ++I)
             Banked = HoverMotion::ApplyBank(Banked, 28.f, 1.f / Rate);

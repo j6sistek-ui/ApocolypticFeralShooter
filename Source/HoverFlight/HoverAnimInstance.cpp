@@ -1,4 +1,6 @@
 #include "HoverAnimInstance.h"
+#include "HoverSecondaryMotion.h"
+#include "HoverPilot.h"
 #include "Animation/AnimInstanceProxy.h"
 #include "Animation/AnimNode_SequencePlayer.h"
 #include "Animation/AnimNodeSpaceConversions.h"
@@ -11,6 +13,7 @@
 #include "BoneControllers/AnimNode_ModifyBone.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Pawn.h"
+#include "AnimNodes/AnimNode_RetargetPoseFromMesh.h"
 
 // Keep the current pose within both legs' reach before solving foot IK.
 // A fixed pelvis offset alone cannot cover the pack's taller dive/aim poses.
@@ -71,16 +74,15 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
     FAnimNode_TwoWayBlend Blend;
     FAnimNode_BlendSpacePlayer_Standalone Locomotion;
     FAnimNode_TwoWayBlend GroundBlend;
+    FAnimNode_RetargetPoseFromMesh MotionPose;
+    FAnimNode_TwoWayBlend MotionBlend;
     FAnimNode_BlendSpacePlayer_Standalone Ride;
     FAnimNode_TwoWayBlend RideBlend;
     FAnimNode_ConvertLocalToComponentSpace ToComponent;
     FHoverPelvisNode Pelvis;
     FAnimNode_TwoBoneIK Left, Right;
     FAnimNode_ModifyBone Springs[4];
-    FVector Secondary[4], SecondaryVelocity[4];
-    FVector PreviousVelocity = FVector::ZeroVector, FilteredAcceleration = FVector::ZeroVector;
-    float PreviousFootHeight[2] = {}, PreviousFootVelocity[2] = {}, FootCooldown[2] = {};
-    bool bMotionInitialized = false;
+    FHoverSecondaryMotion Secondary;
     FAnimNode_ConvertComponentToLocalSpace Root;
     UAnimSequence *Desired = nullptr;
     UAnimSequence *Last = nullptr;
@@ -99,7 +101,12 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
         Blend.B.SetLinkNode(&Players[1]);
         GroundBlend.A.SetLinkNode(&Blend);
         GroundBlend.B.SetLinkNode(&Locomotion);
-        RideBlend.A.SetLinkNode(&GroundBlend);
+        MotionPose.RetargetFrom = ERetargetSourceMode::CustomSkeletalMeshComponent;
+        MotionPose.IKRetargeterAsset =
+            LoadObject<UIKRetargeter>(nullptr, TEXT("/Game/HoverPrototype/CLSComparison/RTG_CLS_Vexa.RTG_CLS_Vexa"));
+        MotionBlend.A.SetLinkNode(&GroundBlend);
+        MotionBlend.B.SetLinkNode(&MotionPose);
+        RideBlend.A.SetLinkNode(&MotionBlend);
         RideBlend.B.SetLinkNode(&Ride);
         UpperBody.BasePose.SetLinkNode(&RideBlend);
         UpperBody.BlendPoses.Reset();
@@ -132,7 +139,6 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
             Spring.BoneToModify.BoneName = SpringNames[I];
             Spring.TranslationMode = BMM_Additive;
             Spring.TranslationSpace = BCS_ComponentSpace;
-            Secondary[I] = SecondaryVelocity[I] = FVector::ZeroVector;
         }
         Root.ComponentPose.SetLinkNode(&Springs[3]);
         Left.IKBone.BoneName = TEXT("foot_l");
@@ -160,67 +166,26 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
                  &ToComponent, &Pelvis,     &Left,  &Right, &Root,       &Ride,        &RideBlend};
         for (auto &Spring : Springs)
             Nodes.Add(&Spring);
+        Nodes.Add(&MotionPose);
+        Nodes.Add(&MotionBlend);
     }
     virtual void PreUpdate(UAnimInstance *Instance, float DT) override
     {
         FAnimInstanceProxy::PreUpdate(Instance, DT);
         auto *State = CastChecked<UHoverAnimInstance>(Instance);
+        MotionPose.SourceMeshComponent = State->MotionSource;
+        MotionBlend.Alpha = FMath::FInterpConstantTo(
+            MotionBlend.Alpha, State->bMotionMatching && State->MotionSource ? 1.f : 0.f, DT, 8.f);
         Desired = State->Sequence;
         Serial = State->RestartSerial;
         bLoop = State->bLoop;
-        // Feed a slow damped response with locomotion impacts and filtered
-        // acceleration. Raw hover correction/breathing no longer excites it.
-        if (auto *Pawn = State->TryGetPawnOwner(); Pawn && DT > 0)
-        {
-            auto *Mesh = State->GetSkelMeshComponent();
-            const FVector Velocity = Pawn->GetVelocity();
-            FVector Acceleration = bMotionInitialized ? (Velocity - PreviousVelocity) / DT : FVector::ZeroVector;
-            PreviousVelocity = Velocity;
-            FilteredAcceleration =
-                FMath::VInterpTo(FilteredAcceleration, Acceleration.GetClampedToMaxSize(3500), DT, 5.f);
-            FVector Force = FilteredAcceleration;
-            const float Deadband = State->bRiding ? 400.f : 120.f;
-            Force = Force.GetSafeNormal() * FMath::Max(0.f, float(Force.Size()) - Deadband);
-            const FVector Local = Mesh->GetComponentTransform().InverseTransformVectorNoScale(Force);
-            for (int32 Foot = 0; Foot < 2; ++Foot)
-            {
-                const float Height =
-                    Mesh->GetSocketTransform(Foot == 0 ? TEXT("foot_l") : TEXT("foot_r"), RTS_Component)
-                        .GetLocation()
-                        .Z;
-                const float FootSpeed = (Height - PreviousFootHeight[Foot]) / DT;
-                FootCooldown[Foot] = FMath::Max(0.f, FootCooldown[Foot] - DT);
-                if (bMotionInitialized && !State->bRiding && State->bGroundLocomotion && Velocity.Size2D() > 60 &&
-                    Height < 20 && PreviousFootVelocity[Foot] < -4 && FootSpeed >= -1 && FootCooldown[Foot] <= 0)
-                {
-                    for (int32 I = 0; I < 4; ++I)
-                        SecondaryVelocity[I].Z -= (I < 2 ? 12.f : 24.f) * (I % 2 == Foot ? 1.f : .72f);
-                    FootCooldown[Foot] = .20f;
-                }
-                PreviousFootHeight[Foot] = Height;
-                PreviousFootVelocity[Foot] = FootSpeed;
-            }
-            bMotionInitialized = true;
-            for (int32 I = 0; I < 4; ++I)
-            {
-                const float Limit = I < 2 ? 2.f : 3.2f;
-                const FVector Target =
-                    FVector(-Local.X * .00035f, 0, -Local.Z * .0008f + Local.Y * .0005f).GetClampedToMaxSize(Limit);
-                const int32 Steps = FMath::Max(1, FMath::CeilToInt(DT * 120.f));
-                const float Step = DT / Steps;
-                for (int32 J = 0; J < Steps; ++J)
-                {
-                    constexpr float Omega = 11.3f; // 1.8 Hz, deliberately below the former rapid vibration.
-                    SecondaryVelocity[I] +=
-                        ((Target - Secondary[I]) * Omega * Omega - SecondaryVelocity[I] * (2.f * .42f * Omega)) * Step;
-                    Secondary[I] += SecondaryVelocity[I] * Step;
-                    Secondary[I] = Secondary[I].GetClampedToMaxSize(Limit);
-                }
-                Springs[I].Translation = Secondary[I];
-            }
-        }
+        Secondary.Update(State->GetSkelMeshComponent(), State->TryGetPawnOwner(), DT, State->bRiding,
+                         State->bGroundLocomotion);
+        for (int32 I = 0; I < 4; ++I)
+            Springs[I].Translation = Secondary.Offsets[I];
         for (auto &Spring : Springs)
-            Spring.Alpha = State->bSecondaryMotion ? 1.f : 0.f;
+            Spring.Alpha =
+                State->bSecondaryMotion && !State->GetSkelMeshComponent()->GetPostProcessInstance() ? 1.f : 0.f;
         Ride.SetBlendSpace(State->RideBlend);
         Ride.SetPosition(State->RideInput);
         Ride.SetLoop(true);
@@ -257,8 +222,14 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
         FAnimInstanceProxy::PostUpdate(Instance);
         auto *State = CastChecked<UHoverAnimInstance>(Instance);
         State->SecondaryOffsets.Reset();
-        for (const auto &Offset : Secondary)
-            State->SecondaryOffsets.Add(State->bSecondaryMotion ? Offset : FVector::ZeroVector);
+        State->SecondaryBonesEvaluated.Reset();
+        for (const auto &Spring : Springs)
+            State->SecondaryBonesEvaluated.Add(Spring.BoneToModify.IsValidToEvaluate(GetRequiredBones()));
+        for (const auto &Offset : Secondary.Offsets)
+            State->SecondaryOffsets.Add(State->bSecondaryMotion &&
+                                                !State->GetSkelMeshComponent()->GetPostProcessInstance()
+                                            ? Offset
+                                            : FVector::ZeroVector);
     }
     virtual void UpdateAnimationNode(const FAnimationUpdateContext &Context) override
     {
@@ -304,6 +275,7 @@ struct FHoverAccessoryProxy final : FAnimInstanceProxy
     FAnimNode_ConvertComponentToLocalSpace Root;
     FVector Angles = FVector::ZeroVector, AngularVelocity = FVector::ZeroVector;
     FVector LastVelocity = FVector::ZeroVector, FilteredForce = FVector::ZeroVector;
+    FVector LastAnchor = FVector::ZeroVector, LastAnchorSpeed = FVector::ZeroVector;
     bool bInitialized = false;
     explicit FHoverAccessoryProxy(UAnimInstance *Instance) : FAnimInstanceProxy(Instance) {}
     virtual void Initialize(UAnimInstance *Instance) override
@@ -336,24 +308,35 @@ struct FHoverAccessoryProxy final : FAnimInstanceProxy
         if (auto *Owner = Mesh->GetOwner(); Owner && DT > 0)
         {
             const FVector Velocity = Owner->GetVelocity();
-            const FVector Acceleration = bInitialized ? (Velocity - LastVelocity) / DT : FVector::ZeroVector;
+            FVector Acceleration = bInitialized ? (Velocity - LastVelocity) / DT : FVector::ZeroVector;
+            const FVector Anchor = Mesh->GetSocketTransform(TEXT("spine_03"), RTS_Component).GetLocation();
+            const FVector AnchorSpeed = bInitialized ? (Anchor - LastAnchor) / DT : FVector::ZeroVector;
+            if (bInitialized && Velocity.Size2D() > 60 &&
+                (!Cast<AHoverPilot>(Owner) || !Cast<AHoverPilot>(Owner)->IsMounted()))
+            {
+                const FVector LocalAccel = ((AnchorSpeed - LastAnchorSpeed) / DT).GetClampedToMaxSize(800);
+                Acceleration += Mesh->GetComponentTransform().TransformVectorNoScale(
+                    FVector(LocalAccel.X * 3.5f, LocalAccel.Y * 3.5f + LocalAccel.Z * 1.2f, 0));
+            }
+            LastAnchor = Anchor;
+            LastAnchorSpeed = AnchorSpeed;
             LastVelocity = Velocity;
             bInitialized = true;
             FilteredForce = FMath::VInterpTo(FilteredForce, Acceleration.GetClampedToMaxSize(2500), DT, 6.f);
             const FVector Force = Mesh->GetComponentTransform().InverseTransformVectorNoScale(FilteredForce);
-            const FVector Target(FMath::Clamp(-FMath::RadiansToDegrees(FMath::Atan(Force.Y / 980.f)), -12.f, 18.f),
-                                 FMath::Clamp(FMath::RadiansToDegrees(FMath::Atan(Force.X / 980.f)), -18.f, 18.f), 0);
+            const FVector Target(FMath::Clamp(-FMath::RadiansToDegrees(FMath::Atan(Force.Y / 450.f)), -25.f, 48.f),
+                                 FMath::Clamp(FMath::RadiansToDegrees(FMath::Atan(Force.X / 450.f)), -45.f, 45.f), 0);
             const int32 Steps = FMath::Max(1, FMath::CeilToInt(DT * 120));
             const float Step = DT / Steps;
             for (int32 I = 0; I < Steps; ++I)
             {
-                AngularVelocity += ((Target - Angles) * 49.f - AngularVelocity * 6.3f) * Step;
+                AngularVelocity += ((Target - Angles) * 49.f - AngularVelocity * 3.6f) * Step;
                 Angles += AngularVelocity * Step;
-                Angles.X = FMath::Clamp(Angles.X, -12.f, 18.f);
-                Angles.Y = FMath::Clamp(Angles.Y, -18.f, 18.f);
+                Angles.X = FMath::Clamp(Angles.X, -25.f, 48.f);
+                Angles.Y = FMath::Clamp(Angles.Y, -45.f, 45.f);
             }
             Chain[0].Rotation = FRotator(Angles.Y, 0, Angles.X);
-            Chain[1].Rotation = FRotator(Angles.Y * .3f, 0, Angles.X * .3f);
+            Chain[1].Rotation = FRotator(Angles.Y * .6f, 0, Angles.X * .6f);
         }
     }
     virtual void PostUpdate(UAnimInstance *Instance) const override

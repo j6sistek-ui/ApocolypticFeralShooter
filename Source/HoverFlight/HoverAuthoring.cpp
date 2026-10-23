@@ -7,6 +7,7 @@
 #include "GameFramework/PlayerController.h"
 #include "InputKeyEventArgs.h"
 #include "UnrealClient.h"
+#include "Misc/App.h"
 #if WITH_EDITOR
 #include "NiagaraSystem.h"
 #include "Animation/BlendSpace.h"
@@ -209,6 +210,10 @@ UWorld *UHoverAuthoring::GetPlaytestWorld()
 void UHoverAuthoring::TestKey(APlayerController *Controller, FName Key, float Value, bool bAnalog)
 {
 #if WITH_EDITOR
+    // A held physical button emits one press edge. Replaying Pressed each frame
+    // restarts Blueprint slide timelines and can compound capsule scaling.
+    if (Controller && !bAnalog && Controller->IsInputKeyDown(FKey(Key)) == (Value > 0))
+        return;
     auto *TestController = Cast<AHoverTestController>(Controller);
     if (TestController)
         TestController->bInjectingTestKey = true;
@@ -230,6 +235,14 @@ void UHoverAuthoring::IsolateTestInput(APlayerController *Controller)
         if (PC->PlayerInput)
             PC->PlayerInput->FlushPressedKeys();
     }
+#endif
+}
+
+void UHoverAuthoring::SetPlaytestFixedStep(bool bEnabled)
+{
+#if WITH_EDITOR
+    FApp::SetFixedDeltaTime(1.0 / 30.0);
+    FApp::SetUseFixedTimeStep(bEnabled);
 #endif
 }
 

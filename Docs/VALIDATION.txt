@@ -246,3 +246,54 @@ captures, source checkpoint and short review montage. It is not a packaged game.
 No physical-controller/owner visual acceptance, representative performance or long-session
 claim. Supplied rifle/footstep audio and Ballista ZIPs are cataloged only. Walking sprint,
 B crouch/prone, other gliders, jetpack and earlier log-only audio/effect work remain queued.
+
+CLS / CONTROLS / SELECTED OUTFIT PASS - 2026-10-23
+
+This section supersedes earlier control, speed, outfit and spring settings above.
+CLS now supplies poses on the original Parkour gameplay pawn. Native builds and
+formatting pass; local Python scripts parse. Rendered hybrid tests verify 500/900
+cm/s walk/run, actual PoseSearch selection, crouch database selection, wall running
+and a wall-jump impulse. F7/D-pad Right changes poses on the same gameplay pawn.
+
+The local ABP_Vexa_BodyPhysics post-process uses four original Xandra spring nodes.
+Actual output-minus-input bone measurements, after final evaluation, go to near zero
+when disabled and resume when enabled. Walking glute peaks were about 2.8/3.1cm,
+running 5.8/5.4cm; limits are 6.5cm glutes and 3.5cm chest. These are separate
+from base animation. A larger, slower back-chain pendulum continues after stops
+and settles. It is applied after CopyPose in the native accessory graph.
+
+Cloth02 top + Cloth05 bottoms replace original fabric; 17,872 original fabric faces
+removed, all 45,336 original chain faces retained. Garments are skin-weighted to
+Vexa, not Chaos cloth. UV channels and skin assignments were checked after reimport.
+Both garments use ivory base color; six local skin material instances share a
+warmer tan-brown SkinColour. Original textures/materials and source outfits remain
+in their original project or preserved D-drive copies. Walking, slide, jump and
+idle poses were rendered at a fixed 30Hz for inspection; this is not measured FPS.
+
+Glider R2 thrust, left-stick pitch/steer, independent right-stick look, L1 stronger
+bank, R1 fire, A ollie and L3 boost passed injected-input checks. Released thrust
+coasts; boost reaches 56m/s. Ollie peak about2.20m settles to1.66m. High exit is
+blocked, low exit releases the gravity-enabled board. Ballista ADS is centred,
+release returns the chosen camera, third-person fire displays the gun, and its
+muzzle effect is anchored to the tip. Solid impacts spawn dust/debris.
+
+Bike exit clears throttle/steering/boost and parks without planar drift or circling.
+Re-entry releases parking constraints and drives again. Vertical motion remains
+available for the vendor hover system. One test failed because the test helper
+repeated Pressed every frame, compounding the template slide timeline after exit;
+the helper now emits real press/release edges. The corrected run must be used as
+evidence, not the abandoned NaN run. Original purchased movement graphs are retained.
+
+Evidence: outputs/AFS_Test/ControlRevision/assessment.json and source reports in
+the Codex workspace. All listed checks must pass; screenshots and the outfit motion
+video supplement the measurements. The complete pre-pass project is preserved at
+D:/AFS_Comparisons/CLS_MM_2026-10-23/Before_Parkour/AFS. Local promotion has per-file
+before/after hashes and backups; the owner descriptor receives only required CLS
+plugin additions. No GitHub PR, source asset upload or SpaceSurvival modification.
+
+Remaining: physical controller feel/rumble and owner visual acceptance; package,
+performance and long-session tests; tap-B crouch/hold-prone behavior, other glider
+rigs and jetpack backlog. The current B binding is Parkour crouch/slide. CLS does
+not repair unrelated gun, glider or mesh animations automatically. Existing vendor
+stale pose/UDIM warnings, installed-engine deprecations and earlier intermittent
+editor-exit crash remain tracked; passing tests do not establish their root cause.

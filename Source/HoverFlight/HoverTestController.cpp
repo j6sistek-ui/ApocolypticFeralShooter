@@ -1,4 +1,5 @@
 #include "HoverTestController.h"
+#include "HoverLocomotionBridge.h"
 #include "HoverPilot.h"
 #include "HoverAnimInstance.h"
 #include "InputModifiers.h"
@@ -18,6 +19,8 @@
 #include "HoverGraphicsSettings.h"
 #include "GameFramework/PlayerInput.h"
 #include "InputKeyEventArgs.h"
+#include "PhysicsEngine/PhysicsThrusterComponent.h"
+#include "PhysicsEngine/BodyInstance.h"
 
 void AHoverTestController::BeginPlay()
 {
@@ -82,6 +85,16 @@ bool AHoverTestController::InputKey(const FInputKeyEventArgs &Params)
     const FKey Key = Params.Key;
     if (!GraphicsMenu)
     {
+        if (Pressed && (Key == EKeys::F7 || Key == EKeys::Gamepad_DPad_Right))
+            if (auto *ActivePilot = Cast<AHoverPilot>(GetPawn());
+                ActivePilot && ActivePilot->IsOnFoot() && !ActivePilot->GetCharacterMovement()->IsFalling())
+                if (auto *Bridge = ActivePilot->FindComponentByClass<UHoverLocomotionBridge>())
+                {
+                    Bridge->bEnabled = !Bridge->bEnabled;
+                    ActivePilot->GetCharacterMovement()->GroundFriction = 8;
+                    ActivePilot->GetCharacterMovement()->BrakingDecelerationWalking = 2048;
+                    return true;
+                }
         if (Pressed && (Key == EKeys::F6 || Key == EKeys::Gamepad_DPad_Up))
         {
             HoverGraphics();
@@ -90,10 +103,11 @@ bool AHoverTestController::InputKey(const FInputKeyEventArgs &Params)
         // The template's jump buffer is bound to Space; feed the same event
         // for controller A instead of bypassing it with a second jump implementation.
         if (auto *P = Cast<AHoverPilot>(GetPawn());
-            P && P->bParkourMovement && P->IsOnFoot() && Key == EKeys::Gamepad_FaceButton_Bottom)
+            P && P->bParkourMovement && P->IsOnFoot() &&
+            (Key == EKeys::Gamepad_FaceButton_Bottom || Key == EKeys::Gamepad_FaceButton_Right))
         {
             FInputKeyEventArgs Jump = Params;
-            Jump.Key = EKeys::SpaceBar;
+            Jump.Key = Key == EKeys::Gamepad_FaceButton_Bottom ? EKeys::SpaceBar : EKeys::LeftShift;
             Super::InputKey(Jump);
         }
         return Super::InputKey(Params);
@@ -189,6 +203,8 @@ bool AHoverTestController::TryEnterBike()
     Pilot->GetCharacterMovement()->DisableMovement();
     Pilot->SetActorTickEnabled(false);
     Possess(bTruck ? Truck : Bike);
+    if (!bTruck)
+        SetBikeParked(false);
     if (bTruck)
     {
         if (auto *Move = Truck->FindComponentByClass<UChaosWheeledVehicleMovementComponent>())
@@ -205,6 +221,79 @@ bool AHoverTestController::TryEnterBike()
     bExitConsumed = true;
     UE_LOG(LogTemp, Display, TEXT("HOVER_VEHICLE entered %s"), *GetNameSafe(GetPawn()));
     return true;
+}
+
+void AHoverTestController::SetBikeParked(bool bParked)
+{
+    if (!Bike)
+        return;
+    // Enhanced Input does not guarantee a Completed event after possession changes.
+    // Clear both the vendor's cached controls and the physics inputs.
+    for (const FName Name : {FName("ThrottleInput"), FName("SteeringInput"), FName("SteeringAngle")})
+        if (auto *P = FindFProperty<FDoubleProperty>(Bike->GetClass(), Name))
+            P->SetPropertyValue_InContainer(Bike, 0.0);
+    for (const FName Name : {FName("BoostPressed"), FName("BoostActivated")})
+        if (auto *P = FindFProperty<FBoolProperty>(Bike->GetClass(), Name))
+            P->SetPropertyValue_InContainer(Bike, false);
+    if (auto *P = FindFProperty<FBoolProperty>(Bike->GetClass(), TEXT("bHandbrake")))
+        P->SetPropertyValue_InContainer(Bike, bParked);
+    if (auto *P = FindFProperty<FObjectProperty>(Bike->GetClass(), TEXT("BoostThruster")))
+        if (auto *Thruster = Cast<UPhysicsThrusterComponent>(P->GetObjectPropertyValue_InContainer(Bike)))
+            Thruster->ThrustStrength = 0;
+    if (auto *Move = Bike->FindComponentByClass<UChaosWheeledVehicleMovementComponent>())
+    {
+        Move->SetRequiresControllerForInputs(!bParked);
+        Move->SetThrottleInput(0);
+        Move->SetSteeringInput(0);
+        Move->SetBrakeInput(bParked ? 1.f : 0.f);
+        Move->SetHandbrakeInput(bParked);
+        Move->SetUseAutomaticGears(!bParked);
+        Move->SetTargetGear(bParked ? 0 : 1, true);
+    }
+    if (!bParked && bBikeParkingLock)
+        if (auto *Body = Cast<UPrimitiveComponent>(Bike->GetRootComponent()))
+            if (FBodyInstance *BI = Body->GetBodyInstance())
+            {
+                BI->bLockXTranslation = bBikeLockX;
+                BI->bLockYTranslation = bBikeLockY;
+                BI->bLockZRotation = bBikeLockYaw;
+                BI->SetDOFLock(static_cast<EDOFMode::Type>(BikeSavedDOF));
+                bBikeParkingLock = false;
+            }
+    if (bParked)
+        if (auto *Body = Cast<UPrimitiveComponent>(Bike->GetRootComponent()); Body && Body->IsSimulatingPhysics())
+        {
+            // The hover lift can unload the tires, so wheel brakes alone cannot
+            // park it reliably. Apply horizontal drag without suppressing gravity.
+            FVector Planar = Body->GetPhysicsLinearVelocity();
+            Planar.Z = 0;
+            Body->AddForce(-Planar * 6.f, NAME_None, true);
+            const FVector Spin = Body->GetPhysicsAngularVelocityInRadians();
+            Body->AddTorqueInRadians(FVector(0, 0, -Spin.Z * 6.f), NAME_None, true);
+            // Once nearly stopped over ground, engage a planar parking constraint.
+            // Hover lift unloads wheel brakes; this prevents residual sideways creep
+            // while leaving gravity, vertical suspension, pitch and roll simulated.
+            if (!bBikeParkingLock && Planar.Size() < 150.f)
+            {
+                FHitResult Floor;
+                FCollisionQueryParams Params(SCENE_QUERY_STAT(HoverbikeParking), false, Bike);
+                Params.AddIgnoredActor(Pilot);
+                const FVector P = Body->GetComponentLocation();
+                if (GetWorld()->LineTraceSingleByChannel(Floor, P + FVector(0, 0, 100), P - FVector(0, 0, 180),
+                                                         ECC_Visibility, Params) &&
+                    Floor.ImpactNormal.Z > .5f)
+                    if (FBodyInstance *BI = Body->GetBodyInstance())
+                    {
+                        bBikeLockX = BI->bLockXTranslation;
+                        bBikeLockY = BI->bLockYTranslation;
+                        bBikeLockYaw = BI->bLockZRotation;
+                        BikeSavedDOF = uint8(BI->DOFMode.GetValue());
+                        BI->bLockXTranslation = BI->bLockYTranslation = BI->bLockZRotation = true;
+                        BI->SetDOFLock(EDOFMode::SixDOF);
+                        bBikeParkingLock = true;
+                    }
+            }
+        }
 }
 
 void AHoverTestController::ExitTruck()
@@ -417,6 +506,7 @@ void AHoverTestController::PlayerTick(float DT)
             if (ExitHold >= .65f)
             {
                 bExitConsumed = true;
+                SetBikeParked(true);
                 if (UFunction *Eject = Bike->FindFunction(TEXT("EjectPlayer")))
                     Bike->ProcessEvent(Eject, nullptr);
             }
@@ -424,6 +514,7 @@ void AHoverTestController::PlayerTick(float DT)
     }
     else if (Pilot && Bike && GetPawn() && GetPawn() != Pilot)
     {
+        SetBikeParked(true);
         // The supplied E action creates its demo pawn. Hand control back to the retained Vexa.
         APawn *ExitPawn = GetPawn();
         const FVector Exit = ExitPawn->GetActorLocation();
@@ -441,4 +532,6 @@ void AHoverTestController::PlayerTick(float DT)
         DressedDriver = nullptr;
         UE_LOG(LogTemp, Display, TEXT("HOVER_BIKE returned to Vexa"));
     }
+    if (Bike && GetPawn() != Bike)
+        SetBikeParked(true);
 }

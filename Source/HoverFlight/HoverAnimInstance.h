@@ -14,6 +14,8 @@ class HOVERFLIGHT_API UHoverAnimInstance : public UAnimInstance
     int32 ShotSerial = 0;
     UPROPERTY() TObjectPtr<class UBlendSpace> Locomotion;
     UPROPERTY() TObjectPtr<class UBlendSpace> RideBlend;
+    UPROPERTY() TObjectPtr<USkeletalMeshComponent> MotionSource;
+    bool bMotionMatching = false;
     FVector RideInput = FVector::ZeroVector;
     bool bRiding = false;
     FVector LocomotionInput = FVector::ZeroVector;
@@ -21,6 +23,7 @@ class HOVERFLIGHT_API UHoverAnimInstance : public UAnimInstance
     float SequenceRate = 1.f;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) bool bSecondaryMotion = true;
     UPROPERTY(BlueprintReadOnly) TArray<FVector> SecondaryOffsets;
+    UPROPERTY(BlueprintReadOnly) TArray<bool> SecondaryBonesEvaluated;
     bool bAiming = false;
     bool bLoop = true;
     int32 RestartSerial = 0;

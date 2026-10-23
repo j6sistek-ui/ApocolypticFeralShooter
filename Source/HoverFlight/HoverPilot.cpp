@@ -1,4 +1,5 @@
 #include "HoverPilot.h"
+#include "HoverLocomotionBridge.h"
 #include "HoverTestController.h"
 #include "HoverAnimInstance.h"
 #include "HoverZombie.h"
@@ -137,6 +138,17 @@ void AHoverPilot::BeginPlay()
     ViewGun->SetRelativeLocation(FVector(35, 18, -20));
     ViewGun->SetRelativeRotation(FRotator(0, -90, 0));
     WorldGun->SetStaticMesh(Assets->Gun);
+    if (Assets->GunOptic)
+        for (auto *Gun : {ViewGun.Get(), WorldGun.Get()})
+        {
+            auto *Optic = NewObject<UStaticMeshComponent>(this);
+            Optic->SetupAttachment(Gun);
+            Optic->SetStaticMesh(Assets->GunOptic);
+            Optic->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+            Optic->SetOnlyOwnerSee(Gun == ViewGun);
+            Optic->CastShadow = Gun != ViewGun;
+            Optic->RegisterComponent();
+        }
     WorldGun->SetRelativeLocation(FVector(4, 2, 0));
     WorldGun->SetRelativeRotation(FRotator(0, 90, -90));
     BoardActor = GetWorld()->SpawnActor<AActor>();
@@ -186,6 +198,14 @@ void AHoverPilot::BeginPlay()
         }
     }
     GetMesh()->SetAnimInstanceClass(UHoverAnimInstance::StaticClass());
+    if (auto *BodyPhysics = LoadClass<UAnimInstance>(
+            nullptr, TEXT("/Game/HoverPrototype/Appearance/ABP_Vexa_BodyPhysics.ABP_Vexa_BodyPhysics_C")))
+        GetMesh()->SetOverridePostProcessAnimBP(BodyPhysics);
+    if (bCLSLocomotion)
+    {
+        LocomotionBridge = NewObject<UHoverLocomotionBridge>(this, TEXT("CLS_Bridge"));
+        LocomotionBridge->RegisterComponent();
+    }
     PlayPose(Assets->Stand, true);
     SetView();
     if (APlayerController *PC = Cast<APlayerController>(GetController()))
@@ -292,6 +312,7 @@ void AHoverPilot::HoverMount()
         GetMesh()->SetRelativeLocation(FVector(0, 0, -110));
         bSteppingOn = true;
         bMounted = true;
+        FlightPitch = FlightPitchVelocity = HopTilt = 0;
         Movement->SetMovementMode(MOVE_Flying);
         Movement->StopMovementImmediately();
         TargetAltitude = GetActorLocation().Z;
@@ -337,17 +358,18 @@ void AHoverPilot::HoverView()
 
 void AHoverPilot::SetView()
 {
+    const bool FirstPerson = !bReview || bAiming;
     TInlineComponentArray<UCameraComponent *> Cameras(this);
     for (auto *C : Cameras)
         C->SetActive(false);
-    FirstPersonCamera->SetActive(!bReview);
-    ReviewCamera->SetActive(bReview);
-    ViewGun->SetVisibility(!bReview);
-    WorldGun->SetVisibility(bReview && (bAiming || GunRaisedTime > 0));
+    FirstPersonCamera->SetActive(FirstPerson);
+    ReviewCamera->SetActive(!FirstPerson);
+    ViewGun->SetVisibility(FirstPerson, true);
+    WorldGun->SetVisibility(!FirstPerson && GunRaisedTime > 0, true);
     // The full-body riding pose crosses the eye camera during pitch and recoil.
     // Keep it for the external view; the FPS camera renders its own rifle.
     for (USkeletalMeshComponent *Part : Parts)
-        Part->SetOwnerNoSee(!bReview);
+        Part->SetOwnerNoSee(FirstPerson);
 }
 
 void AHoverPilot::HoverReset()
@@ -399,8 +421,11 @@ void AHoverPilot::UpdateInput(float DT)
     SideInput = FMath::Clamp(Stick(PC->GetInputAnalogKeyState(EKeys::Gamepad_LeftX)) + float(Down(EKeys::D)) -
                                  float(Down(EKeys::A)),
                              -1.f, 1.f);
-    BankInput = float(Down(EKeys::Gamepad_RightShoulder) || Down(EKeys::E)) -
-                float(Down(EKeys::Gamepad_LeftShoulder) || Down(EKeys::Q));
+    PitchInput = ForwardInput;
+    BankInput = float(Down(EKeys::Gamepad_LeftShoulder) || Down(EKeys::Q));
+    if (bMounted)
+        ForwardInput =
+            FMath::Clamp(PC->GetInputAnalogKeyState(EKeys::Gamepad_RightTriggerAxis) + float(Down(EKeys::E)), 0.f, 1.f);
     TurnInput = Stick(PC->GetInputAnalogKeyState(EKeys::Gamepad_RightX));
     float MouseX = 0, MouseY = 0;
     PC->GetInputMouseDelta(MouseX, MouseY);
@@ -414,6 +439,8 @@ void AHoverPilot::UpdateInput(float DT)
     Look.Roll = 0;
     PC->SetControlRotation(Look);
     bBoostHeld = Down(EKeys::Gamepad_LeftThumbstick) || Down(EKeys::LeftShift);
+    if (!bMounted)
+        GetCharacterMovement()->MaxWalkSpeed = Down(EKeys::Gamepad_LeftThumbstick) ? 900.f : 500.f;
     const bool Hold = Down(EKeys::Gamepad_FaceButton_Left) || Down(EKeys::X);
     if (Hold && !bHoldConsumed)
     {
@@ -432,11 +459,12 @@ void AHoverPilot::UpdateInput(float DT)
     const bool JumpPressed = Down(EKeys::Gamepad_FaceButton_Bottom) || Down(EKeys::SpaceBar);
     if (JumpPressed && !bWasJump && TransitionTime <= 0)
     {
-        if (bMounted)
+        if (bMounted && HopTime <= 0)
         {
-            GetCharacterMovement()->Velocity.Z = 440;
-            HopTime = .5f;
+            HopStartZ = GetActorLocation().Z;
+            HopTime = 1.10f;
             bHeightHolding = false;
+            ImpactPulse(BoardActor->GetActorLocation() - FVector(0, 0, 8), FVector::UpVector, .28f, .15f, .40f);
         }
         else if (!bParkourMovement)
             Jump();
@@ -474,8 +502,9 @@ void AHoverPilot::UpdateInput(float DT)
         }
         SetView();
     }
-    if ((PC->GetInputAnalogKeyState(EKeys::Gamepad_RightTriggerAxis) > .2f || Down(EKeys::LeftMouseButton)) &&
-        FireCooldown <= 0 && TransitionTime <= 0)
+    const bool FirePressed = bMounted ? Down(EKeys::Gamepad_RightShoulder)
+                                      : PC->GetInputAnalogKeyState(EKeys::Gamepad_RightTriggerAxis) > .2f;
+    if ((FirePressed || Down(EKeys::LeftMouseButton)) && FireCooldown <= 0 && TransitionTime <= 0)
         FireShot();
 }
 
@@ -484,8 +513,8 @@ void AHoverPilot::UpdateFlight(float DT)
     UCharacterMovementComponent *Move = GetCharacterMovement();
     if (!bBoostHeld && BoostCharge >= .2f)
         bBoostExhausted = false;
-    bBoost = bMounted && TransitionTime <= 0 && bBoostHeld && !bBoostExhausted && BoostCharge > 0 &&
-             (FMath::Abs(ForwardInput) > .05f || FMath::Abs(SideInput) > .05f);
+    bBoost =
+        bMounted && TransitionTime <= 0 && bBoostHeld && !bBoostExhausted && BoostCharge > 0 && ForwardInput > .05f;
     if (bBoost)
     {
         BoostCharge = FMath::Max(0.f, BoostCharge - DT / 4.f);
@@ -514,20 +543,19 @@ void AHoverPilot::UpdateFlight(float DT)
         const float TargetYaw = bAiming || GunRaisedTime > 0 || !bReview ? Facing.Yaw
                                 : Travel.Size2D() > 12.f                 ? Travel.Rotation().Yaw
                                                                          : BodyYaw;
-        const float Step = FMath::Clamp(FMath::FindDeltaAngleDegrees(BodyYaw, TargetYaw), -540.f * DT, 540.f * DT);
+        const float TurnRate = LocomotionBridge && LocomotionBridge->bEnabled ? 180.f : 540.f;
+        const float Step =
+            FMath::Clamp(FMath::FindDeltaAngleDegrees(BodyYaw, TargetYaw), -TurnRate * DT, TurnRate * DT);
         GroundYawRate = DT > 0 ? Step / DT : 0;
         BodyYaw = FRotator::NormalizeAxis(BodyYaw + Step);
         return;
     }
     const float ForwardSpeed = FVector::DotProduct(Move->Velocity, GetActorForwardVector());
     const float BankYaw = HoverMotion::BankYawRate(BoardBank, ForwardSpeed);
-    if (Controller)
-    {
-        FRotator Heading = GetControlRotation();
-        Heading.Yaw += BankYaw * DT;
-        Controller->SetControlRotation(Heading);
-    }
-    SetActorRotation(FRotator(0, GetControlRotation().Yaw, 0));
+    // Flight heading is independent of the head/weapon camera. Banking bends
+    // the velocity; the left stick supplies low-speed steering authority too.
+    const float SteeringYaw = SideInput * (30.f + 15.f * BankInput);
+    SetActorRotation(FRotator(0, GetActorRotation().Yaw + (SteeringYaw + BankYaw) * DT, 0));
     GroundYawRate = 0;
     Move->SetMovementMode(MOVE_Flying);
     if (bSteppingOn)
@@ -550,21 +578,26 @@ void AHoverPilot::UpdateFlight(float DT)
         return;
     }
     const float Speed = bBoost ? 5600.f : 1800.f;
-    FVector Direction = GetActorForwardVector() * ForwardInput + GetActorRightVector() * SideInput;
+    FVector Direction = GetActorForwardVector() * ForwardInput;
     Direction = Direction.GetClampedToMaxSize(1.f);
     const FVector PreviousVelocity = Move->Velocity;
     FVector Desired = HoverMotion::HorizontalVelocity(PreviousVelocity, Direction, Speed, DT, bBoost);
     Desired = HoverMotion::ApplyBank(Desired, BoardBank * (ForwardSpeed < 0 ? -1.f : 1.f), DT);
-    const float Pitch = FRotator::NormalizeAxis(GetControlRotation().Pitch);
+    HoverMotion::Spring(FlightPitch, FlightPitchVelocity, PitchInput * 35.f, DT, 7.f);
+    const float Pitch = FlightPitch;
     const float AlongSpeed = FVector::DotProduct(Desired, GetActorForwardVector());
-    const float VerticalCommand =
-        FMath::Abs(Pitch) > 5.f ? FMath::Sin(FMath::DegreesToRadians(Pitch)) * AlongSpeed : 0.f;
+    const float VerticalCommand = FMath::Abs(PitchInput) > .05f ? FMath::Sin(FMath::DegreesToRadians(Pitch)) *
+                                                                      FMath::Max(800.f, FMath::Abs(AlongSpeed))
+                                                                : 0.f;
+    HopTilt = 0;
     if (HopTime > 0)
     {
-        HopTime -= DT;
-        Desired.Z = FMath::Max(0.f, PreviousVelocity.Z - 500.f * DT);
-        TargetAltitude = GetActorLocation().Z;
-        bHeightHolding = false;
+        HopTime = FMath::Max(0.f, HopTime - DT);
+        const float T = 1.10f - HopTime;
+        Desired.Z = (HopStartZ + HoverMotion::OllieHeight(T) - GetActorLocation().Z) / FMath::Max(DT, .001f);
+        HopTilt = T < .4f ? 9.f * FMath::Sin(PI * T / .4f) : -3.f * FMath::Sin(PI * (T - .4f) / .7f);
+        TargetAltitude = HopStartZ + 166.f;
+        bHeightHolding = HopTime <= 0;
     }
     else if (FMath::Abs(VerticalCommand) > 1)
     {
@@ -600,9 +633,9 @@ void AHoverPilot::UpdateFlight(float DT)
     const float MomentumPitchWeight = 1.f - FMath::Clamp(FMath::Abs(Pitch) / 20.f, 0.f, 1.f);
     HoverMotion::Spring(
         BoardPitch, PitchVelocity,
-        FMath::Clamp(Pitch * .8f - (Travel * 6.f + ForwardForce * 8.f) * MomentumPitchWeight, -30.f, 30.f), DT);
-    HoverMotion::Spring(BoardBank, BankVelocity,
-                        FMath::Clamp(BankInput * 28.f + SideInput * 10.f + TurnInput * 5.f, -35.f, 35.f), DT);
+        FMath::Clamp(Pitch * .8f + HopTilt - (Travel * 6.f + ForwardForce * 8.f) * MomentumPitchWeight, -35.f, 35.f),
+        DT);
+    HoverMotion::Spring(BoardBank, BankVelocity, SideInput * (18.f + BankInput * 17.f), DT);
     HoverMotion::Spring(WingSweep, WingVelocity,
                         FMath::Clamp(Travel * 10.f + ForwardForce * 5.f + Pitch * .12f, -20.f, 20.f), DT);
     HoverMotion::Spring(RiderLean, LeanVelocity,
@@ -665,8 +698,11 @@ void AHoverPilot::UpdateAppearance(float DT)
                                                        bAiming ? 65.f : (bBoost && bMounted ? 105.f : 95.f), DT, 10.f));
     FirstPersonCamera->SetRelativeLocation(
         FMath::VInterpTo(FirstPersonCamera->GetRelativeLocation(), FVector(0, 0, bMounted ? 33.f : 65.f), DT, 8.f));
-    ViewGun->SetRelativeLocation(FMath::VInterpTo(ViewGun->GetRelativeLocation(),
-                                                  bAiming ? FVector(55, 2, -22) : FVector(35, 18, -20), DT, 12.f));
+    const FQuat GunBasis = FQuat::FindBetweenNormals(Assets->GunForward.GetSafeNormal(), FVector::ForwardVector);
+    const FVector SightAligned = FVector(20, 0, 0) - GunBasis.RotateVector(Assets->GunSight);
+    WeaponAimAlpha = FMath::FInterpTo(WeaponAimAlpha, bAiming ? 1.f : 0.f, DT, 12.f);
+    ViewGun->SetRelativeLocation(FMath::Lerp(FVector(35, 18, -20), SightAligned, WeaponAimAlpha));
+    ViewGun->SetRelativeRotation(GunBasis);
     const float LockTarget = bMounted && !bSteppingOn ? 1.f : 0.f;
     // Substep the pad spring without discarding elapsed time on slow frames.
     for (float Remaining = DT; Remaining > 0;)
@@ -733,7 +769,7 @@ void AHoverPilot::UpdateAppearance(float DT)
         Instance->RideBlend = Assets->RideBlend;
         Instance->bRiding = bMounted;
         const float Along = FVector::DotProduct(GetVelocity(), GetActorForwardVector());
-        const float PitchDemand = FRotator::NormalizeAxis(GetControlRotation().Pitch);
+        const float PitchDemand = FlightPitch;
         Instance->RideInput = FVector(FMath::Clamp((BoardBank + SideInput * 12.f + TurnInput * 12.f) / 28.f, -1.f, 1.f),
                                       FMath::Clamp(Along / 1800.f - PitchDemand / 50.f, -1.f, 1.f), 0);
         Instance->RifleAim = bMounted && Assets->RideGunPose ? Assets->RideGunPose : Assets->RifleAim;
@@ -758,7 +794,7 @@ void AHoverPilot::UpdateAppearance(float DT)
         Instance->LeftFoot = Feet[0];
         Instance->RightFoot = Feet[1];
     }
-    WorldGun->SetVisibility(bReview && (bAiming || GunRaisedTime > 0));
+    WorldGun->SetVisibility(bReview && !bAiming && GunRaisedTime > 0, true);
     UpdateGunTransform();
     const bool Powered = bMounted && TransitionTime <= 0 && !bSteppingOn;
     const float Thrust = FMath::Max(FMath::Abs(ForwardInput), FMath::Abs(SideInput));
@@ -786,10 +822,37 @@ void AHoverPilot::UpdateAppearance(float DT)
 
 void AHoverPilot::UpdateGunTransform()
 {
+    if (!Assets)
+        return;
+    const UCameraComponent *Camera = bReview && !bAiming ? ReviewCamera : FirstPersonCamera;
+    const FVector Eye = Camera->GetComponentLocation();
+    const FVector RayEnd = Eye + Camera->GetForwardVector() * 50000.f;
+    FCollisionQueryParams Params(SCENE_QUERY_STAT(HoverWeaponAlignment), true, this);
+    Params.AddIgnoredActor(BoardActor);
+    FHitResult Hit;
+    GetWorld()->LineTraceSingleByChannel(Hit, Eye, RayEnd, ECC_Visibility, Params);
+    const FVector Target = Hit.bBlockingHit ? Hit.ImpactPoint : RayEnd;
+    const FQuat Basis = FQuat::FindBetweenNormals(Assets->GunForward.GetSafeNormal(), FVector::ForwardVector);
     const FVector Hand = GetMesh()->GetSocketLocation(TEXT("hand_r"));
-    const FVector Aim = GetControlRotation().Vector();
-    WorldGun->SetWorldLocationAndRotation(Hand + Aim * 20.f + GetActorUpVector() * 3.f,
-                                          FRotationMatrix::MakeFromYZ(Aim, GetActorUpVector()).Rotator());
+    FQuat WorldRotation = GetControlRotation().Quaternion() * Basis;
+    for (int32 I = 0; I < 3; ++I)
+    {
+        const FVector Origin = Hand - WorldRotation.RotateVector(Assets->GunGrip);
+        const FVector Muzzle = Origin + WorldRotation.RotateVector(Assets->GunMuzzle);
+        WorldRotation = (Target - Muzzle).Rotation().Quaternion() * Basis;
+    }
+    WorldGun->SetWorldLocationAndRotation(Hand - WorldRotation.RotateVector(Assets->GunGrip), WorldRotation);
+    // Keep the sight centred while the barrel converges on the same aim point.
+    // The tracer then travels along that barrel axis with no steering in flight.
+    const FVector SightAnchor = ViewGun->GetComponentTransform().TransformPosition(Assets->GunSight);
+    FQuat ViewRotation = FirstPersonCamera->GetComponentQuat() * Basis;
+    for (int32 I = 0; I < 3; ++I)
+    {
+        const FVector Origin = SightAnchor - ViewRotation.RotateVector(Assets->GunSight);
+        const FVector Muzzle = Origin + ViewRotation.RotateVector(Assets->GunMuzzle);
+        ViewRotation = (Target - Muzzle).Rotation().Quaternion() * Basis;
+    }
+    ViewGun->SetWorldLocationAndRotation(SightAnchor - ViewRotation.RotateVector(Assets->GunSight), ViewRotation);
 }
 
 void AHoverPilot::FireShot()
@@ -799,20 +862,18 @@ void AHoverPilot::FireShot()
     GunRaisedTime = 3.f;
     UpdateGunTransform();
     SetView();
-    const UCameraComponent *ActiveCamera = bReview ? ReviewCamera : FirstPersonCamera;
-    const FVector Eye = ActiveCamera->GetComponentLocation();
-    const FVector End = Eye + ActiveCamera->GetForwardVector() * 50000.f;
     FCollisionQueryParams Params(SCENE_QUERY_STAT(HoverShot), true, this);
     Params.AddIgnoredActor(BoardActor);
-    FHitResult AimHit;
-    GetWorld()->LineTraceSingleByChannel(AimHit, Eye, End, ECC_Visibility, Params);
-    const FVector Target = AimHit.bBlockingHit ? AimHit.ImpactPoint : End;
+    const UStaticMeshComponent *Gun = bReview && !bAiming ? WorldGun.Get() : ViewGun.Get();
     const FVector Muzzle = GetMuzzlePosition();
+    const FVector ShotDirection =
+        Gun->GetComponentTransform().TransformVectorNoScale(Assets->GunForward).GetSafeNormal();
+    const FVector Target = Muzzle + ShotDirection * 50000.f;
     if (auto *System = Cast<UNiagaraSystem>(Assets->MuzzleEffect))
     {
         auto *Flash = UNiagaraFunctionLibrary::SpawnSystemAttached(
-            System, bReview ? WorldGun : ViewGun, NAME_None, FVector(0, 46.f, 2.f),
-            FRotationMatrix::MakeFromZ(FVector::RightVector).Rotator(), EAttachLocation::KeepRelativeOffset, true);
+            System, bReview && !bAiming ? WorldGun : ViewGun, NAME_None, Assets->GunMuzzle,
+            FRotationMatrix::MakeFromZ(Assets->GunForward).Rotator(), EAttachLocation::KeepRelativeOffset, true);
         if (Flash)
         {
             TWeakObjectPtr<UNiagaraComponent> WeakFlash(Flash);
@@ -823,17 +884,20 @@ void AHoverPilot::FireShot()
                     if (WeakFlash.IsValid())
                         WeakFlash->DestroyComponent();
                 },
-                .045f, false);
+                .07f, false);
         }
     }
     FHitResult Hit;
-    const FVector ShotDirection = (Target - Muzzle).GetSafeNormal();
     GetWorld()->LineTraceSingleByChannel(Hit, Muzzle, Target + ShotDirection * 3.f, ECC_Visibility, Params);
     auto *Tracer = GetWorld()->SpawnActor<AHoverShotVisual>();
     if (Tracer)
         Tracer->Launch(Muzzle, Hit.bBlockingHit ? Hit.ImpactPoint : Target);
     if (auto *Zombie = Cast<AHoverZombie>(Hit.GetActor()))
         UGameplayStatics::ApplyPointDamage(Zombie, 35.f, ShotDirection, Hit, GetController(), this, nullptr);
+    else if (Hit.bBlockingHit && Assets->SurfaceImpact)
+        ImpactPulse(Hit.ImpactPoint + Hit.ImpactNormal * 2, Hit.ImpactNormal, .25f, 0, .65f, Assets->SurfaceImpact);
+    if (Assets->ShotSound)
+        UGameplayStatics::PlaySoundAtLocation(this, Assets->ShotSound, Muzzle, .60f, FMath::FRandRange(.96f, 1.04f));
     if (bMounted && bAiming && Assets->Fire)
     {
         CurrentAnimation = nullptr;
@@ -844,8 +908,8 @@ void AHoverPilot::FireShot()
 
 FVector AHoverPilot::GetMuzzlePosition() const
 {
-    const UStaticMeshComponent *Gun = bReview ? WorldGun.Get() : ViewGun.Get();
-    return Gun->GetComponentTransform().TransformPosition(FVector(0, 46.f, 2.f));
+    const UStaticMeshComponent *Gun = bReview && !bAiming ? WorldGun.Get() : ViewGun.Get();
+    return Gun->GetComponentTransform().TransformPosition(Assets ? Assets->GunMuzzle : FVector(0, 46.f, 2.f));
 }
 
 void AHoverPilot::ImpactPulse(const FVector &Location, const FVector &Normal, float Scale, float Rumble, float Duration,
@@ -878,6 +942,26 @@ void AHoverPilot::ImpactPulse(const FVector &Location, const FVector &Normal, fl
             Niagara->SetVariableFloat(TEXT("User.Scale Overall"), Scale);
             Niagara->SetVariableFloat(TEXT("User.Lifetime Overall"), Duration);
             Niagara->SetVariableFloat(TEXT("User.Emissiveness Overall"), Rumble < .1f ? .25f : .6f);
+        }
+        if (Niagara && Template == Assets->SurfaceImpact)
+        {
+            Niagara->SetVariableVec3(TEXT("User.DustOffset"), FVector::ZeroVector);
+            Niagara->SetVariableVec3(TEXT("User.RockOffset"), FVector::ZeroVector);
+            Niagara->SetVariableFloat(TEXT("User.DustSize"), 22.f);
+            Niagara->SetVariableFloat(TEXT("User.DustSpawningRate"), 140.f);
+            Niagara->SetVariableFloat(TEXT("User.RockImpulse"), 160.f);
+            Niagara->SetVariableInt(TEXT("User.RockSpawningRate"), 8);
+            Niagara->SetVariableFloat(TEXT("User.RockSpawnRate"), 45.f);
+            Niagara->SetVariableLinearColor(TEXT("User.EffectColor"), FLinearColor(.25f, .20f, .15f, 1));
+            TWeakObjectPtr<UNiagaraComponent> WeakDust(Niagara);
+            FTimerHandle StopEmission;
+            GetWorld()->GetTimerManager().SetTimer(
+                StopEmission,
+                [WeakDust]() {
+                    if (WeakDust.IsValid())
+                        WeakDust->Deactivate();
+                },
+                .08f, false);
         }
         if (Niagara)
             Niagara->Activate(true);
@@ -944,6 +1028,13 @@ void AHoverPilot::Tick(float DT)
     FireCooldown = FMath::Max(0.f, FireCooldown - DT);
     StatusTime = FMath::Max(0.f, StatusTime - DT);
     UpdateInput(DT);
+    if (LocomotionBridge && LocomotionBridge->bEnabled && !bMounted && GetCharacterMovement()->IsMovingOnGround() &&
+        GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight() >= 70)
+    {
+        const bool InputHeld = FMath::Abs(ForwardInput) + FMath::Abs(SideInput) > .05f;
+        GetCharacterMovement()->GroundFriction = InputHeld ? 2.f : 8.f;
+        GetCharacterMovement()->BrakingDecelerationWalking = InputHeld ? 350.f : 2048.f;
+    }
     UpdateFlight(DT);
     GetMesh()->SetRelativeLocation(
         FVector(0, 0, bMounted ? -97.f : -GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight()));
@@ -965,8 +1056,8 @@ FString AHoverPilot::GetPrompt() const
         if (const auto *PC = Cast<AHoverTestController>(GetController()); PC && PC->IsNearBike())
             return TEXT("Hold X to ride the hoverbike");
     if (bMounted)
-        return CanDismount() ? TEXT("Hold X: get off   |   L1 / Q: bank left   R1 / E: bank right")
-                             : TEXT("Slow down and descend near clear ground to get off   |   L1 / R1: bank");
+        return CanDismount() ? TEXT("Hold X: get off   |   Hold L1 / Q: stronger bank while steering")
+                             : TEXT("Descend and slow down to get off   |   Hold L1 / Q: stronger bank");
     return HasBoardNearby() ? TEXT("Hold X to step on and lock the pads")
                             : TEXT("Walk to the glider   |   R: reset test");
 }
@@ -994,18 +1085,29 @@ void AHoverHUD::DrawHUD()
                  FLinearColor::White, 30, Canvas->ClipY - 50);
         return;
     }
+    if (const auto *Bridge = Pilot->FindComponentByClass<UHoverLocomotionBridge>(); Bridge && Pilot->IsOnFoot())
+        DrawText(Bridge->bEnabled ? TEXT("CLS motion + Parkour | D-pad Right / F7: compare")
+                                  : TEXT("Original motion + Parkour | D-pad Right / F7: compare"),
+                 FLinearColor(.7f, .85f, 1.f), 24, 60);
     const float X = Canvas->ClipX * .5f, Y = Canvas->ClipY * .5f;
-    DrawLine(X - 5, Y, X + 5, Y, FLinearColor::White);
-    DrawLine(X, Y - 5, X, Y + 5, FLinearColor::White);
+    if (Pilot->IsAiming())
+        DrawRect(FLinearColor(1.f, .08f, .025f), X - 1.5f, Y - 1.5f, 3.f, 3.f);
+    else
+    {
+        DrawLine(X - 5, Y, X + 5, Y, FLinearColor::White);
+        DrawLine(X, Y - 5, X, Y + 5, FLinearColor::White);
+    }
     DrawRect(FLinearColor(0, 0, 0, .65f), 18, Canvas->ClipY - 108, FMath::Min(Canvas->ClipX - 36, 850.f), 90);
     DrawText(Pilot->GetPrompt(), FLinearColor::White, 32, Canvas->ClipY - 96, nullptr, 1.1f);
-    DrawText(TEXT("LS / WASD move   RS / mouse aim   L2 / RMB aim gun   R2 / LMB fire"), FLinearColor(.8f, .85f, .9f),
-             32, Canvas->ClipY - 69);
+    DrawText(Pilot->IsMounted() ? TEXT("R2 / E thrust   LS / WASD steer + pitch   RS look   L2 aim   R1 / LMB fire")
+                                : TEXT("LS / WASD move   RS / mouse aim   L2 / RMB aim gun   R2 / LMB fire"),
+             FLinearColor(.8f, .85f, .9f), 32, Canvas->ClipY - 69);
     const FString MovementHelp =
         Pilot->IsMounted()
             ? FString::Printf(TEXT("A / Space hop   L3 / Shift boost   B / Ctrl coast   F5 view   %.0f m/s"),
                               Pilot->GetSpeedMps())
-            : FString::Printf(TEXT("A / Space jump   F5 / Menu view   R reset   %.0f m/s"), Pilot->GetSpeedMps());
+            : FString::Printf(TEXT("A / Space jump   Hold L3 run   B / Shift slide   F5 / Menu view   %.0f m/s"),
+                              Pilot->GetSpeedMps());
     DrawText(MovementHelp, FLinearColor(.8f, .85f, .9f), 32, Canvas->ClipY - 44);
     if (Pilot->HoldProgress() > 0 && Pilot->HoldProgress() < 1)
         DrawRect(FLinearColor(.9f, .1f, .08f), X - 70, Y + 35, 140 * Pilot->HoldProgress(), 5);
@@ -1057,4 +1159,16 @@ void AHoverGameMode::BeginPlay()
                Defaults->TestExposureBias, Defaults->TestBloomIntensity);
     }
     GetWorld()->SpawnActor<AHoverZombieRange>();
+}
+
+void AHoverGameMode::InitGame(const FString &MapName, const FString &Options, FString &ErrorMessage)
+{
+    Super::InitGame(MapName, Options, ErrorMessage);
+    // Resolve after module startup, avoiding a native CDO's early asset-load fallback.
+    if (auto *Parkour =
+            LoadClass<APawn>(nullptr, TEXT("/Game/HoverPrototype/Parkour/BP_AFS_ParkourPilot.BP_AFS_ParkourPilot_C")))
+        DefaultPawnClass = Parkour;
+    if (auto *Hybrid =
+            LoadClass<APawn>(nullptr, TEXT("/Game/HoverPrototype/Hybrid/BP_Vexa_CLS_Parkour.BP_Vexa_CLS_Parkour_C")))
+        DefaultPawnClass = Hybrid;
 }

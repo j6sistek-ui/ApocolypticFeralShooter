@@ -3,6 +3,17 @@
 
 namespace HoverMotion
 {
+// Pop above the eventual hover height, then settle gently. Heights are centimetres.
+inline float OllieHeight(float Time)
+{
+    if (Time <= .40f)
+    {
+        const float T = FMath::Clamp(Time / .40f, 0.f, 1.f);
+        return FMath::CubicInterp(0.f, 320.f, 220.f, 0.f, T);
+    }
+    const float T = FMath::Clamp((Time - .40f) / .70f, 0.f, 1.f);
+    return FMath::CubicInterp(220.f, 0.f, 166.f, 0.f, T);
+}
 // A bank bends the existing velocity, rather than replacing it with a new heading.
 // Positive UE roll is right bank. At low speed the turn authority fades away.
 inline float BankYawRate(float BankDegrees, float ForwardSpeed)
