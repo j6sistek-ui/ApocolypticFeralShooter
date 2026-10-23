@@ -5,6 +5,14 @@
 #include "InputKeyEventArgs.h"
 #include "UnrealClient.h"
 #if WITH_EDITOR
+#include "NiagaraSystem.h"
+#include "NiagaraEmitter.h"
+#include "NiagaraEmitterHandle.h"
+#include "NiagaraScript.h"
+#include "Engine/StaticMeshActor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/World.h"
 #include "Editor.h"
 #include "PlayInEditorDataTypes.h"
 #include "Settings/LevelEditorPlaySettings.h"
@@ -93,6 +101,77 @@ void UHoverAuthoring::TestKey(APlayerController *Controller, FName Key, float Va
                                                 bAnalog ? IE_Axis : (Value > 0 ? IE_Pressed : IE_Released), Value,
                                                 false, FPlatformTime::Cycles64()));
 #endif
+}
+
+AActor *UHoverAuthoring::SpawnTestPlatform(FVector Location)
+{
+#if WITH_EDITOR
+    if (UWorld *World = GetPlaytestWorld())
+    {
+        AStaticMeshActor *Platform = World->SpawnActor<AStaticMeshActor>(Location, FRotator::ZeroRotator);
+        Platform->GetStaticMeshComponent()->SetMobility(EComponentMobility::Movable);
+        Platform->GetStaticMeshComponent()->SetStaticMesh(
+            LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube")));
+        Platform->SetActorScale3D(FVector(14, 14, 1));
+        Platform->GetStaticMeshComponent()->SetCollisionProfileName(TEXT("BlockAll"));
+        return Platform;
+    }
+#endif
+    return nullptr;
+}
+
+FString UHoverAuthoring::ConfigurePrototypeEffect(UNiagaraSystem *Effect, float SpriteScale, bool LocalSpace)
+{
+    FString Report;
+#if WITH_EDITOR
+    // Restrict authoring to our duplicates; vendor systems must remain unchanged.
+    if (!Effect || !Effect->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/Effects/")))
+        return TEXT("Refused: only local prototype effect copies may be edited");
+    Effect->Modify();
+    TArray<FNiagaraVariable> Exposed;
+    Effect->GetExposedParameters().GetParameters(Exposed);
+    for (const auto &Variable : Exposed)
+        Report += TEXT("USER ") + Variable.GetName().ToString() + TEXT(" ") + Variable.GetType().GetName() + TEXT("\n");
+    for (auto &Handle : Effect->GetEmitterHandles())
+    {
+        auto *Data = Handle.GetEmitterData();
+        if (!Data)
+            continue;
+        Data->bLocalSpace = LocalSpace;
+        TArray<UNiagaraScript *> Scripts;
+        Data->GetScripts(Scripts);
+        for (auto *Script : Scripts)
+        {
+            auto &Store = Script->RapidIterationParameters;
+            TArray<FNiagaraVariable> Variables;
+            Store.GetParameters(Variables);
+            for (const auto &Variable : Variables)
+            {
+                const FString Name = Variable.GetName().ToString();
+                if (!Name.Contains(TEXT("InitializeParticle.")) || !Name.Contains(TEXT("Sprite Size")))
+                    continue;
+                Script->Modify();
+                if (Variable.GetType() == FNiagaraTypeDefinition::GetFloatDef())
+                {
+                    const float Old = Store.GetParameterValue<float>(Variable);
+                    Store.SetParameterValue(Old * SpriteScale, Variable);
+                    Report += FString::Printf(TEXT("%s %.3f -> %.3f\n"), *Name, Old, Old * SpriteScale);
+                }
+                else if (Variable.GetType() == FNiagaraTypeDefinition::GetVec2Def())
+                {
+                    const FVector2f Old = Store.GetParameterValue<FVector2f>(Variable);
+                    Store.SetParameterValue(Old * SpriteScale, Variable);
+                    Report += FString::Printf(TEXT("%s %.3f,%.3f -> %.3f,%.3f\n"), *Name, Old.X, Old.Y,
+                                              Old.X * SpriteScale, Old.Y * SpriteScale);
+                }
+            }
+        }
+    }
+    Effect->RequestCompile(true);
+    Effect->WaitForCompilationComplete();
+    Effect->MarkPackageDirty();
+#endif
+    return Report;
 }
 
 void UHoverAuthoring::CapturePlaytest(const FString &Filename)

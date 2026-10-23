@@ -47,6 +47,8 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
         Pelvis.TranslationMode = BMM_Additive;
         Pelvis.TranslationSpace = BCS_ComponentSpace;
         Pelvis.Translation = FVector(0, 0, -32.f);
+        Pelvis.RotationMode = BMM_Additive;
+        Pelvis.RotationSpace = BCS_ComponentSpace;
         Left.ComponentPose.SetLinkNode(&Pelvis);
         Right.ComponentPose.SetLinkNode(&Left);
         Root.ComponentPose.SetLinkNode(&Right);
@@ -86,6 +88,7 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
             FMath::FInterpTo(UpperBody.BlendWeights[0], State->bAiming && State->RifleAim ? 1.f : 0.f, DT, 10.f);
         Left.Alpha = Right.Alpha = State->FootLock;
         Pelvis.Alpha = State->FootLock;
+        Pelvis.Rotation = FQuat(FVector::ForwardVector, FMath::DegreesToRadians(-State->RiderLean)).Rotator();
         Left.EffectorLocation = State->LeftFoot;
         Right.EffectorLocation = State->RightFoot;
     }

@@ -3,13 +3,17 @@ AFS FREE FLIGHT TEST
 VEXA / GLIDER
 Left stick / WASD: forward, reverse, left/right strafe.
 Right stick / mouse: turn and look. Right stick forward pitches down; back pitches up.
-Pitch plus forward/reverse thrust climbs/dives. Neutral vertical commands hold altitude.
-R1 / E: ascend. L1 / Q: descend. Release to hold height when no pitch/thrust climb is active.
-Hold X (0.65 seconds): mount nearby glider/bike/truck, or dismount glider.
+Pitch plus forward/reverse travel climbs/dives. Level the pitch to settle and hold altitude.
+L1 / Q: bank left. R1 / E: bank right. Release smoothly levels the board.
+Hold X (0.65 seconds): mount nearby glider/bike/truck, or safely dismount glider.
+Glider exit needs clear walkable ground within 1.5 m of the pads and speed below 3 m/s.
+The unoccupied glider has gravity and collision; wait for it to settle before mounting.
 A / Space: jump on foot; hop rider and glider together when mounted.
-L3 held / Shift: boost. B / Ctrl: briefly coast in the current movement direction.
+L3 held / Shift: boost; the meter drains while boosting and recharges after a delay.
+Release thrust to coast; opposite thrust brakes before reversing. B / Ctrl: brief coast assist.
 L2 held / right mouse: gun aim and in-flight aiming animation.
-R2 held / left mouse: fire rifle. Three body hits or one headshot kills a zombie.
+R2 held / left mouse: fire rifle, including unscoped third-person fire with a visible gun.
+Three body hits or one headshot kills a zombie.
 Zombies respawn to maintain 20; blood impacts and ragdoll deaths show hits/kills.
 Ammo is unlimited. Vexa is invulnerable, and zombies have no attack damage.
 F5 / Menu: toggle FPS and external review camera.
@@ -30,4 +34,6 @@ The vendor's controller X throttle and A brake bindings remain intact.
 
 Deferred: ammo/reloading, target locking, R3 barrel roll, multiplayer,
 production tuning, and integration into the main game.
+Walking L3 sprint and B crouch/hold-prone/stand are separate queued work.
+The earlier B-dive request still needs its intended movement mode clarified.
 The FPS view uses a separate rifle; the full Vexa body/aim pose is shown in F5 review view.

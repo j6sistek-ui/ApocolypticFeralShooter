@@ -5,11 +5,19 @@ PostApo test level with Vexa, black/red personal glider, ScifiHoverbike and Doom
 pickup truck. Three separate rides; each supports entry/exit. Original vendor
 vehicle Blueprints and their supplied mappings are retained.
 
-Glider: spring pad slides, stepping mount, foot IK, rigid wing movement, FPS
-thrust/strafe/look, ascend/descend, neutral altitude hold, hop, boost and coast.
+Glider: spring pad slides, stepping mount, foot IK, signed/smoothed wing and rider
+reactions, FPS thrust/strafe/look, right-stick pitch climb/dive, L1/R1 banking,
+neutral altitude hold, hop, stronger boost with meter, coasting and braking.
+Released glider uses a Chaos rigid body with collision/gravity. Ridden movement
+uses a custom velocity controller with swept CharacterMovement collision; this
+is not a fully force-driven hover simulation or a Chaos wheeled vehicle.
 Rifle: L2 aim uses a two-handed upper-body pose over the in-flight pose; R2 fires
 camera-to-target then muzzle-to-target traces. FPS renders its own rifle so the
 full-body riding/recoil pose cannot obstruct the camera. F5 shows full Vexa.
+Grounded aiming preserves the lower-body pose. Unscoped third-person fire raises
+and shows the rifle briefly. Orange debug traces have been removed.
+Local Niagara copies provide thrust, compact muzzle flash and landing pulses.
+Third-person framing keeps the glider above the controls display.
 
 ZombieMale_AAB uses local copies of Zombie Animation Pack walking/idle clips.
 20 zombies wander or approach with simple obstacle avoidance (no pathfinding).
@@ -29,6 +37,32 @@ kills another; four blood impacts emitted; count restored to 20. Applying 9999
 damage to Vexa returns zero. Visible blood and collapsed zombie reviewed.
 Final integrated controller-input/vehicle results are in the delivery receipts.
 
+PHYSICS PASS - OCTOBER 22 EVENING (UTC OCTOBER 23)
+Native rebuild and authored C++ formatting pass. A fresh rendered 71-second
+D3D12 Play test passes all 18 recorded behavior checks in
+Saved/HoverPrototype/PhysicsReview/assessment.json. Injected controller inputs
+exercise mounting, shoulder banks and right-stick climb/dive. Test AI is cleared
+after gun checks to avoid random zombies correctly blocking the mount sweep;
+the map and normal zombie population are not saved or altered.
+Measured: 15.90 m/s retained shortly after releasing 18 m/s thrust; boost 56 m/s;
+reverse thrust brakes before reversing; wings react in opposite directions;
+bank reaches about +/-28 degrees and smoothly levels. Boost drains/recharges.
+High-air exit is blocked; clear low/slow exit succeeds; released board drops
+47.38 cm, settles, and can be remounted. Mounted touchdown pulse is logged.
+Maximum sampled ankle/pad target error is 0.67 cm with 8.5 cm ankle offset.
+Grounded aiming/firing changes sampled foot height by only 0.044 cm; hipfire
+shows the gun. Muzzle/boost/pose screenshots have been visually inspected.
+Landing calls include subtle controller feedback; actual rumble is unverified.
+These are synthetic input tests and visual samples, not physical play acceptance.
+
+REPRODUCING THE CHECKS
+Build with Scripts/Build.ps1. Run the native automation test
+AFS.HoverMotion.MomentumAndDirection separately from Play (automation ends PIE).
+Run Scripts/VerifyGliderPhysics.py through Unreal -ExecutePythonScript with
+-RenderOffscreen; it changes only an unsaved Play world. After it exits, run
+Scripts/AssessGliderPhysics.py Saved/HoverPrototype/PhysicsReview/runtime.json
+with Python. Assessment reports numeric checks; inspect PNGs for visible quality.
+
 PRESERVATION
 192 Vexa dependency source files retain their SHA256 hashes. 222 truck files
 match both original source and copied destination. Original black/red GLB is
@@ -42,7 +76,12 @@ This is a local editor test, not a packaged release or SpaceSurvival integration
 Physical controller feel, long sessions and representative performance remain
 unverified. FPS hand placement is not authored; full Vexa is in the external view.
 R3 barrel rolls, target lock, ammo/reloading and multiplayer are deferred.
-High-altitude dismount falls to the ground; R resets Vexa and the glider.
+High-altitude dismount is blocked. Exit requires speed <=3 m/s, a clear standing
+capsule and walkable ground within 1.5 m of the pads. R resets Vexa and glider.
+Walking L3 sprint, B crouch/prone/stand, B dive, directional walking/turning clips,
+Vexa defaults/jiggle and broad lighting/material polish remain separate backlog.
+DLSS, DLAA, NVIDIA frame generation and DLSS 5 are not installed/enabled in AFS;
+no graphics plugin/config change was made during this physics pass.
 Zombie steering is local obstacle avoidance; complex paths may leave some stuck.
 Native engine headers produce deprecation warnings; installed MSVC is newer than
 the engine's preferred version. Supplied hoverbike pose assets report stale

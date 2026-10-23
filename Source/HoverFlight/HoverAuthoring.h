@@ -2,6 +2,7 @@
 #include "CoreMinimal.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "HoverAuthoring.generated.h"
+class UNiagaraSystem;
 
 UCLASS()
 class HOVERFLIGHT_API UHoverAuthoring : public UBlueprintFunctionLibrary
@@ -14,5 +15,8 @@ class HOVERFLIGHT_API UHoverAuthoring : public UBlueprintFunctionLibrary
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static UWorld *GetPlaytestWorld();
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static void TestKey(APlayerController *Controller, FName Key, float Value, bool bAnalog = false);
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static AActor *SpawnTestPlatform(FVector Location);
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
+    static FString ConfigurePrototypeEffect(UNiagaraSystem *Effect, float SpriteScale, bool LocalSpace);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static void CapturePlaytest(const FString &Filename);
 };

@@ -12,6 +12,10 @@ class UCameraComponent;
 class UPoseableMeshComponent;
 class USpringArmComponent;
 class UStaticMeshComponent;
+class UBoxComponent;
+class UNiagaraComponent;
+class UNiagaraSystem;
+class UFXSystemAsset;
 
 USTRUCT(BlueprintType)
 struct FHoverBodyPart
@@ -41,6 +45,9 @@ class HOVERFLIGHT_API UHoverPilotAssets : public UDataAsset
     UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> RifleAim;
     UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> Walk;
     UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> Stand;
+    UPROPERTY(EditAnywhere) TObjectPtr<UNiagaraSystem> BoosterEffect;
+    UPROPERTY(EditAnywhere) TObjectPtr<UFXSystemAsset> ShockwaveEffect;
+    UPROPERTY(EditAnywhere) TObjectPtr<UFXSystemAsset> MuzzleEffect;
 };
 
 UCLASS()
@@ -48,9 +55,10 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
 {
     GENERATED_BODY()
   public:
-    AHoverPilot();
+    AHoverPilot(const FObjectInitializer &ObjectInitializer);
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaSeconds) override;
+    virtual void Landed(const FHitResult &Hit) override;
     virtual void SetupPlayerInputComponent(UInputComponent *Input) override;
     UFUNCTION(Exec) void HoverMount();
     UFUNCTION(Exec) void HoverView();
@@ -68,11 +76,28 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     {
         return bAiming;
     }
-    float HoldProgress() const
+    UFUNCTION(BlueprintPure) float GetBoostCharge() const
+    {
+        return BoostCharge;
+    }
+    UFUNCTION(BlueprintPure) float GetBoardPitch() const
+    {
+        return BoardPitch;
+    }
+    UFUNCTION(BlueprintPure) float GetBoardBank() const
+    {
+        return BoardBank;
+    }
+    UFUNCTION(BlueprintPure) float GetWingSweep() const
+    {
+        return WingSweep;
+    }
+    UFUNCTION(BlueprintPure) bool CanDismount() const;
+    UFUNCTION(BlueprintPure) float HoldProgress() const
     {
         return HoldTime / .65f;
     }
-    FString GetPrompt() const;
+    UFUNCTION(BlueprintPure) FString GetPrompt() const;
     float GetSpeedMps() const
     {
         return GetVelocity().Size() / 100.f;
@@ -88,15 +113,24 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     UPROPERTY() TArray<TObjectPtr<USkeletalMeshComponent>> Parts;
     UPROPERTY() TObjectPtr<AActor> BoardActor;
     UPROPERTY() TObjectPtr<UPoseableMeshComponent> Board;
+    UPROPERTY() TObjectPtr<UBoxComponent> BoardBody;
+    UPROPERTY() TArray<TObjectPtr<UNiagaraComponent>> Boosters;
     UPROPERTY() TObjectPtr<UAnimSequence> CurrentAnimation;
     TMap<FName, FTransform> BoardRest;
     FVector StartLocation, ParkedLocation;
     FVector MountFrom, MountTo, MountFeet[2];
     FRotator StartRotation;
-    float ForwardInput = 0, SideInput = 0, UpInput = 0, TurnInput = 0;
+    float ForwardInput = 0, SideInput = 0, BankInput = 0, TurnInput = 0;
     float HoldTime = 0, TransitionTime = 0, HopTime = 0, SlideTime = 0;
-    float TargetAltitude = 0, FireCooldown = 0, AimExitTime = 0;
+    float TargetAltitude = 0, FireCooldown = 0, AimExitTime = 0, StatusTime = 0;
     float LockAlpha = 0, LockVelocity = 0, BoardPitch = 0, BoardBank = 0;
+    float PitchVelocity = 0, BankVelocity = 0, WingSweep = 0, WingVelocity = 0, RiderLean = 0, LeanVelocity = 0;
+    float BoostCharge = 1, BoostRechargeDelay = 0, GunRaisedTime = 0;
+    bool bBoostHeld = false, bBoostExhausted = false;
+    bool bGliderGrounded = false;
+    float PreviousFlightVerticalSpeed = 0;
+    float BoosterSize = 1.f, BoosterSpawnRate = 100.f;
+    float LastLandingPulse = -10.f;
     bool bSteppingOn = false;
     bool bMounted = false, bAiming = false, bReview = false, bBoost = false;
     bool bHoldConsumed = false, bWasJump = false, bWasView = false, bWasSlide = false;
@@ -110,6 +144,13 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     void FireShot();
     void SetView();
     bool HasBoardNearby() const;
+    bool FindDismountLocation(FVector &Location) const;
+    void UpdateGunTransform();
+    void ImpactPulse(const FVector &Location, const FVector &Normal, float Scale, float Rumble, float Duration,
+                     UFXSystemAsset *Template = nullptr);
+    UFUNCTION()
+    void BoardHit(UPrimitiveComponent *HitComponent, AActor *OtherActor, UPrimitiveComponent *OtherComponent,
+                  FVector NormalImpulse, const FHitResult &Hit);
 };
 
 UCLASS()

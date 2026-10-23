@@ -2,16 +2,24 @@
 #include "HoverTestController.h"
 #include "HoverAnimInstance.h"
 #include "HoverZombie.h"
+#include "HoverMotion.h"
+#include "HoverMovementComponent.h"
 #include "EngineUtils.h"
 
 #include "Animation/AnimSequence.h"
 #include "Animation/AnimSingleNodeInstance.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/BoxComponent.h"
 #include "Components/PoseableMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "DrawDebugHelpers.h"
+#include "NiagaraComponent.h"
+#include "NiagaraSystem.h"
+#include "NiagaraFunctionLibrary.h"
+#include "Particles/ParticleSystem.h"
+#include "Particles/ParticleSystemComponent.h"
+#include "TimerManager.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
 #include "Engine/SkeletalMesh.h"
@@ -30,14 +38,16 @@ float Stick(float Value)
 }
 } // namespace
 
-AHoverPilot::AHoverPilot()
+AHoverPilot::AHoverPilot(const FObjectInitializer &ObjectInitializer)
+    : Super(ObjectInitializer.SetDefaultSubobjectClass<UHoverMovementComponent>(
+          ACharacter::CharacterMovementComponentName))
 {
     PrimaryActorTick.bCanEverTick = true;
     GetCapsuleComponent()->InitCapsuleSize(32.f, 97.f);
     bUseControllerRotationYaw = true;
     GetCharacterMovement()->MaxWalkSpeed = 500.f;
     GetCharacterMovement()->JumpZVelocity = 420.f;
-    GetCharacterMovement()->MaxFlySpeed = 4500.f;
+    GetCharacterMovement()->MaxFlySpeed = 8000.f;
     GetCharacterMovement()->BrakingDecelerationFlying = 0.f;
     GetCharacterMovement()->BrakingFrictionFactor = 0.f;
     GetCharacterMovement()->bUseSeparateBrakingFriction = true;
@@ -53,8 +63,8 @@ AHoverPilot::AHoverPilot()
     Camera->FieldOfView = 95;
     ReviewArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("ReviewArm"));
     ReviewArm->SetupAttachment(GetRootComponent());
-    ReviewArm->TargetArmLength = 380;
-    ReviewArm->SocketOffset = FVector(0, 40, 60);
+    ReviewArm->TargetArmLength = 430;
+    ReviewArm->SocketOffset = FVector(0, 40, 15);
     ReviewArm->bUsePawnControlRotation = true;
     ReviewCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("ReviewCamera"));
     ReviewCamera->SetupAttachment(ReviewArm);
@@ -107,16 +117,50 @@ void AHoverPilot::BeginPlay()
     WorldGun->SetRelativeRotation(FRotator(0, 90, -90));
     BoardActor = GetWorld()->SpawnActor<AActor>();
     BoardActor->SetOwner(this);
+    BoardBody = NewObject<UBoxComponent>(BoardActor, TEXT("HoverCollision"));
+    BoardActor->SetRootComponent(BoardBody);
+    BoardBody->SetBoxExtent(FVector(90, 38, 9));
+    BoardBody->SetCollisionProfileName(TEXT("PhysicsActor"));
+    BoardBody->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+    BoardBody->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+    BoardBody->SetLinearDamping(.3f);
+    BoardBody->SetAngularDamping(4.f);
+    BoardBody->RegisterComponent();
+    BoardBody->SetMassOverrideInKg(NAME_None, 35.f);
+    BoardBody->SetNotifyRigidBodyCollision(true);
+    BoardBody->SetUseCCD(true);
+    BoardBody->OnComponentHit.AddDynamic(this, &AHoverPilot::BoardHit);
     Board = NewObject<UPoseableMeshComponent>(BoardActor, TEXT("HoverMechanism"));
-    BoardActor->SetRootComponent(Board);
+    Board->SetupAttachment(BoardBody);
     Board->RegisterComponent();
     Board->SetSkinnedAssetAndUpdate(Assets->Glider);
     Board->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     Board->SetBoundsScale(2.f);
     for (const FMeshBoneInfo &Bone : Assets->Glider->GetRefSkeleton().GetRefBoneInfo())
         BoardRest.Add(Bone.Name, Board->GetBoneTransformByName(Bone.Name, EBoneSpaces::ComponentSpace));
-    ParkedLocation = StartLocation + GetActorForwardVector() * 150.f - FVector(0, 0, 102);
+    ParkedLocation = StartLocation + GetActorForwardVector() * 150.f - FVector(0, 0, 73);
     BoardActor->SetActorLocationAndRotation(ParkedLocation, StartRotation + FRotator(0, -90, 0));
+    BoardBody->SetSimulatePhysics(true);
+    if (Assets->BoosterEffect)
+    {
+        const auto &Parameters = Assets->BoosterEffect->GetExposedParameters();
+        BoosterSize = Parameters.GetParameterValue<float>(
+            FNiagaraVariable(FNiagaraTypeDefinition::GetFloatDef(), TEXT("User.ThrustSize")));
+        BoosterSpawnRate = Parameters.GetParameterValue<float>(
+            FNiagaraVariable(FNiagaraTypeDefinition::GetFloatDef(), TEXT("User.ThurstSpawningRate")));
+        UE_LOG(LogTemp, Display, TEXT("HOVER_BOOSTER size=%.3f rate=%.3f"), BoosterSize, BoosterSpawnRate);
+        for (float Side : {-1.f, 1.f})
+        {
+            UNiagaraComponent *Effect = NewObject<UNiagaraComponent>(BoardActor);
+            Effect->SetupAttachment(Board);
+            Effect->SetAutoActivate(false);
+            Effect->SetAsset(Assets->BoosterEffect);
+            Effect->SetRelativeLocation(FVector(Side * 48.f, -22.f, 0));
+            Effect->SetRelativeRotation(FRotator(0, 90, 0));
+            Effect->RegisterComponent();
+            Boosters.Add(Effect);
+        }
+    }
     GetMesh()->SetAnimInstanceClass(UHoverAnimInstance::StaticClass());
     PlayPose(Assets->Stand, true);
     SetView();
@@ -141,6 +185,36 @@ bool AHoverPilot::HasBoardNearby() const
     return BoardActor && FVector::Dist(GetActorLocation(), BoardActor->GetActorLocation() + FVector(0, 0, 125)) < 240.f;
 }
 
+bool AHoverPilot::FindDismountLocation(FVector &Location) const
+{
+    if (!Board || !bMounted || GetVelocity().Size() > 300.f)
+        return false;
+    const float FeetHeight = Board->GetBoneLocationByName(TEXT("foot_contact_L"), EBoneSpaces::WorldSpace).Z;
+    FCollisionQueryParams Params(SCENE_QUERY_STAT(HoverSafeDismount), false, this);
+    Params.AddIgnoredActor(BoardActor);
+    for (float Side : {-1.f, 1.f})
+    {
+        const FVector Candidate = GetActorLocation() + GetActorRightVector() * (Side * 165.f);
+        FHitResult Floor;
+        if (!GetWorld()->LineTraceSingleByChannel(Floor, Candidate + FVector(0, 0, 30),
+                                                  FVector(Candidate.X, Candidate.Y, FeetHeight - 150.f), ECC_Visibility,
+                                                  Params) ||
+            Floor.ImpactNormal.Z < .7f || FeetHeight - Floor.ImpactPoint.Z > 150.f)
+            continue;
+        Location = FVector(Candidate.X, Candidate.Y, Floor.ImpactPoint.Z + 99.f);
+        if (!GetWorld()->OverlapBlockingTestByChannel(Location, FQuat::Identity, ECC_Pawn,
+                                                      FCollisionShape::MakeCapsule(32.f, 97.f), Params))
+            return true;
+    }
+    return false;
+}
+
+bool AHoverPilot::CanDismount() const
+{
+    FVector Location;
+    return FindDismountLocation(Location);
+}
+
 void AHoverPilot::HoverMount()
 {
     if (!Board || TransitionTime > 0)
@@ -153,6 +227,16 @@ void AHoverPilot::HoverMount()
         if (!HasBoardNearby())
         {
             StatusMessage = TEXT("Move closer to the glider.");
+            StatusTime = 3.f;
+            UE_LOG(LogTemp, Display, TEXT("HOVER_MOUNT blocked: distance"));
+            return;
+        }
+        if (BoardBody->GetPhysicsLinearVelocity().Size() > 100.f)
+        {
+            StatusMessage = TEXT("Wait for the glider to settle");
+            StatusTime = 3.f;
+            UE_LOG(LogTemp, Display, TEXT("HOVER_MOUNT blocked: moving board %s"),
+                   *BoardBody->GetPhysicsLinearVelocity().ToString());
             return;
         }
         FVector MountPoint = BoardActor->GetActorLocation() + FVector(0, 0, 132);
@@ -161,11 +245,21 @@ void AHoverPilot::HoverMount()
         SetActorLocation(MountPoint, true, &Hit);
         if (FVector::Dist(GetActorLocation(), MountPoint) > 8.f)
         {
+            UE_LOG(LogTemp, Display,
+                   TEXT("HOVER_MOUNT blocked: hit=%s component=%s point=%s target=%s startPenetrating=%d"),
+                   *GetNameSafe(Hit.GetActor()), *GetNameSafe(Hit.GetComponent()), *GetActorLocation().ToString(),
+                   *MountPoint.ToString(), Hit.bStartPenetrating);
             SetActorLocation(Before);
             StatusMessage = TEXT("Not enough room to mount here.");
+            StatusTime = 3.f;
             return;
         }
-        GetCapsuleComponent()->SetCapsuleSize(90, 110);
+        GetCapsuleComponent()->SetCapsuleSize(90, 142);
+        BoardBody->SetSimulatePhysics(false);
+        BoardBody->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        BoardActor->SetActorRotation(FRotator(0, GetActorRotation().Yaw - 90, 0));
+        BoardPitch = BoardBank = WingSweep = RiderLean = 0;
+        PitchVelocity = BankVelocity = WingVelocity = LeanVelocity = 0;
         MountFeet[0] = GetMesh()->GetSocketLocation(TEXT("foot_l"));
         MountFeet[1] = GetMesh()->GetSocketLocation(TEXT("foot_r"));
         MountFrom = Before;
@@ -180,24 +274,24 @@ void AHoverPilot::HoverMount()
         bHeightHolding = true;
         TransitionTime = .85f;
         StatusMessage = TEXT("Pads locking");
+        StatusTime = 0;
     }
     else
     {
-        FVector Exit = GetActorLocation() + GetActorRightVector() * 130.f + FVector(0, 0, 15);
-        FCollisionQueryParams Params(SCENE_QUERY_STAT(HoverExit), false, this);
-        const FCollisionShape Shape = FCollisionShape::MakeCapsule(32, 97);
-        if (GetWorld()->OverlapBlockingTestByChannel(Exit, FQuat::Identity, ECC_Pawn, Shape, Params))
+        FVector Exit;
+        if (!FindDismountLocation(Exit))
         {
-            Exit = GetActorLocation() - GetActorRightVector() * 130.f + FVector(0, 0, 15);
-            if (GetWorld()->OverlapBlockingTestByChannel(Exit, FQuat::Identity, ECC_Pawn, Shape, Params))
-            {
-                StatusMessage = TEXT("Both sides blocked. Move into clear space.");
-                return;
-            }
+            StatusMessage = TEXT("Slow down and descend near clear ground to get off");
+            UE_LOG(LogTemp, Display, TEXT("HOVER_DISMOUNT blocked: height, speed or landing clearance"));
+            return;
         }
+        const FVector ReleaseVelocity = Movement->Velocity;
         BoardActor->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
         ParkedLocation = BoardActor->GetActorLocation();
-        BoardActor->SetActorRotation(FRotator(0, GetActorRotation().Yaw - 90, 0));
+        BoardBody->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        BoardBody->SetSimulatePhysics(true);
+        BoardBody->SetPhysicsLinearVelocity(ReleaseVelocity);
+        BoardBody->WakeAllRigidBodies();
         bMounted = false;
         bSteppingOn = false;
         GetCapsuleComponent()->SetCapsuleSize(32, 97);
@@ -222,7 +316,7 @@ void AHoverPilot::SetView()
     Camera->SetActive(!bReview);
     ReviewCamera->SetActive(bReview);
     ViewGun->SetVisibility(!bReview);
-    WorldGun->SetVisibility(bReview && bAiming);
+    WorldGun->SetVisibility(bReview && (bAiming || GunRaisedTime > 0));
     // The full-body riding pose crosses the eye camera during pitch and recoil.
     // Keep it for the external view; the FPS camera renders its own rifle.
     for (USkeletalMeshComponent *Part : Parts)
@@ -234,9 +328,14 @@ void AHoverPilot::HoverReset()
     if (!BoardActor)
         return;
     BoardActor->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+    BoardBody->SetSimulatePhysics(false);
     bMounted = false;
     bSteppingOn = false;
-    BoardPitch = BoardBank = 0;
+    BoardPitch = BoardBank = WingSweep = RiderLean = 0;
+    PitchVelocity = BankVelocity = WingVelocity = LeanVelocity = 0;
+    BoostCharge = 1;
+    BoostRechargeDelay = 0;
+    bBoostExhausted = false;
     TransitionTime = 0;
     HopTime = 0;
     GetCapsuleComponent()->SetCapsuleSize(32, 97);
@@ -245,8 +344,12 @@ void AHoverPilot::HoverReset()
     SetActorLocationAndRotation(StartLocation + FVector(0, 0, 20), StartRotation);
     GetCharacterMovement()->SetMovementMode(MOVE_Falling);
     GetCharacterMovement()->StopMovementImmediately();
-    ParkedLocation = StartLocation + StartRotation.Vector() * 150.f - FVector(0, 0, 102);
+    ParkedLocation = StartLocation + StartRotation.Vector() * 150.f - FVector(0, 0, 73);
     BoardActor->SetActorLocationAndRotation(ParkedLocation, StartRotation + FRotator(0, -90, 0));
+    BoardBody->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    BoardBody->SetSimulatePhysics(true);
+    BoardBody->SetPhysicsLinearVelocity(FVector::ZeroVector);
+    BoardBody->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
     if (Controller)
         Controller->SetControlRotation(StartRotation);
 }
@@ -269,8 +372,8 @@ void AHoverPilot::UpdateInput(float DT)
     SideInput = FMath::Clamp(Stick(PC->GetInputAnalogKeyState(EKeys::Gamepad_LeftX)) + float(Down(EKeys::D)) -
                                  float(Down(EKeys::A)),
                              -1.f, 1.f);
-    UpInput = float(Down(EKeys::Gamepad_RightShoulder) || Down(EKeys::E)) -
-              float(Down(EKeys::Gamepad_LeftShoulder) || Down(EKeys::Q));
+    BankInput = float(Down(EKeys::Gamepad_RightShoulder) || Down(EKeys::E)) -
+                float(Down(EKeys::Gamepad_LeftShoulder) || Down(EKeys::Q));
     TurnInput = Stick(PC->GetInputAnalogKeyState(EKeys::Gamepad_RightX));
     float MouseX = 0, MouseY = 0;
     PC->GetInputMouseDelta(MouseX, MouseY);
@@ -281,7 +384,7 @@ void AHoverPilot::UpdateInput(float DT)
                               -75.f, 75.f);
     Look.Roll = 0;
     PC->SetControlRotation(Look);
-    bBoost = Down(EKeys::Gamepad_LeftThumbstick) || Down(EKeys::LeftShift);
+    bBoostHeld = Down(EKeys::Gamepad_LeftThumbstick) || Down(EKeys::LeftShift);
     const bool Hold = Down(EKeys::Gamepad_FaceButton_Left) || Down(EKeys::X);
     if (Hold && !bHoldConsumed)
     {
@@ -331,12 +434,14 @@ void AHoverPilot::UpdateInput(float DT)
         if (Aim)
         {
             AimExitTime = 0;
-            PlayPose(Assets->AimStart, false);
+            if (bMounted)
+                PlayPose(Assets->AimStart, false);
         }
         else
         {
-            PlayPose(Assets->AimEnd, false);
-            AimExitTime = Assets->AimEnd ? Assets->AimEnd->GetPlayLength() : 0;
+            if (bMounted)
+                PlayPose(Assets->AimEnd, false);
+            AimExitTime = bMounted && Assets->AimEnd ? Assets->AimEnd->GetPlayLength() : 0;
         }
         SetView();
     }
@@ -348,6 +453,23 @@ void AHoverPilot::UpdateInput(float DT)
 void AHoverPilot::UpdateFlight(float DT)
 {
     UCharacterMovementComponent *Move = GetCharacterMovement();
+    if (!bBoostHeld && BoostCharge >= .2f)
+        bBoostExhausted = false;
+    bBoost = bMounted && TransitionTime <= 0 && bBoostHeld && !bBoostExhausted && BoostCharge > 0 &&
+             (FMath::Abs(ForwardInput) > .05f || FMath::Abs(SideInput) > .05f);
+    if (bBoost)
+    {
+        BoostCharge = FMath::Max(0.f, BoostCharge - DT / 4.f);
+        BoostRechargeDelay = 1.25f;
+        if (BoostCharge <= 0)
+            bBoostExhausted = true;
+    }
+    else
+    {
+        BoostRechargeDelay = FMath::Max(0.f, BoostRechargeDelay - DT);
+        if (BoostRechargeDelay <= 0)
+            BoostCharge = FMath::Min(1.f, BoostCharge + DT / 8.f);
+    }
     if (!bMounted)
     {
         AddMovementInput(GetActorForwardVector(), ForwardInput);
@@ -374,24 +496,25 @@ void AHoverPilot::UpdateFlight(float DT)
         TargetAltitude = GetActorLocation().Z;
         return;
     }
-    const float Speed = bBoost ? 4000.f : 1800.f;
+    const float Speed = bBoost ? 5600.f : 1800.f;
     FVector Direction = GetActorForwardVector() * ForwardInput + GetActorRightVector() * SideInput;
     Direction = Direction.GetClampedToMaxSize(1.f);
-    FVector Desired = Direction * Speed;
+    const FVector PreviousVelocity = Move->Velocity;
+    FVector Desired = HoverMotion::HorizontalVelocity(PreviousVelocity, Direction, Speed, DT, bBoost);
     const float Pitch = FRotator::NormalizeAxis(GetControlRotation().Pitch);
-    float VerticalCommand = UpInput * 900.f;
-    if (FMath::IsNearlyZero(UpInput) && FMath::Abs(ForwardInput) > .05f && FMath::Abs(Pitch) > 5.f)
-        VerticalCommand = FMath::Sin(FMath::DegreesToRadians(Pitch)) * ForwardInput * Speed;
+    const float AlongSpeed = FVector::DotProduct(Desired, GetActorForwardVector());
+    const float VerticalCommand =
+        FMath::Abs(Pitch) > 5.f ? FMath::Sin(FMath::DegreesToRadians(Pitch)) * AlongSpeed : 0.f;
     if (HopTime > 0)
     {
         HopTime -= DT;
-        Desired.Z = FMath::Max(0.f, Move->Velocity.Z - 500.f * DT);
+        Desired.Z = FMath::Max(0.f, PreviousVelocity.Z - 500.f * DT);
         TargetAltitude = GetActorLocation().Z;
         bHeightHolding = false;
     }
     else if (FMath::Abs(VerticalCommand) > 1)
     {
-        Desired.Z = VerticalCommand;
+        Desired.Z = FMath::FInterpConstantTo(PreviousVelocity.Z, VerticalCommand, DT, 2200.f);
         bHeightHolding = false;
         TargetAltitude = GetActorLocation().Z;
     }
@@ -399,10 +522,13 @@ void AHoverPilot::UpdateFlight(float DT)
     {
         if (!bHeightHolding)
         {
-            TargetAltitude = GetActorLocation().Z;
+            // Account for the remaining vertical stopping distance before holding.
+            TargetAltitude = GetActorLocation().Z + PreviousVelocity.Z * FMath::Abs(PreviousVelocity.Z) / 4400.f;
             bHeightHolding = true;
         }
-        Desired.Z = FMath::Clamp((TargetAltitude - GetActorLocation().Z) * 5.f, -500.f, 500.f);
+        Desired.Z = FMath::FInterpConstantTo(
+            PreviousVelocity.Z, FMath::Clamp((TargetAltitude - GetActorLocation().Z) * 3.f, -1200.f, 1200.f), DT,
+            2200.f);
     }
     if (SlideTime > 0)
     {
@@ -410,11 +536,32 @@ void AHoverPilot::UpdateFlight(float DT)
         Desired.X = Move->Velocity.X;
         Desired.Y = Move->Velocity.Y;
     }
-    Move->Velocity = FMath::VInterpTo(Move->Velocity, Desired, DT, 4.5f);
+    Move->Velocity = Desired;
     if (bHeightHolding && FMath::Abs(Move->Velocity.Z) < 1.f && FMath::Abs(TargetAltitude - GetActorLocation().Z) < 1.f)
         Move->Velocity.Z = 0;
-    BoardPitch = FMath::FInterpTo(BoardPitch, -ForwardInput * 8.f + FMath::Clamp(Pitch * .18f, -12.f, 12.f), DT, 5.f);
-    BoardBank = FMath::FInterpTo(BoardBank, SideInput * 12.f + TurnInput * 6.f, DT, 5.f);
+    const FVector Acceleration = (Move->Velocity - PreviousVelocity) / FMath::Max(DT, .001f);
+    const float ForwardForce =
+        FMath::Clamp(FVector::DotProduct(Acceleration, GetActorForwardVector()) / 3000.f, -1.f, 1.f);
+    const float Travel = FMath::Clamp(AlongSpeed / 1800.f, -1.f, 1.f);
+    HoverMotion::Spring(BoardPitch, PitchVelocity, FMath::Clamp(Pitch * .65f - ForwardForce * 8.f, -30.f, 30.f), DT);
+    HoverMotion::Spring(BoardBank, BankVelocity,
+                        FMath::Clamp(BankInput * 28.f + SideInput * 10.f + TurnInput * 5.f, -35.f, 35.f), DT);
+    HoverMotion::Spring(WingSweep, WingVelocity,
+                        FMath::Clamp(Travel * 10.f + ForwardForce * 5.f + Pitch * .12f, -20.f, 20.f), DT);
+    HoverMotion::Spring(RiderLean, LeanVelocity,
+                        FMath::Clamp(Travel * 3.f + ForwardForce * 4.f - Pitch * .1f, -8.f, 8.f), DT);
+    FHitResult Floor;
+    FCollisionQueryParams FloorParams(SCENE_QUERY_STAT(HoverLanding), false, this);
+    FloorParams.AddIgnoredActor(BoardActor);
+    const FVector Bottom = GetActorLocation() - FVector(0, 0, 142);
+    const bool Grounded =
+        GetWorld()->LineTraceSingleByChannel(Floor, Bottom + FVector(0, 0, 8), Bottom - FVector(0, 0, 12),
+                                             ECC_Visibility, FloorParams) &&
+        Floor.ImpactNormal.Z > .7f;
+    if (Grounded && !bGliderGrounded && FMath::Min(PreviousVelocity.Z, PreviousFlightVerticalSpeed) < -60.f)
+        ImpactPulse(Floor.ImpactPoint + Floor.ImpactNormal * 2, Floor.ImpactNormal, .45f, .18f, .5f);
+    bGliderGrounded = Grounded;
+    PreviousFlightVerticalSpeed = Desired.Z;
 }
 
 void AHoverPilot::PlayPose(UAnimSequence *Animation, bool bLoop)
@@ -433,19 +580,22 @@ void AHoverPilot::PlayPose(UAnimSequence *Animation, bool bLoop)
 void AHoverPilot::UpdateAppearance(float DT)
 {
     AimExitTime = FMath::Max(0.f, AimExitTime - DT);
-    if (!bAiming && AimExitTime <= 0)
+    GunRaisedTime = FMath::Max(0.f, GunRaisedTime - DT);
+    // Grounded aiming keeps the locomotion pose below the spine. The supplied
+    // full-body gun clips are glider poses and lift the feet when used on foot.
+    if (!bMounted || (!bAiming && AimExitTime <= 0))
     {
         UAnimSequence *Pose = Assets->Stand;
         if (bMounted)
         {
             Pose = Assets->RideIdle;
-            if (ForwardInput > .2f)
+            if (FVector::DotProduct(GetVelocity(), GetActorForwardVector()) > 150.f)
                 Pose = Assets->RideMove;
-            if (UpInput < -.1f)
+            if (GetVelocity().Z < -200.f)
                 Pose = Assets->RideDown;
-            if (SideInput < -.25f || TurnInput < -.25f)
+            if (BoardBank < -7.f)
                 Pose = Assets->RideLeft;
-            if (SideInput > .25f || TurnInput > .25f)
+            if (BoardBank > 7.f)
                 Pose = Assets->RideRight;
         }
         else if (GetVelocity().Size2D() > 20)
@@ -485,10 +635,17 @@ void AHoverPilot::UpdateAppearance(float DT)
         if (const FTransform *Rest = BoardRest.Find(Wing))
         {
             FTransform Pose = *Rest;
-            Pose.SetRotation(FQuat(FVector::UpVector, FMath::DegreesToRadians(Sign * (FMath::Abs(ForwardInput) * 12.f +
-                                                                                      FMath::Abs(SideInput) * 6.f))) *
-                             Rest->GetRotation());
+            Pose.SetRotation(FQuat(FVector::UpVector, FMath::DegreesToRadians(Sign * WingSweep)) * Rest->GetRotation());
             Board->SetBoneTransformByName(Wing, Pose, EBoneSpaces::ComponentSpace);
+        }
+        Board->RefreshBoneTransforms();
+        const FName Cant(*FString::Printf(TEXT("wing_cant_%s"), Side));
+        if (BoardRest.Contains(Cant))
+        {
+            FTransform Pose = Board->GetBoneTransformByName(Cant, EBoneSpaces::ComponentSpace);
+            Pose.SetRotation(FQuat(FVector::RightVector, FMath::DegreesToRadians(BoardBank * .25f)) *
+                             Pose.GetRotation());
+            Board->SetBoneTransformByName(Cant, Pose, EBoneSpaces::ComponentSpace);
         }
     }
     Board->RefreshBoneTransforms();
@@ -499,7 +656,8 @@ void AHoverPilot::UpdateAppearance(float DT)
     {
         Instance->FootLock = bMounted ? 1.f : 0.f;
         Instance->RifleAim = Assets->RifleAim;
-        Instance->bAiming = bAiming;
+        Instance->bAiming = bAiming || GunRaisedTime > 0;
+        Instance->RiderLean = bMounted ? RiderLean : 0;
         FVector Feet[2];
         for (int32 I = 0; I < 2; ++I)
         {
@@ -517,19 +675,47 @@ void AHoverPilot::UpdateAppearance(float DT)
         Instance->LeftFoot = Feet[0];
         Instance->RightFoot = Feet[1];
     }
-    if (bAiming)
+    WorldGun->SetVisibility(bReview && (bAiming || GunRaisedTime > 0));
+    UpdateGunTransform();
+    const bool Powered = bMounted && TransitionTime <= 0 && !bSteppingOn;
+    const float Thrust = FMath::Max(FMath::Abs(ForwardInput), FMath::Abs(SideInput));
+    for (UNiagaraComponent *Effect : Boosters)
     {
-        const FVector Hand = GetMesh()->GetSocketLocation(TEXT("hand_r"));
-        const FVector Aim = GetControlRotation().Vector();
-        WorldGun->SetWorldLocationAndRotation(Hand + Aim * 20.f + GetActorUpVector() * 3.f,
-                                              FRotationMatrix::MakeFromYZ(Aim, GetActorUpVector()).Rotator());
+        const bool Active = Powered && Thrust > .05f;
+        const float Scale = bBoost ? 1.4f : .55f + .3f * Thrust;
+        Effect->SetVariableFloat(TEXT("User.ThrustAlpha"), bBoost ? 1.f : .75f * Thrust);
+        Effect->SetVariableFloat(TEXT("User.ThrustSize"), BoosterSize * Scale);
+        Effect->SetVariableFloat(TEXT("User.ThurstSpawningRate"), BoosterSpawnRate * (bBoost ? 1.8f : Thrust));
+        if (Active && !Effect->IsActive())
+            Effect->Activate(true);
+        else if (!Active && Effect->IsActive())
+            Effect->Deactivate();
+        Effect->SetRelativeScale3D(FVector(Scale));
+        if (Thrust > .05f)
+        {
+            const FVector ThrustDirection = FRotator(BoardPitch, GetActorRotation().Yaw, 0).Vector() * ForwardInput +
+                                            GetActorRightVector() * SideInput;
+            Effect->SetWorldRotation(
+                FRotationMatrix::MakeFromXZ(ThrustDirection.GetSafeNormal(), Board->GetUpVector()).Rotator());
+        }
     }
+}
+
+void AHoverPilot::UpdateGunTransform()
+{
+    const FVector Hand = GetMesh()->GetSocketLocation(TEXT("hand_r"));
+    const FVector Aim = GetControlRotation().Vector();
+    WorldGun->SetWorldLocationAndRotation(Hand + Aim * 20.f + GetActorUpVector() * 3.f,
+                                          FRotationMatrix::MakeFromYZ(Aim, GetActorUpVector()).Rotator());
 }
 
 void AHoverPilot::FireShot()
 {
     ++ShotsFired;
     FireCooldown = .18f;
+    GunRaisedTime = 3.f;
+    UpdateGunTransform();
+    SetView();
     const UCameraComponent *ActiveCamera = bReview ? ReviewCamera : Camera;
     const FVector Eye = ActiveCamera->GetComponentLocation();
     const FVector End = Eye + ActiveCamera->GetForwardVector() * 50000.f;
@@ -540,21 +726,86 @@ void AHoverPilot::FireShot()
     const FVector Target = AimHit.bBlockingHit ? AimHit.ImpactPoint : End;
     const FVector Muzzle = bReview ? WorldGun->GetComponentLocation() + WorldGun->GetRightVector() * 45.f
                                    : ViewGun->GetComponentLocation() + Camera->GetForwardVector() * 50.f;
+    ImpactPulse(Muzzle, (Target - Muzzle).GetSafeNormal(), .04f, 0.f, .10f, Assets->MuzzleEffect);
     FHitResult Hit;
     const FVector ShotDirection = (Target - Muzzle).GetSafeNormal();
     GetWorld()->LineTraceSingleByChannel(Hit, Muzzle, Target + ShotDirection * 3.f, ECC_Visibility, Params);
-    const FVector Impact = Hit.bBlockingHit ? Hit.ImpactPoint : Target;
-    DrawDebugLine(GetWorld(), Muzzle, Impact, FColor(255, 185, 65), false, .1f, 0, 1.5f);
-    if (Hit.bBlockingHit)
-        DrawDebugSphere(GetWorld(), Impact, 4.f, 8, FColor::Orange, false, .35f);
     if (auto *Zombie = Cast<AHoverZombie>(Hit.GetActor()))
         UGameplayStatics::ApplyPointDamage(Zombie, 35.f, ShotDirection, Hit, GetController(), this, nullptr);
-    if (bAiming && Assets->Fire)
+    if (bMounted && bAiming && Assets->Fire)
     {
         CurrentAnimation = nullptr;
         PlayPose(Assets->Fire, false);
     }
     UE_LOG(LogTemp, Verbose, TEXT("HOVER_SHOT hit=%s"), *GetNameSafe(Hit.GetActor()));
+}
+
+void AHoverPilot::ImpactPulse(const FVector &Location, const FVector &Normal, float Scale, float Rumble, float Duration,
+                              UFXSystemAsset *Template)
+{
+    if (!Assets)
+        return;
+    if (!Template)
+        Template = Assets->ShockwaveEffect;
+    if (!Template)
+        return;
+    if (Rumble > 0)
+    {
+        if (GetWorld()->GetTimeSeconds() - LastLandingPulse < .45f)
+            return;
+        LastLandingPulse = GetWorld()->GetTimeSeconds();
+        if (APlayerController *PC = Cast<APlayerController>(GetController()))
+            PC->PlayDynamicForceFeedback(Rumble, .09f, false, true, false, true);
+    }
+    UFXSystemComponent *Effect = nullptr;
+    const FRotator Rotation = FRotationMatrix::MakeFromZ(Normal).Rotator();
+    if (UNiagaraSystem *System = Cast<UNiagaraSystem>(Template))
+    {
+        auto *Niagara = UNiagaraFunctionLibrary::SpawnSystemAtLocation(GetWorld(), System, Location, Rotation,
+                                                                       FVector(Scale), true, false);
+        if (Niagara && Template == Assets->ShockwaveEffect)
+        {
+            // This pack exposes world-space size/lifetime controls; component
+            // scale alone does not scale its particles.
+            Niagara->SetVariableFloat(TEXT("User.Scale Overall"), Scale);
+            Niagara->SetVariableFloat(TEXT("User.Lifetime Overall"), Duration);
+            Niagara->SetVariableFloat(TEXT("User.Emissiveness Overall"), Rumble < .1f ? .25f : .6f);
+        }
+        if (Niagara)
+            Niagara->Activate(true);
+        Effect = Niagara;
+    }
+    else if (UParticleSystem *Particles = Cast<UParticleSystem>(Template))
+        Effect =
+            UGameplayStatics::SpawnEmitterAtLocation(GetWorld(), Particles, Location, Rotation, FVector(Scale), true);
+    if (Effect)
+    {
+        TWeakObjectPtr<UFXSystemComponent> WeakEffect(Effect);
+        FTimerHandle Timer;
+        GetWorld()->GetTimerManager().SetTimer(
+            Timer,
+            [WeakEffect]() {
+                if (WeakEffect.IsValid())
+                    WeakEffect->DestroyComponent();
+            },
+            Duration, false);
+        UE_LOG(LogTemp, Display, TEXT("HOVER_PULSE scale=%.3f duration=%.2f"), Scale, Duration);
+    }
+}
+
+void AHoverPilot::Landed(const FHitResult &Hit)
+{
+    const float FallSpeed = -GetVelocity().Z;
+    Super::Landed(Hit);
+    if (!bMounted && FallSpeed > 150.f)
+        ImpactPulse(Hit.ImpactPoint + Hit.ImpactNormal * 2, Hit.ImpactNormal, .07f, .06f, .2f);
+}
+
+void AHoverPilot::BoardHit(UPrimitiveComponent *HitComponent, AActor *OtherActor, UPrimitiveComponent *OtherComponent,
+                           FVector NormalImpulse, const FHitResult &Hit)
+{
+    if (!bMounted && Hit.ImpactNormal.Z > .6f && NormalImpulse.Size() > 1800.f)
+        ImpactPulse(Hit.ImpactPoint + Hit.ImpactNormal * 2, Hit.ImpactNormal, .35f, .1f, .5f);
 }
 
 void AHoverPilot::Tick(float DT)
@@ -565,6 +816,7 @@ void AHoverPilot::Tick(float DT)
     DT = FMath::Min(DT, .05f);
     TransitionTime = FMath::Max(0.f, TransitionTime - DT);
     FireCooldown = FMath::Max(0.f, FireCooldown - DT);
+    StatusTime = FMath::Max(0.f, StatusTime - DT);
     UpdateInput(DT);
     UpdateFlight(DT);
     UpdateAppearance(DT);
@@ -574,6 +826,8 @@ void AHoverPilot::Tick(float DT)
 
 FString AHoverPilot::GetPrompt() const
 {
+    if (StatusTime > 0)
+        return StatusMessage;
     if (TransitionTime > 0)
         return bMounted ? TEXT("Pads locking...") : TEXT("Pads released");
     if (!bMounted)
@@ -583,7 +837,8 @@ FString AHoverPilot::GetPrompt() const
         if (const auto *PC = Cast<AHoverTestController>(GetController()); PC && PC->IsNearBike())
             return TEXT("Hold X to ride the hoverbike");
     if (bMounted)
-        return TEXT("Hold X: get off   |   R1 / E: up   L1 / Q: down");
+        return CanDismount() ? TEXT("Hold X: get off   |   L1 / Q: bank left   R1 / E: bank right")
+                             : TEXT("Slow down and descend near clear ground to get off   |   L1 / R1: bank");
     return HasBoardNearby() ? TEXT("Hold X to step on and lock the pads")
                             : TEXT("Walk to the glider   |   R: reset test");
 }
@@ -618,11 +873,20 @@ void AHoverHUD::DrawHUD()
     DrawText(Pilot->GetPrompt(), FLinearColor::White, 32, Canvas->ClipY - 96, nullptr, 1.1f);
     DrawText(TEXT("LS / WASD move   RS / mouse aim   L2 / RMB aim gun   R2 / LMB fire"), FLinearColor(.8f, .85f, .9f),
              32, Canvas->ClipY - 69);
-    DrawText(FString::Printf(TEXT("A / Space hop   L3 / Shift boost   B / Ctrl slide   F5 review view   %.0f m/s"),
-                             Pilot->GetSpeedMps()),
-             FLinearColor(.8f, .85f, .9f), 32, Canvas->ClipY - 44);
+    const FString MovementHelp =
+        Pilot->IsMounted()
+            ? FString::Printf(TEXT("A / Space hop   L3 / Shift boost   B / Ctrl coast   F5 view   %.0f m/s"),
+                              Pilot->GetSpeedMps())
+            : FString::Printf(TEXT("A / Space jump   F5 / Menu view   R reset   %.0f m/s"), Pilot->GetSpeedMps());
+    DrawText(MovementHelp, FLinearColor(.8f, .85f, .9f), 32, Canvas->ClipY - 44);
     if (Pilot->HoldProgress() > 0 && Pilot->HoldProgress() < 1)
         DrawRect(FLinearColor(.9f, .1f, .08f), X - 70, Y + 35, 140 * Pilot->HoldProgress(), 5);
+    if (Pilot->IsMounted())
+    {
+        DrawText(TEXT("BOOST"), FLinearColor::White, 28, Canvas->ClipY - 148);
+        DrawRect(FLinearColor(.08f, .1f, .13f, .9f), 88, Canvas->ClipY - 141, 220, 12);
+        DrawRect(FLinearColor(.2f, .7f, 1.f), 88, Canvas->ClipY - 141, 220 * Pilot->GetBoostCharge(), 12);
+    }
 }
 
 AHoverGameMode::AHoverGameMode()

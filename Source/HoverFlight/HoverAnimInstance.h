@@ -14,6 +14,7 @@ class HOVERFLIGHT_API UHoverAnimInstance : public UAnimInstance
     bool bLoop = true;
     int32 RestartSerial = 0;
     float FootLock = 0;
+    float RiderLean = 0;
     FVector LeftFoot = FVector::ZeroVector;
     FVector RightFoot = FVector::ZeroVector;
 

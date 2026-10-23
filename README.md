@@ -9,7 +9,8 @@ BloodShot Niagara impacts and ragdoll deaths provide hit feedback; ammo is unlim
 
 Build with `Scripts/Build.ps1`, open `AFS.uproject`, and press Play. The default
 map is `/Game/JustBStudios/PostApo/Levels/PostApo`. If the editor has another level
-open, open that map first. Hold X near the glider to mount; hold X again to get off.
+open, open that map first. Hold X near the settled glider to mount; hold X to get off
+only when slow and within 1.5 m of clear walkable ground. Released gliders fall and settle.
 Walk toward the parked bike and hold X to drive it. Its supplied E exit action
 returns to the retained Vexa player; hold X is also supported.
 The truck is parked on the opposite side of the starting area. Hold X nearby to
@@ -23,11 +24,16 @@ does not contain a playable installation. The locally authored assets must be
 retained alongside the code.
 
 See `Docs/CONTROLS.txt` for the input map and `Docs/VALIDATION.txt` for evidence
-and current limits. On the glider, right-stick pitch also drives climb/dive while
-forward or reverse thrust is applied. With no vertical command, the movement
-controller damps vertical velocity and holds the current height. Vexa is invulnerable.
-Dismounting in the air makes the rider fall; R resets
-the player and glider to the test start.
+and current limits. Right-stick pitch drives climb/dive along the direction of travel;
+L1/R1 bank left/right. Released thrust coasts, opposing thrust brakes before reverse,
+and board/rider/wing reactions use signed motion with damped transitions. Leveling pitch
+settles vertical motion into altitude hold. L3 boost has a draining/recharging meter.
+Vexa is invulnerable; R resets the player and glider to the test start.
+
+The data asset also exposes booster, muzzle and landing effect references. Local effect
+copies preserve vendor originals. Niagara thrust follows direction and boost strength;
+landing shockwaves and muzzle pulses are intentionally brief. Landings request a light
+controller pulse, whose physical feel still needs owner review.
 
 Run portable script syntax checks with:
 
