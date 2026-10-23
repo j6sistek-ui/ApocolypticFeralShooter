@@ -35,6 +35,17 @@ copies preserve vendor originals. Niagara thrust follows direction and boost str
 landing shockwaves and muzzle pulses are intentionally brief. Landings request a light
 controller pulse, whose physical feel still needs owner review.
 
+Press D-pad Up or F6 for the graphics menu. D-pad/arrows select and adjust, A/Enter
+applies and saves, B/F6 cancels. DLAA, DLSS quality modes and supported frame-generation
+multipliers are available. Frame generation requires Standalone Game; editor Play saves
+that preference without activating it. Reflex enables automatically with frame generation.
+The menu pauses all movement and firing, including the supplied vehicles. Preferences live
+in the local GameUserSettings.ini `[AFS.Graphics]` section. Editor renderer values are
+restored when Play ends. The project requires the locally installed NVIDIA UE5.8 v8.9
+plugins DLSS, StreamlineDLSSG, StreamlineReflex, StreamlineCore and StreamlineNGXCommon.
+These licensed dependencies are excluded from Git. Ray reconstruction and cinematic
+Movie Render Queue configuration are outside this menu's scope.
+
 Run portable script syntax checks with:
 
 ```powershell

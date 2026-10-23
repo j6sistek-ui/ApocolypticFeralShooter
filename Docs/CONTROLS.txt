@@ -1,5 +1,17 @@
 AFS FREE FLIGHT TEST
 
+GRAPHICS (ALL RIDES AND WALKING)
+D-pad Up / F6: open graphics and pause the game.
+D-pad / arrow up-down: choose row; left-right: change the pending option.
+A / Enter: apply, save and resume. B / F6: cancel and resume.
+Image choices: Native TSR, DLAA, DLSS Quality/Balanced/Performance/Ultra Performance.
+Only supported GPU modes appear. DLAA keeps full resolution; DLSS trades resolution for speed.
+Frame generation: Off, supported fixed multipliers, or Dynamic. Reflex turns on with FG.
+Frame generation preferences are saved in editor Play but apply only in Standalone Game.
+NVIDIA suspends generated frames while the game window is in the background.
+Use Play > Standalone Game or the supplied Open_AFS_Standalone.cmd launcher for FG testing.
+DLAA/DLSS image modes also work in editor Play. No restart is needed to change menu options.
+
 VEXA / GLIDER
 Left stick / WASD: forward, reverse, left/right strafe.
 Right stick / mouse: turn and look. Right stick forward pitches down; back pitches up.

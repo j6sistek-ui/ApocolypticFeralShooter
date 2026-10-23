@@ -80,8 +80,8 @@ High-altitude dismount is blocked. Exit requires speed <=3 m/s, a clear standing
 capsule and walkable ground within 1.5 m of the pads. R resets Vexa and glider.
 Walking L3 sprint, B crouch/prone/stand, B dive, directional walking/turning clips,
 Vexa defaults/jiggle and broad lighting/material polish remain separate backlog.
-DLSS, DLAA, NVIDIA frame generation and DLSS 5 are not installed/enabled in AFS;
-no graphics plugin/config change was made during this physics pass.
+Superseded by the graphics pass: DLSS/DLAA and NVIDIA frame generation now have
+a native controller menu. DLSS 5 is not part of the installed DLSS 4.5 v8.9 bundle.
 Zombie steering is local obstacle avoidance; complex paths may leave some stuck.
 Native engine headers produce deprecation warnings; installed MSVC is newer than
 the engine's preferred version. Supplied hoverbike pose assets report stale
@@ -91,3 +91,42 @@ warnings did not prevent the recorded gameplay, but this is not release QA.
 Four missing vendor/demo dependency references were already absent at source.
 Docker is unavailable; a minimal container syntax workflow is supplied. Native
 Unreal requires the installed Windows engine; no host packages were installed.
+
+GRAPHICS MENU PASS - 2026-10-22 (2026-10-23 UTC)
+Native UE5.8 build, clang-format and Python syntax checks pass. A rendered PIE
+integration run passes 31 checks: DLAA at 100%, DLSS Quality at 66.7%, native TSR
+at 100%, controller/keyboard opening, apply/save/cancel, paused movement/look/fire,
+truck/bike pause and retained possession, and the PIE frame-generation guard.
+NGX logs confirm actual DLAA and MaxQuality feature creation, not just enabled CVars.
+The menu screenshot was visually reviewed. Physical controller acceptance is pending.
+
+A separate D3D12 Standalone Game automation run passes with 2 vendor warnings.
+The RTX 5080 reports actual presented-frame counts 2,3,4,5,6 for the corresponding
+fixed FG modes; Dynamic also generates additional frames. Invalid stored choices
+fall back to native/FG Off. This small 1280x720 window test is functional evidence,
+not a representative FPS benchmark, long-session test, or image-artifact review.
+Warnings: one transition frame lacked Streamline constants; the plugin corrected
+an unsupported depth-resource alignment. Generated frames resumed successfully.
+The first persistence rerun loaded DLAA+2X but its generated-frame assertions failed
+with the window in the background. Inspection of NVIDIA's installed source confirms
+FG is disabled when FApp::HasFocus is false. Runtime diagnostics now include focus;
+the test explicitly reports background samples as unvalidated presentation instead
+of mistaking disabled background FG for a failed toggle. Foreground evidence remains
+the earlier run with actual 2X through 6X counts, not a background sample.
+The final fresh-process persistence run passed: saved DLAA/100% and FG2X loaded
+and applied, with foreground=0 explicitly recorded. Generated presentation in
+that background run is marked unvalidated. Test-only preferences were restored
+to the owner's exact original file after all test processes exited.
+Existing editor-toolset Python startup scripts report missing editor-only classes
+in -game mode; Nwiro's listener port is occupied when another editor is open.
+These optional tooling issues did not prevent the tested menu or rendering.
+
+Only supported GPU choices appear. DLAA and DLSS are mutually exclusive choices.
+Frame generation requires Standalone Game; editor Play saves that preference only.
+Reflex enables automatically with FG. Renderer globals are restored at EndPlay;
+saved preferences live in local GameUserSettings.ini [AFS.Graphics].
+The five required NVIDIA plugins are local project copies excluding vendor PDBs;
+the owner's engine installation and SpaceSurvival session were not modified.
+Engine-root plugin placement caused a native RulesError; local project placement
+resolved it. For future engine-wide installation use Engine/Plugins/Marketplace.
+Purchased code/binaries and the owner's AFS.uproject edits remain outside this commit.

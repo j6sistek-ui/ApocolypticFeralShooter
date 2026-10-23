@@ -11,6 +11,95 @@
 #include "InputMappingContext.h"
 #include "ChaosWheeledVehicleMovementComponent.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
+#include "HoverGraphicsMenu.h"
+#include "HoverGraphicsSettings.h"
+#include "GameFramework/PlayerInput.h"
+#include "InputKeyEventArgs.h"
+
+void AHoverTestController::BeginPlay()
+{
+    Super::BeginPlay();
+    GraphicsSettings = NewObject<UHoverGraphicsSettings>(this);
+    GraphicsSettings->Initialize(GetWorld());
+}
+
+void AHoverTestController::EndPlay(const EEndPlayReason::Type Reason)
+{
+    if (GraphicsMenu)
+        CloseGraphicsMenu(false);
+    if (GraphicsSettings)
+        GraphicsSettings->RestoreRenderer();
+    Super::EndPlay(Reason);
+}
+
+void AHoverTestController::HoverGraphics()
+{
+    if (GraphicsMenu)
+    {
+        CloseGraphicsMenu(false);
+        return;
+    }
+    if (!GraphicsSettings || IsPaused() || !SetPause(true))
+        return;
+    GraphicsMenu = CreateWidget<UHoverGraphicsMenu>(this);
+    GraphicsMenu->Open(GraphicsSettings);
+    GraphicsMenu->AddToViewport(10000);
+    SetIgnoreMoveInput(true);
+    SetIgnoreLookInput(true);
+    if (PlayerInput)
+        PlayerInput->FlushPressedKeys();
+    SetInputMode(FInputModeGameOnly());
+    bShowMouseCursor = false;
+}
+
+void AHoverTestController::CloseGraphicsMenu(bool bApply)
+{
+    if (!GraphicsMenu)
+        return;
+    if (bApply)
+        GraphicsSettings->Apply(GraphicsMenu->GetSelection());
+    GraphicsMenu->RemoveFromParent();
+    GraphicsMenu = nullptr;
+    if (PlayerInput)
+        PlayerInput->FlushPressedKeys();
+    ExitHold = 0;
+    bExitConsumed = true;
+    SetIgnoreMoveInput(false);
+    SetIgnoreLookInput(false);
+    SetPause(false);
+}
+
+bool AHoverTestController::InputKey(const FInputKeyEventArgs &Params)
+{
+    const bool Pressed = Params.Event == IE_Pressed;
+    const FKey Key = Params.Key;
+    if (!GraphicsMenu)
+    {
+        if (Pressed && (Key == EKeys::F6 || Key == EKeys::Gamepad_DPad_Up))
+        {
+            HoverGraphics();
+            return true;
+        }
+        return Super::InputKey(Params);
+    }
+    // Intercept before pawn/vendor input, including axes and trigger input while paused.
+    if (Pressed || Params.Event == IE_Repeat)
+    {
+        if (Key == EKeys::Up || Key == EKeys::Gamepad_DPad_Up)
+            GraphicsMenu->Navigate(-1);
+        else if (Key == EKeys::Down || Key == EKeys::Gamepad_DPad_Down)
+            GraphicsMenu->Navigate(1);
+        else if (Key == EKeys::Left || Key == EKeys::Gamepad_DPad_Left)
+            GraphicsMenu->Adjust(-1);
+        else if (Key == EKeys::Right || Key == EKeys::Gamepad_DPad_Right)
+            GraphicsMenu->Adjust(1);
+        else if (Pressed && (Key == EKeys::Enter || Key == EKeys::Gamepad_FaceButton_Bottom))
+            CloseGraphicsMenu(true);
+        else if (Pressed && (Key == EKeys::F6 || Key == EKeys::Escape || Key == EKeys::Gamepad_FaceButton_Right))
+            CloseGraphicsMenu(false);
+    }
+    return true;
+}
 
 bool AHoverTestController::IsNearTruck() const
 {
@@ -143,6 +232,8 @@ void AHoverTestController::DressDriver()
 void AHoverTestController::PlayerTick(float DT)
 {
     Super::PlayerTick(DT);
+    if (GraphicsMenu)
+        return;
     if (auto *P = Cast<AHoverPilot>(GetPawn()))
         Pilot = P;
     if (Pilot && !bSpawnAttempted)

@@ -849,6 +849,7 @@ void AHoverHUD::DrawHUD()
     const auto *Pilot = Cast<AHoverPilot>(GetOwningPawn());
     if (!Canvas)
         return;
+    DrawText(TEXT("D-pad Up / F6: graphics"), FLinearColor(.7f, .85f, 1.f), 24, 16);
     for (TActorIterator<AHoverZombieRange> It(GetWorld()); It; ++It)
     {
         DrawText(FString::Printf(TEXT("INVULNERABLE | Zombies: %d | Kills: %d"), It->GetAliveCount(), It->GetKills()),

@@ -3,13 +3,31 @@
 #include "GameFramework/PlayerController.h"
 #include "HoverTestController.generated.h"
 class AHoverPilot;
+class UHoverGraphicsSettings;
+class UHoverGraphicsMenu;
 
 UCLASS()
 class HOVERFLIGHT_API AHoverTestController : public APlayerController
 {
     GENERATED_BODY()
   public:
+    virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    virtual bool InputKey(const FInputKeyEventArgs &Params) override;
     virtual void PlayerTick(float DeltaSeconds) override;
+    UFUNCTION(Exec) void HoverGraphics();
+    UFUNCTION(BlueprintPure) bool IsGraphicsMenuOpen() const
+    {
+        return GraphicsMenu != nullptr;
+    }
+    UFUNCTION(BlueprintPure) UHoverGraphicsSettings *GetGraphicsSettings() const
+    {
+        return GraphicsSettings;
+    }
+    UFUNCTION(BlueprintPure) UHoverGraphicsMenu *GetGraphicsMenu() const
+    {
+        return GraphicsMenu;
+    }
     bool IsNearBike() const;
     bool IsNearTruck() const;
     bool TryEnterBike();
@@ -27,6 +45,9 @@ class HOVERFLIGHT_API AHoverTestController : public APlayerController
     }
 
   private:
+    UPROPERTY() TObjectPtr<UHoverGraphicsSettings> GraphicsSettings;
+    UPROPERTY() TObjectPtr<UHoverGraphicsMenu> GraphicsMenu;
+    void CloseGraphicsMenu(bool bApply);
     UPROPERTY() TObjectPtr<AHoverPilot> Pilot;
     UPROPERTY() TObjectPtr<APawn> Bike;
     UPROPERTY() TObjectPtr<APawn> Truck;
