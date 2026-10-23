@@ -15,8 +15,19 @@ class HOVERFLIGHT_API UHoverAuthoring : public UBlueprintFunctionLibrary
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static UWorld *GetPlaytestWorld();
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static void TestKey(APlayerController *Controller, FName Key, float Value, bool bAnalog = false);
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
+    static void IsolateTestInput(APlayerController *Controller);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static AActor *SpawnTestPlatform(FVector Location);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static FString ConfigurePrototypeEffect(UNiagaraSystem *Effect, float SpriteScale, bool LocalSpace);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static void CapturePlaytest(const FString &Filename);
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static void CaptureWorldFrame(const FString &Filename);
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static FString InspectCharacterMesh(USkeletalMesh *Mesh);
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static FString InspectTexture(class UTexture2D *Texture);
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
+    static int32 RemapAppearanceAsset(UObject *Asset, const TArray<UObject *> &Sources,
+                                      const TArray<UObject *> &Copies);
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
+    static bool ConvertAppearanceTextures(const TArray<class UTexture2D *> &Textures,
+                                          const TArray<class UMaterial *> &Materials);
 };

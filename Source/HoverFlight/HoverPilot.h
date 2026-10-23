@@ -24,6 +24,8 @@ struct FHoverBodyPart
     UPROPERTY(EditAnywhere) FName Name;
     UPROPERTY(EditAnywhere) TObjectPtr<USkeletalMesh> Mesh;
     UPROPERTY(EditAnywhere) TArray<TObjectPtr<UMaterialInterface>> Materials;
+    UPROPERTY(EditAnywhere) TMap<FName, float> Morphs;
+    UPROPERTY(EditAnywhere) TObjectPtr<class UPhysicsAsset> PhysicsOverride;
 };
 
 UCLASS(BlueprintType)
@@ -45,6 +47,14 @@ class HOVERFLIGHT_API UHoverPilotAssets : public UDataAsset
     UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> RifleAim;
     UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> Walk;
     UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> Stand;
+    UPROPERTY(EditAnywhere) TObjectPtr<class UBlendSpace> Locomotion;
+    UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> TurnLeft;
+    UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> TurnRight;
+    UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> JumpPose;
+    UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> FallPose;
+    UPROPERTY(EditAnywhere, Category = "Appearance") bool bBalancedTestLighting = true;
+    UPROPERTY(EditAnywhere, Category = "Appearance") float TestExposureBias = .25f;
+    UPROPERTY(EditAnywhere, Category = "Appearance") float TestBloomIntensity = .2f;
     UPROPERTY(EditAnywhere) TObjectPtr<UNiagaraSystem> BoosterEffect;
     UPROPERTY(EditAnywhere) TObjectPtr<UFXSystemAsset> ShockwaveEffect;
     UPROPERTY(EditAnywhere) TObjectPtr<UFXSystemAsset> MuzzleEffect;
@@ -93,6 +103,10 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
         return WingSweep;
     }
     UFUNCTION(BlueprintPure) bool CanDismount() const;
+    UFUNCTION(BlueprintPure) FVector GetLocomotionState() const
+    {
+        return FVector(GroundDirection, GetVelocity().Size2D(), GroundYawRate);
+    }
     UFUNCTION(BlueprintPure) float HoldProgress() const
     {
         return HoldTime / .65f;
@@ -121,6 +135,7 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     FVector MountFrom, MountTo, MountFeet[2];
     FRotator StartRotation;
     float ForwardInput = 0, SideInput = 0, BankInput = 0, TurnInput = 0;
+    float GroundDirection = 0, GroundYawRate = 0;
     float HoldTime = 0, TransitionTime = 0, HopTime = 0, SlideTime = 0;
     float TargetAltitude = 0, FireCooldown = 0, AimExitTime = 0, StatusTime = 0;
     float LockAlpha = 0, LockVelocity = 0, BoardPitch = 0, BoardBank = 0;

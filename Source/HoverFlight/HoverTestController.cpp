@@ -71,6 +71,10 @@ void AHoverTestController::CloseGraphicsMenu(bool bApply)
 
 bool AHoverTestController::InputKey(const FInputKeyEventArgs &Params)
 {
+#if WITH_EDITOR
+    if (bTestInputOnly && !bInjectingTestKey)
+        return false;
+#endif
     const bool Pressed = Params.Event == IE_Pressed;
     const FKey Key = Params.Key;
     if (!GraphicsMenu)
@@ -214,10 +218,15 @@ void AHoverTestController::DressDriver()
             C->SetCollisionEnabled(ECollisionEnabled::NoCollision);
         }
         C->SetSkeletalMesh(Part.Mesh);
+        C->bCastContactShadow = true;
+        if (Part.PhysicsOverride)
+            C->SetPhysicsAsset(Part.PhysicsOverride);
         for (int32 J = 0; J < Part.Materials.Num(); ++J)
             C->SetMaterial(J, Part.Materials[J]);
         if (I != 0)
             C->SetLeaderPoseComponent(Leader);
+        for (const auto &Morph : Part.Morphs)
+            C->SetMorphTarget(Morph.Key, Morph.Value);
     }
     Leader->SetAnimInstanceClass(AnimClass);
     if (auto *AnimProperty = FindFProperty<FObjectProperty>(Driver->GetClass(), TEXT("As ABP Quinn")))

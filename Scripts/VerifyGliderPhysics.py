@@ -9,7 +9,7 @@ out = Path(u.Paths.convert_relative_path_to_full(u.Paths.project_saved_dir())) /
 out.mkdir(parents=True, exist_ok=True)
 report = {'samples': [], 'events': [], 'errors': [], 'curves': []}
 (out/'runtime.json').write_text(json.dumps(report,indent=2))
-state = {'start': time.monotonic(), 'requested': False, 'index': 0, 'busy': False, 'last_sample': -1}
+state = {'start': time.monotonic(), 'requested': False, 'index': 0, 'busy': False, 'last_sample': -1, 'isolated':False}
 axes = {}
 buttons = {}
 u.get_editor_subsystem(u.LevelEditorSubsystem).load_level('/Game/JustBStudios/PostApo/Levels/PostApo')
@@ -56,7 +56,7 @@ def sample(pc, label, capture=False):
     report['samples'].append(row)
     (out/'runtime.json').write_text(json.dumps(report,indent=2))
     if capture:
-        u.HoverAuthoring.capture_playtest(str(out/(label+'.png')))
+        u.HoverAuthoring.capture_world_frame(str(out/(label+'.png')))
 
 def pitch(pc, angle):
     r=pc.get_control_rotation(); r.pitch=angle; pc.set_control_rotation(r)
@@ -175,6 +175,9 @@ def tick(dt):
         if not w:return
         pc=u.GameplayStatics.get_player_controller(w,0)
         if not pc or not isinstance(pc.get_controlled_pawn(),u.HoverPilot):return
+        if not state['isolated']:
+            u.HoverAuthoring.isolate_test_input(pc);state['isolated']=True
+            for name in ['Gamepad_LeftX','Gamepad_LeftY','Gamepad_RightX','Gamepad_RightY','Gamepad_LeftTriggerAxis','Gamepad_RightTriggerAxis']:axis(pc,name,0)
         for name,value in axes.items():u.HoverAuthoring.test_key(pc,name,value,True)
         for name,value in buttons.items():u.HoverAuthoring.test_key(pc,name,value,False)
         t=u.GameplayStatics.get_time_seconds(w)

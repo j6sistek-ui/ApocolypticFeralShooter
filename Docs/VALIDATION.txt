@@ -78,15 +78,17 @@ unverified. FPS hand placement is not authored; full Vexa is in the external vie
 R3 barrel rolls, target lock, ammo/reloading and multiplayer are deferred.
 High-altitude dismount is blocked. Exit requires speed <=3 m/s, a clear standing
 capsule and walkable ground within 1.5 m of the pads. R resets Vexa and glider.
-Walking L3 sprint, B crouch/prone/stand, B dive, directional walking/turning clips,
-Vexa defaults/jiggle and broad lighting/material polish remain separate backlog.
+Walking L3 sprint, B crouch/prone/stand and B dive remain separate backlog.
+Directional locomotion, Vexa defaults/jiggle and lighting/material corrections
+are superseded by the character pass below; owner visual acceptance remains open.
 Superseded by the graphics pass: DLSS/DLAA and NVIDIA frame generation now have
 a native controller menu. DLSS 5 is not part of the installed DLSS 4.5 v8.9 bundle.
 Zombie steering is local obstacle avoidance; complex paths may leave some stuck.
 Native engine headers produce deprecation warnings; installed MSVC is newer than
 the engine's preferred version. Supplied hoverbike pose assets report stale
-source GUIDs. Vexa's inherited UDIM textures warn that only the first tile is
-built with virtual texturing off; original configuration is retained. These
+source GUIDs. Retained original Xandra textures still warn about nonvirtual UDIMs
+when the original mesh material dependencies load. Vexa now uses isolated virtual
+copies with both tiles; no virtual-sampler mismatch remains on her active materials. These
 warnings did not prevent the recorded gameplay, but this is not release QA.
 Four missing vendor/demo dependency references were already absent at source.
 Docker is unavailable; a minimal container syntax workflow is supplied. Native
@@ -130,3 +132,44 @@ the owner's engine installation and SpaceSurvival session were not modified.
 Engine-root plugin placement caused a native RulesError; local project placement
 resolved it. For future engine-wide installation use Engine/Plugins/Marketplace.
 Purchased code/binaries and the owner's AFS.uproject edits remain outside this commit.
+
+CHARACTER PASS - 2026-10-23 UTC
+Native UE5.8 build, clang-format, Python syntax and git diff whitespace checks pass.
+Scripts/VerifyCharacter.py runs 49 seconds in an unsaved, rendered D3D12 Play world.
+The test isolates injected input from a connected physical controller and uses
+a temporary platform above the ruins to avoid obstacle-contaminated movement.
+Scripts/AssessCharacter.py passes 22 behavioral/default checks. Observed values:
+- Analog walk 200 cm/s; full jog/back/left/right 600 cm/s, directions 0/180/-90/+90.
+- Foot cycles change with direction and speed. Stationary turns step at +/-95 deg/s.
+- Jump reaches 183.5 cm; grounded aiming changes foot height by 0.0034 cm.
+- Chest/glute secondary motion is active, never exceeds 2 cm and settles to 0.014 cm.
+- All six body components match the saved source morphs/physics overrides and
+  use contact shadows plus the isolated local material graph.
+- Runtime exposure 0.25, bloom 0.2, grain 0, motion blur 0.15, final gather 5.
+  Lumen hardware ray tracing and virtual texturing CVars are enabled.
+Sequential walk/turn frames and matching-camera lighting comparisons were inspected.
+The final glider regression passes all 18 checks: 56 m/s boost, signed wings,
+coasting/braking, climb/dive/bank, high-exit blocking, low exit/gravity, remount and
+landing. Maximum sampled foot-to-pad target error is 0.67 cm. The controller
+vehicle regression passes all 7 checks: bike/truck entry, driving and exit,
+plus six-part Vexa appearance on the bike. Bike traveled 7.82 m and truck 21.62 m;
+controller hold X exits the bike and hold Y exits the truck. Captures inspected.
+Stride sample rates were calibrated against planted-foot motion in the source clips.
+Sparse rendered foot-slip estimates remain diagnostics, not cinematic foot-lock proof.
+
+Source BP_Vexa_Stylized had its Physics? switch disabled. AFS enables the source
+Xandra chest/glute spring settings with a 2 cm safety limit, as requested. This
+does not add cloth, hair simulation, or bike-vendor secondary animation. The bike
+retains its supplied animation graph; Vexa appearance/morphs are applied to its rider.
+The local data asset was backed up before changes. Five two-tile textures and a
+compatible black fallback were converted only inside HoverPrototype/Appearance;
+35 original shader asset hashes remain unchanged. Original SpaceSurvival assets
+and the source glider/truck are preserved. Runtime lighting does not save the map.
+
+Run VerifyCharacter.py via Unreal -ExecutePythonScript -RenderOffscreen, then run
+AssessCharacter.py Saved/HoverPrototype/CharacterReview/runtime.json with Python.
+VerifyVehicles.py exercises controller entry, driving and exit for bike/truck.
+The setup/refinement scripts author local assets; do not rerun setup over an
+already configured Appearance graph. Retain native Content and local Config files
+alongside the source checkpoint. This remains editor test evidence, not packaged
+performance, long-session, physical-controller or owner visual acceptance.

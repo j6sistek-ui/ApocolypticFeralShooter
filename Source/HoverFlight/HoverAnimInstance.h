@@ -10,6 +10,12 @@ class HOVERFLIGHT_API UHoverAnimInstance : public UAnimInstance
   public:
     UPROPERTY() TObjectPtr<UAnimSequence> Sequence;
     UPROPERTY() TObjectPtr<UAnimSequence> RifleAim;
+    UPROPERTY() TObjectPtr<class UBlendSpace> Locomotion;
+    FVector LocomotionInput = FVector::ZeroVector;
+    bool bGroundLocomotion = false;
+    float SequenceRate = 1.f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) bool bSecondaryMotion = true;
+    UPROPERTY(BlueprintReadOnly) TArray<FVector> SecondaryOffsets;
     bool bAiming = false;
     bool bLoop = true;
     int32 RestartSerial = 0;

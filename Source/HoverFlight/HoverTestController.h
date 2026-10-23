@@ -11,6 +11,10 @@ class HOVERFLIGHT_API AHoverTestController : public APlayerController
 {
     GENERATED_BODY()
   public:
+#if WITH_EDITOR
+    bool bTestInputOnly = false;
+    bool bInjectingTestKey = false;
+#endif
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     virtual bool InputKey(const FInputKeyEventArgs &Params) override;

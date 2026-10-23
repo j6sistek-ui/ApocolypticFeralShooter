@@ -23,6 +23,20 @@ assets are deliberately excluded from source control; a source checkout alone
 does not contain a playable installation. The locally authored assets must be
 retained alongside the code.
 
+On foot, an eight-direction idle/walk/jog blend follows actual movement speed;
+stationary camera turns use stepping animations. Vexa retains her source body/face
+morphs, physics overrides, contact shadows and 600 cm/s walk/jump defaults. Chest
+and glute springs run on foot and on the personal glider, limited to 2 cm. The
+supplied bike keeps its own riding animation graph and receives Vexa's appearance.
+
+The local `HoverPrototype/Appearance` material graph contains complete virtual
+UDIM textures; original materials and SpaceSurvival remain intact. The PostApo
+runtime lighting lowers exposure/bloom, removes film grain and preserves its
+Lumen final-gather quality. The data asset exposes Balanced Test Lighting,
+Test Exposure Bias and Test Bloom Intensity. Turning this treatment off restores
+the authored map on the next Play session. Local renderer configuration enables
+virtual textures and Lumen hardware ray tracing; restart after changing these.
+
 See `Docs/CONTROLS.txt` for the input map and `Docs/VALIDATION.txt` for evidence
 and current limits. Right-stick pitch drives climb/dive along the direction of travel;
 L1/R1 bank left/right. Released thrust coasts, opposing thrust brakes before reverse,

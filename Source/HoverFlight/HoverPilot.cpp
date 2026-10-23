@@ -24,6 +24,9 @@
 #include "Engine/Engine.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/World.h"
+#include "Engine/PostProcessVolume.h"
+#include "Engine/DirectionalLight.h"
+#include "Components/DirectionalLightComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/SpringArmComponent.h"
@@ -44,9 +47,9 @@ AHoverPilot::AHoverPilot(const FObjectInitializer &ObjectInitializer)
 {
     PrimaryActorTick.bCanEverTick = true;
     GetCapsuleComponent()->InitCapsuleSize(32.f, 97.f);
-    bUseControllerRotationYaw = true;
-    GetCharacterMovement()->MaxWalkSpeed = 500.f;
-    GetCharacterMovement()->JumpZVelocity = 420.f;
+    bUseControllerRotationYaw = false;
+    GetCharacterMovement()->MaxWalkSpeed = 600.f;
+    GetCharacterMovement()->JumpZVelocity = 600.f;
     GetCharacterMovement()->MaxFlySpeed = 8000.f;
     GetCharacterMovement()->BrakingDecelerationFlying = 0.f;
     GetCharacterMovement()->BrakingFrictionFactor = 0.f;
@@ -103,10 +106,15 @@ void AHoverPilot::BeginPlay()
             Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
         }
         Component->SetSkeletalMesh(Part.Mesh);
+        Component->bCastContactShadow = true;
+        if (Part.PhysicsOverride)
+            Component->SetPhysicsAsset(Part.PhysicsOverride);
         for (int32 M = 0; M < Part.Materials.Num(); ++M)
             Component->SetMaterial(M, Part.Materials[M]);
         if (Index != 0)
             Component->SetLeaderPoseComponent(GetMesh());
+        for (const auto &Morph : Part.Morphs)
+            Component->SetMorphTarget(Morph.Key, Morph.Value);
         Parts.Add(Component);
     }
     ViewGun->SetStaticMesh(Assets->Gun);
@@ -472,10 +480,19 @@ void AHoverPilot::UpdateFlight(float DT)
     }
     if (!bMounted)
     {
-        AddMovementInput(GetActorForwardVector(), ForwardInput);
-        AddMovementInput(GetActorRightVector(), SideInput);
+        const FRotator Facing(0, GetControlRotation().Yaw, 0);
+        const float DeltaYaw = FMath::FindDeltaAngleDegrees(GetActorRotation().Yaw, Facing.Yaw);
+        const bool Moving = GetVelocity().Size2D() > 12.f || FMath::Abs(ForwardInput) + FMath::Abs(SideInput) > .05f;
+        // A stationary camera turn takes visible steps. Travel remains camera-relative.
+        const float Step = FMath::Clamp(DeltaYaw, -(Moving ? 540.f : 95.f) * DT, (Moving ? 540.f : 95.f) * DT);
+        GroundYawRate = DT > 0 ? Step / DT : 0;
+        SetActorRotation(FRotator(0, GetActorRotation().Yaw + Step, 0));
+        AddMovementInput(Facing.Vector(), ForwardInput);
+        AddMovementInput(FRotationMatrix(Facing).GetUnitAxis(EAxis::Y), SideInput);
         return;
     }
+    SetActorRotation(FRotator(0, GetControlRotation().Yaw, 0));
+    GroundYawRate = 0;
     Move->SetMovementMode(MOVE_Flying);
     if (bSteppingOn)
     {
@@ -598,8 +615,10 @@ void AHoverPilot::UpdateAppearance(float DT)
             if (BoardBank > 7.f)
                 Pose = Assets->RideRight;
         }
-        else if (GetVelocity().Size2D() > 20)
-            Pose = Assets->Walk;
+        else if (GetCharacterMovement()->IsFalling())
+            Pose = GetVelocity().Z > 80.f ? Assets->JumpPose : Assets->FallPose;
+        else if (GetVelocity().Size2D() < 12.f && FMath::Abs(GroundYawRate) > 8.f)
+            Pose = GroundYawRate < 0 ? Assets->TurnLeft : Assets->TurnRight;
         PlayPose(Pose, true);
     }
     Camera->SetFieldOfView(
@@ -655,6 +674,15 @@ void AHoverPilot::UpdateAppearance(float DT)
     if (auto *Instance = Cast<UHoverAnimInstance>(GetMesh()->GetAnimInstance()))
     {
         Instance->FootLock = bMounted ? 1.f : 0.f;
+        const FVector LocalVelocity = GetActorRotation().UnrotateVector(GetVelocity());
+        const float Speed = LocalVelocity.Size2D();
+        if (Speed > 8.f)
+            GroundDirection = FMath::RadiansToDegrees(FMath::Atan2(LocalVelocity.Y, LocalVelocity.X));
+        Instance->Locomotion = Assets->Locomotion;
+        Instance->LocomotionInput = FVector(GroundDirection, Speed, 0);
+        const bool Turning = !bMounted && Speed < 12.f && FMath::Abs(GroundYawRate) > 8.f;
+        Instance->bGroundLocomotion = !bMounted && !GetCharacterMovement()->IsFalling() && !Turning;
+        Instance->SequenceRate = Turning ? FMath::Clamp(FMath::Abs(GroundYawRate) / 95.f, .25f, 1.4f) : 1.f;
         Instance->RifleAim = Assets->RifleAim;
         Instance->bAiming = bAiming || GunRaisedTime > 0;
         Instance->RiderLean = bMounted ? RiderLean : 0;
@@ -899,5 +927,32 @@ AHoverGameMode::AHoverGameMode()
 void AHoverGameMode::BeginPlay()
 {
     Super::BeginPlay();
+    const auto *Defaults =
+        LoadObject<UHoverPilotAssets>(nullptr, TEXT("/Game/HoverPrototype/DA_HoverPilot.DA_HoverPilot"));
+    if (Defaults && Defaults->bBalancedTestLighting && GetWorld()->GetMapName().EndsWith(TEXT("PostApo")))
+    {
+        // Local runtime treatment; the purchased map and its authored light actors remain intact.
+        for (TActorIterator<APostProcessVolume> It(GetWorld()); It; ++It)
+        {
+            auto &Settings = It->Settings;
+            Settings.bOverride_AutoExposureBias = true;
+            Settings.AutoExposureBias = Defaults->TestExposureBias;
+            Settings.bOverride_BloomIntensity = true;
+            Settings.BloomIntensity = Defaults->TestBloomIntensity;
+            Settings.bOverride_FilmGrainIntensity = true;
+            Settings.FilmGrainIntensity = 0;
+            Settings.bOverride_MotionBlurAmount = true;
+            Settings.MotionBlurAmount = .15f;
+            Settings.bOverride_LumenFinalGatherQuality = true;
+            Settings.LumenFinalGatherQuality = FMath::Max(Settings.LumenFinalGatherQuality, 2.f);
+        }
+        for (TActorIterator<ADirectionalLight> It(GetWorld()); It; ++It)
+        {
+            It->GetLightComponent()->SetIndirectLightingIntensity(1.f);
+            It->GetLightComponent()->SetVolumetricScatteringIntensity(1.f);
+        }
+        UE_LOG(LogTemp, Display, TEXT("HOVER_LIGHTING exposure=%.2f bloom=%.2f indirect=1 grain=0"),
+               Defaults->TestExposureBias, Defaults->TestBloomIntensity);
+    }
     GetWorld()->SpawnActor<AHoverZombieRange>();
 }
