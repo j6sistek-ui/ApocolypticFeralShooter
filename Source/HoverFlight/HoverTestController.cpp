@@ -23,10 +23,15 @@
 #include "PhysicsEngine/PhysicsThrusterComponent.h"
 #include "PhysicsEngine/BodyInstance.h"
 #include "Misc/PackageName.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 
 void AHoverTestController::BeginPlay()
 {
     Super::BeginPlay();
+#if WITH_EDITOR
+    bSpawnAttempted = FParse::Param(FCommandLine::Get(), TEXT("AFSReviewNoVehicles"));
+#endif
     GraphicsSettings = NewObject<UHoverGraphicsSettings>(this);
     GraphicsSettings->Initialize(GetWorld());
 }
@@ -49,6 +54,12 @@ void AHoverTestController::HoverGraphics()
     }
     if (!GraphicsSettings || IsPaused() || !SetPause(true))
         return;
+    if (auto *ActivePilot = Cast<AHoverPilot>(GetPawn()))
+    {
+        ActivePilot->CancelPostureInput();
+        if (ActivePilot->Combat && ActivePilot->Combat->IsInventoryOpen())
+            ActivePilot->Combat->ToggleInventory();
+    }
     GraphicsMenu = CreateWidget<UHoverGraphicsMenu>(this);
     GraphicsMenu->Open(GraphicsSettings);
     GraphicsMenu->AddToViewport(10000);
@@ -106,7 +117,26 @@ bool AHoverTestController::InputKey(const FInputKeyEventArgs &Params)
     const bool Pressed = Params.Event == IE_Pressed;
     const FKey Key = Params.Key;
     if (!GraphicsMenu)
+        if (auto *ActivePilot = Cast<AHoverPilot>(GetPawn());
+            ActivePilot && ActivePilot->Combat && ActivePilot->Combat->IsInventoryOpen())
+        {
+            if (Pressed && (Key == EKeys::Gamepad_FaceButton_Right || Key == EKeys::Escape || Key == EKeys::Tab ||
+                            Key == EKeys::Gamepad_DPad_Down))
+                ActivePilot->Combat->ToggleInventory();
+            else if (Pressed && (Key == EKeys::F6 || Key == EKeys::Gamepad_DPad_Up))
+                HoverGraphics();
+            // Slate handles the inventory cursor/click first. Unhandled UI keys
+            // must not stand up from prone, jump or reach the Parkour Blueprint.
+            return true;
+        }
+    if (!GraphicsMenu)
     {
+        if (Pressed && (Key == EKeys::Gamepad_RightThumbstick || Key == EKeys::V))
+            if (auto *ActivePilot = Cast<AHoverPilot>(GetPawn()))
+            {
+                ActivePilot->Melee();
+                return true;
+            }
         if (auto *P = Cast<AHoverPilot>(GetPawn());
             Pressed && P && P->IsProne() && (Key == EKeys::SpaceBar || Key == EKeys::Gamepad_FaceButton_Bottom))
         {
@@ -130,11 +160,6 @@ bool AHoverTestController::InputKey(const FInputKeyEventArgs &Params)
             if (Key == EKeys::Gamepad_DPad_Left)
             {
                 P->Combat->SelectQuickbar();
-                return true;
-            }
-            if (Key == EKeys::Gamepad_RightThumbstick || Key == EKeys::V)
-            {
-                P->Combat->Melee();
                 return true;
             }
             if (Key == EKeys::R)
@@ -250,12 +275,14 @@ void AHoverTestController::UpdateBikeMappings()
 bool AHoverTestController::IsNearTruck() const
 {
     return Truck && Pilot && !Pilot->IsMounted() &&
+           FMath::Abs(Pilot->GetActorLocation().Z - Truck->GetActorLocation().Z) < 220.f &&
            FVector::Dist2D(Pilot->GetActorLocation(), Truck->GetActorLocation()) < 420.f;
 }
 
 bool AHoverTestController::IsNearBike() const
 {
     return Bike && Pilot && !Pilot->IsMounted() &&
+           FMath::Abs(Pilot->GetActorLocation().Z - Bike->GetActorLocation().Z) < 220.f &&
            FVector::Dist2D(Pilot->GetActorLocation(), Bike->GetActorLocation()) < 280.f;
 }
 

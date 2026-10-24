@@ -234,6 +234,8 @@ float AHoverCyberZombie::TakeDamage(float Damage, const FDamageEvent &Event, ACo
         FHitResult Hit;
         FVector Direction;
         Event.GetBestHitInfo(this, Causer, Hit, Direction);
+        UE_LOG(LogTemp, Verbose, TEXT("HOVER_ZOMBIE_HIT causer=%s bone=%s damage=%.1f point=%s"), *GetNameSafe(Causer),
+               *Hit.BoneName.ToString(), Damage, *Hit.ImpactPoint.ToString());
         if (EventController && Cast<AHoverPilot>(EventController->GetPawn()) && SurvivalComponent &&
             (Hit.BoneName.ToString().Contains(TEXT("head"), ESearchCase::IgnoreCase) || (Mode && Mode->HasInstaKill())))
             Damage = FMath::Max(Damage, SurvivalComponent->GetHealth());

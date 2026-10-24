@@ -1,5 +1,26 @@
 AFS LOCAL TEST SANDBOX - 2026-10-22
 
+CPU CONTINUATION - 2026-10-24 (latest changes; no new GPU acceptance)
+Owner explicitly requested continued work without GPU tests. Build23 passed8.53s.
+Katana native body contact2000->1950 follows an undamaging windup; repeated presses
+do not add damage, and inventory entry cancels pending contact. Both camera modes
+select the matching blade and hide the rifle. Recovery hides the blade. Successful
+bike entry cancels the swing and pending damage; failed high entry stays on foot.
+Inventory clears a held crouch, A cannot escape the UI into a prone-stand action,
+and graphics opening from inventory closes the inventory correctly.
+PostApo CPU route test: jump, terrain shots and generic damage request zero blood;
+a legitimate katana point hit requests one burst and deals50damage. A later ground
+shot does not add blood. This is event routing evidence, not particle appearance.
+The native knife slash was selected after comparison with owned punch clips.
+CPU Blender replay validates reference-pose mapping and coarse grip/screen framing;
+Unreal rendering, final motion quality and physical controller feel remain open.
+Read Docs/KATANA_20261023.txt and outputs/AFS_Test/QualityContinue20261023.
+Fresh vehicles22 and city22 runs also passed: all3rides, high-entry rejection,
+rifle3-shot kill, pause, wave2 and City/PostApo/City travel. Exactly1katana actor
+exists in each world; PostApo still has no Cyber combatbridge. The existing CLS
+Divide_VectorVector startup warning occurred once per map in both city12 and
+city22 (3occurrences each). Its source remains open; no warning-free claim.
+
 QUALITY PASS - 2026-10-23 (supersedes conflicting historical controls/claims below)
 Current feature scope and limits: Docs/QUALITY_20261023.txt.
 Final build14 succeeded in15.14seconds. Clang-format and git diff whitespace checks pass.

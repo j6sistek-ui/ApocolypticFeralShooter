@@ -516,6 +516,10 @@ FString UHoverAuthoring::DescribeNiagaraEffect(UNiagaraSystem *Effect)
                 Report += FString::Printf(TEXT(" = %.4f"), Store.GetParameterValue<float>(Variable));
             else if (Variable.GetType() == FNiagaraTypeDefinition::GetColorDef())
                 Report += TEXT(" = ") + Store.GetParameterValue<FLinearColor>(Variable).ToString();
+            else if (Variable.GetType() == FNiagaraTypeDefinition::GetIntDef())
+                Report += FString::Printf(TEXT(" = %d"), Store.GetParameterValue<int32>(Variable));
+            else if (Variable.GetType() == FNiagaraTypeDefinition::GetVec3Def())
+                Report += TEXT(" = ") + Store.GetParameterValue<FVector3f>(Variable).ToString();
             Report += TEXT("\n");
         }
     };

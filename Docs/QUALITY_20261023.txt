@@ -33,11 +33,24 @@ CYBER CITY: ACTUAL PURCHASED SYSTEMS IN USE
 - Native rifle cadence, recoil/spread and ammo/reload timers feed the existing
   Ballista presentation. Native melee sphere hit/cooldown feeds the owned action.
   R3/V melee; A remains jump. Magazines persist across quickbar swaps, including0.
+  The supplied bloodied katana now uses the native ZESP knife slash via a local
+  root-locked copy. It appears only during a swing; the rifle is hidden until
+  recovery. The native sphere trace resolves at0.30s, with0.8s recovery and a
+  1.1 attacks/s cooldown. Common katana presentation also works in PostApo;
+  its inventory, waves and unlimited-ammo range remain separate from Cyber City.
   Reload cancels on melee, swapping and ride entry. No refill through empty swaps.
+  Inventory blocks gameplay buttons, including A while prone, and clears held
+  crouch input. Opening graphics from inventory closes inventory first. Reload
+  cannot replace an active melee swing, and repeated melee cannot cancel it.
+  Bike/truck entry now also requires vertical proximity within220cm, preventing
+  entry through a floor or from a high platform. Normal three-ride tests pass.
 - Native inventory/quickbar, item stacks, weight, equipment capacity, drag/drop,
   ammo pickups and shared Survival-component gold. Supply crates at street,
   market and north shop offer tiers1/2/3 for500/1250/2500; owned-weapon ammo is250.
   Five local Ballista definitions retain the vendor rifle tier ratios.
+  CPU floor traces found7-12cm hover gaps under the crates. Their bounding bases
+  now sit0.5cm above the road, with all3navigation paths retained. Visual dressing
+  and controller interaction appearance still need the deferred rendered review.
 - Native probabilistic loot: local ammo plus Nuke, Speed and InstaKill. First
   successful entry wins after the overall loot roll, as in the supplied code.
 - Native perception senses now accept the possessed AFS pawn. Direct-chase mode
@@ -96,6 +109,9 @@ Local purchased plugin patches (not committed to Git):
 4. ZE_InventoryWidgetBase.cpp: missing cells use supplied concrete WBP_GridCell,
    not the abstract native class. Native slot/drag/tooltip behavior is retained.
 5. SZE_ControlPanel.cpp: include local item/zombie/wave definitions in its browser.
+6. ZE_MeleeWeapon.h/.cpp: extract the existing trace into a virtual hook so the
+   local katana can delay contact to its strike. Native cooldown, trace and damage
+   logic remain in the purchased class; original vendor project is unchanged.
 These are in addition to the earlier documented UE5.8 compatibility patches.
 Do not copy a source-only checkout to SpaceSurvival expecting assets or licensed
 plugin changes to follow. Keep the native backups and patch receipt with any port.
@@ -109,3 +125,10 @@ Physical controller cursor/feel, final effects and city placement visuals, packa
 performance and long-session acceptance remain open. The source checks and injected
 inputs do not replace those gates. Directional thrusters/assisted landing remain
 the earlier plan-only stage; other glider rigs are delivered separately in Blender.
+
+CPU CONTINUATION
+The owner explicitly deferred GPU tests. Native katana/controller tests and CPU
+Blender pose replay supplement the earlier evidence; no new Unreal particle or
+render-quality pass is implied. Dedicated human slide, prone entry/exit and
+wall-run animations remain an asset gap after the wider rifle-archive audit.
+See Docs/KATANA_20261023.txt and the QualityContinue20261023 evidence folder.

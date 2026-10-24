@@ -13,6 +13,10 @@
 #include "Animation/AnimSequence.h"
 #include "Blueprint/UserWidget.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerInput.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Camera/CameraComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
@@ -94,12 +98,100 @@ void AHoverCyberRifle::CancelReload()
     if (auto *Pilot = Cast<AHoverPilot>(OwnerPawn); Pilot && Pilot->LocomotionBridge)
         Pilot->LocomotionBridge->CancelAction();
 }
+AHoverMeleeWeapon::AHoverMeleeWeapon()
+{
+    PrimaryActorTick.bCanEverTick = true;
+}
+bool AHoverMeleeWeapon::IsSwinging() const
+{
+    return GetWorld() && GetWorld()->GetTimeSeconds() < SwingEnd;
+}
+void AHoverMeleeWeapon::CancelSwing()
+{
+    if (IsSwinging())
+        if (auto *Pilot = Cast<AHoverPilot>(OwnerPawn); Pilot && Pilot->LocomotionBridge)
+            Pilot->LocomotionBridge->CancelAction();
+    GetWorldTimerManager().ClearTimer(ContactTimer);
+    SwingEnd = 0;
+    SetActorHiddenInGame(true);
+    StaticMeshTP->SetVisibility(false);
+    StaticMeshFP->SetVisibility(false);
+}
+void AHoverMeleeWeapon::EndPlay(const EEndPlayReason::Type Reason)
+{
+    CancelSwing();
+    Super::EndPlay(Reason);
+}
+void AHoverMeleeWeapon::Tick(float DT)
+{
+    Super::Tick(DT);
+    auto *Pilot = Cast<AHoverPilot>(OwnerPawn);
+    const bool Active = Pilot && Pilot->IsOnFoot() && IsSwinging();
+    SetActorHiddenInGame(!Active);
+    if (!Active)
+    {
+        StaticMeshTP->SetVisibility(false);
+        StaticMeshFP->SetVisibility(false);
+        return;
+    }
+    const bool ThirdPerson = Pilot->IsThirdPersonView();
+    StaticMeshTP->SetHiddenInGame(!ThirdPerson);
+    StaticMeshFP->SetHiddenInGame(ThirdPerson);
+    StaticMeshTP->SetVisibility(ThirdPerson);
+    StaticMeshFP->SetVisibility(!ThirdPerson);
+    if (!ThirdPerson)
+    {
+        // Use the owned attack's hand motion for the FPS presentation too. This
+        // changes the weapon transform, never camera position or arm length.
+        const auto Hand = Pilot->GetMesh()->GetSocketTransform(TEXT("hand_r"), RTS_Component);
+        const FVector Delta = Hand.GetLocation() - HandStart;
+        const FQuat BodyToCamera = FRotator(0, -90, 0).Quaternion();
+        StaticMeshFP->SetRelativeLocation(FVector(75, 30, -15) + BodyToCamera.RotateVector(Delta) * .35f);
+        StaticMeshFP->SetRelativeRotation(BodyToCamera * Pilot->GetMesh()->GetComponentQuat().Inverse() *
+                                          StaticMeshTP->GetComponentQuat());
+    }
+}
+void AHoverMeleeWeapon::PerformMeleeTrace()
+{
+    // Keep the purchased trace/damage path, resolving at the attack's strike
+    // rather than damaging a target on the first wind-up frame.
+    GetWorldTimerManager().SetTimer(
+        ContactTimer,
+        [this]() {
+            auto *Pilot = Cast<AHoverPilot>(OwnerPawn);
+            if (Pilot && Pilot->IsOnFoot() && IsSwinging())
+                Super::PerformMeleeTrace();
+        },
+        .30f, false);
+}
 void AHoverMeleeWeapon::PlayFireAnimation()
 {
     LastFireAnimTime = GetWorld()->GetTimeSeconds();
+    SwingEnd = LastFireAnimTime + .8f;
     if (auto *Pilot = Cast<AHoverPilot>(OwnerPawn); Pilot && Pilot->LocomotionBridge)
+    {
+        auto *Body = Pilot->GetMesh();
+        const auto Hand = Body->GetSocketTransform(TEXT("hand_r"), RTS_Component);
+        HandStart = Hand.GetLocation();
+        if (!bGripConfigured)
+        {
+            const FTransform HandWorld = Body->GetSocketTransform(TEXT("hand_r"));
+            const FVector Index = HandWorld.InverseTransformPosition(Body->GetSocketLocation(TEXT("index_02_r")));
+            const FVector Pinky = HandWorld.InverseTransformPosition(Body->GetSocketLocation(TEXT("pinky_02_r")));
+            const FVector BladeAxis = (Index - Pinky).GetSafeNormal(SMALL_NUMBER, FVector::UpVector);
+            StaticMeshTP->AttachToComponent(Body, FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+                                            TEXT("hand_r"));
+            StaticMeshTP->SetRelativeLocation((Index + Pinky) * .5f);
+            StaticMeshTP->SetRelativeRotation(FRotationMatrix::MakeFromZX(BladeAxis, FVector::ForwardVector).Rotator());
+            StaticMeshFP->AttachToComponent(Pilot->FirstPersonCamera,
+                                            FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+            StaticMeshFP->CastShadow = false;
+            AddTickPrerequisiteComponent(Body);
+            bGripConfigured = true;
+        }
         Pilot->LocomotionBridge->PlayAction(
-            LoadObject<UAnimSequence>(nullptr, TEXT("/Game/HoverPrototype/Animations/QA_Melee.QA_Melee")));
+            LoadObject<UAnimSequence>(nullptr, TEXT("/Game/HoverPrototype/Animations/QA_Katana.QA_Katana")), .8f);
+    }
 }
 UHoverCombatBridge::UHoverCombatBridge()
 {
@@ -142,14 +234,7 @@ void UHoverCombatBridge::BeginPlay()
         if (auto *Weapon = GetWeapon())
             Weapon->FinalizeEquipped();
     }
-    MeleeWeapon = GetWorld()->SpawnActor<AHoverMeleeWeapon>();
-    if (MeleeWeapon)
-    {
-        MeleeWeapon->SetWeaponDefinition(LoadObject<UZE_WeaponDefinition>(
-            nullptr, TEXT("/Game/HoverPrototype/ZombieEngine/DA_AFS_Melee.DA_AFS_Melee")));
-        MeleeWeapon->Equip(Pilot);
-        MeleeWeapon->SetActorHiddenInGame(true);
-    }
+    MeleeWeapon = Pilot->MeleeWeapon;
 }
 AZE_WeaponBase *UHoverCombatBridge::GetWeapon() const
 {
@@ -157,7 +242,7 @@ AZE_WeaponBase *UHoverCombatBridge::GetWeapon() const
 }
 void UHoverCombatBridge::SetTrigger(bool Held)
 {
-    Held = Held && !InventoryUI;
+    Held = Held && !InventoryUI && !(MeleeWeapon && MeleeWeapon->IsSwinging());
     if (auto *Weapon = GetWeapon())
     {
         if (Held && !bTriggerHeld)
@@ -169,7 +254,7 @@ void UHoverCombatBridge::SetTrigger(bool Held)
 }
 void UHoverCombatBridge::Reload()
 {
-    if (!InventoryUI)
+    if (!InventoryUI && !(MeleeWeapon && MeleeWeapon->IsSwinging()))
         if (auto *Weapon = GetWeapon())
             Weapon->Reload();
 }
@@ -185,7 +270,7 @@ void UHoverCombatBridge::SuspendForRide()
 void UHoverCombatBridge::Melee()
 {
     auto *Pilot = Cast<AHoverPilot>(GetOwner());
-    if (!Pilot || !Pilot->IsOnFoot() || InventoryUI || !MeleeWeapon)
+    if (!Pilot || !Pilot->IsOnFoot() || InventoryUI || !MeleeWeapon || MeleeWeapon->IsSwinging())
         return;
     if (auto *Weapon = Cast<AHoverCyberRifle>(GetWeapon()))
         Weapon->CancelReload();
@@ -259,6 +344,11 @@ void UHoverCombatBridge::ToggleInventory()
     if (!PC || !Pilot->IsOnFoot())
         return;
     SetTrigger(false);
+    if (PC->PlayerInput)
+        PC->PlayerInput->FlushPressedKeys();
+    Pilot->CancelPostureInput();
+    if (MeleeWeapon)
+        MeleeWeapon->CancelSwing();
     if (InventoryUI)
     {
         InventoryUI->RemoveFromParent();
@@ -344,8 +434,6 @@ void UHoverCombatBridge::EndPlay(const EEndPlayReason::Type Reason)
         InventoryUI->RemoveFromParent();
     InventoryUI = nullptr;
     UpdateInventoryCursor();
-    if (MeleeWeapon)
-        MeleeWeapon->Destroy();
     if (Weapons)
         Weapons->UnequipCurrentWeapon();
     Super::EndPlay(Reason);

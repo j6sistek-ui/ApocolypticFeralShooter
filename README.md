@@ -17,6 +17,11 @@ reload, melee, inventory, quickbar, gold, loot and wall-buy systems. Three suppl
 crates offer Ballista tiers and ammunition. PostApo keeps unlimited ammo and its
 original zombie range; it has no Zombie Engine inventory or waves.
 
+R3/V uses the supplied bloodied katana on foot in either level. It uses the
+purchased knife slash, native melee contact/cooldown and a local hand attachment.
+The rifle hides during the swing. See `Docs/KATANA_20261023.txt` for provenance,
+timing, rollback files and the distinction between CPU checks and rendered review.
+
 Eight curated entrances use the construction area, shop alcoves, service streets
 and courtyard. Their navigation routes connect to the starting street. Spawns wait
 when an entrance is within14m, openly visible ahead, occupied, or more than100m

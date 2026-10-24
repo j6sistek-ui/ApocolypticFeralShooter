@@ -9,6 +9,9 @@
 #include "HoverMotion.h"
 #include "HoverMovementComponent.h"
 #include "Settings/ZE_PlayerSettings.h"
+#include "Inventory/ZE_WeaponDefinition.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 #include "Perception/AISense_Hearing.h"
 #include "EngineUtils.h"
 
@@ -211,6 +214,13 @@ void AHoverPilot::BeginPlay()
         LocomotionBridge->RegisterComponent();
     }
     PlayPose(Assets->Stand, true);
+    MeleeWeapon = GetWorld()->SpawnActor<AHoverMeleeWeapon>();
+    if (MeleeWeapon)
+    {
+        MeleeWeapon->SetWeaponDefinition(LoadObject<UZE_WeaponDefinition>(
+            nullptr, TEXT("/Game/HoverPrototype/ZombieEngine/DA_AFS_Melee.DA_AFS_Melee")));
+        MeleeWeapon->Equip(this);
+    }
     if (Cast<AHoverCyberCityGameMode>(GetWorld()->GetAuthGameMode()))
     {
         Combat = NewObject<UHoverCombatBridge>(this, TEXT("CyberCitySystems"));
@@ -226,6 +236,26 @@ void AHoverPilot::BeginPlay()
     }
     UE_LOG(LogTemp, Display, TEXT("HOVER_READY Vexa parts=%d glider=%s gun=%s"), Parts.Num(),
            *GetNameSafe(Assets->Glider), *GetNameSafe(Assets->Gun));
+}
+
+void AHoverPilot::EndPlay(const EEndPlayReason::Type Reason)
+{
+    if (MeleeWeapon)
+        MeleeWeapon->Destroy();
+    Super::EndPlay(Reason);
+}
+
+void AHoverPilot::Melee()
+{
+    if (!IsOnFoot() || !MeleeWeapon)
+        return;
+    if (Combat)
+        Combat->Melee();
+    else
+    {
+        MeleeWeapon->StartFire();
+        MeleeWeapon->StopFire();
+    }
 }
 
 void AHoverPilot::SetupPlayerInputComponent(UInputComponent *Input)
@@ -270,6 +300,8 @@ bool AHoverPilot::CanDismount() const
 
 bool AHoverPilot::PrepareForRide()
 {
+    if (MeleeWeapon)
+        MeleeWeapon->CancelSwing();
     GroundSlideTime = 0;
     bGroundCrouchHeld = false;
     UnCrouch();
@@ -391,8 +423,9 @@ void AHoverPilot::SetView()
         C->SetActive(false);
     FirstPersonCamera->SetActive(FirstPerson);
     ReviewCamera->SetActive(!FirstPerson);
-    ViewGun->SetVisibility(FirstPerson, true);
-    WorldGun->SetVisibility(!FirstPerson && (bAiming || GunRaisedTime > 0), true);
+    const bool Swinging = MeleeWeapon && MeleeWeapon->IsSwinging();
+    ViewGun->SetVisibility(!Swinging && FirstPerson, true);
+    WorldGun->SetVisibility(!Swinging && !FirstPerson && (bAiming || GunRaisedTime > 0), true);
     // The full-body riding pose crosses the eye camera during pitch and recoil.
     // Keep it for the external view; the FPS camera renders its own rifle.
     for (USkeletalMeshComponent *Part : Parts)
@@ -582,8 +615,16 @@ void AHoverPilot::UpdateInput(float DT)
                                       : PC->GetInputAnalogKeyState(EKeys::Gamepad_RightTriggerAxis) > .2f;
     if (Combat)
         Combat->SetTrigger((FirePressed || Down(EKeys::LeftMouseButton)) && TransitionTime <= 0);
-    else if ((FirePressed || Down(EKeys::LeftMouseButton)) && FireCooldown <= 0 && TransitionTime <= 0)
+    else if ((FirePressed || Down(EKeys::LeftMouseButton)) && FireCooldown <= 0 && TransitionTime <= 0 &&
+             !(MeleeWeapon && MeleeWeapon->IsSwinging()))
         FireShot();
+}
+
+void AHoverPilot::CancelPostureInput()
+{
+    bGroundCrouchHeld = false;
+    GroundCrouchHold = 0;
+    bCrouchedAtPress = false;
 }
 
 void AHoverPilot::SetParkourCrouch(bool Held)
@@ -943,7 +984,9 @@ void AHoverPilot::UpdateAppearance(float DT)
         Instance->LeftFoot = Feet[0];
         Instance->RightFoot = Feet[1];
     }
-    WorldGun->SetVisibility(bReview && (bAiming || GunRaisedTime > 0), true);
+    const bool Swinging = MeleeWeapon && MeleeWeapon->IsSwinging();
+    WorldGun->SetVisibility(!Swinging && bReview && (bAiming || GunRaisedTime > 0), true);
+    ViewGun->SetVisibility(!Swinging && !bReview, true);
     UpdateGunTransform();
     const bool Powered = bMounted && TransitionTime <= 0 && !bSteppingOn;
     const float Thrust = FMath::Max(FMath::Abs(ForwardInput), FMath::Abs(SideInput));
@@ -1361,6 +1404,10 @@ void AHoverGameMode::BeginPlay()
         UE_LOG(LogTemp, Display, TEXT("HOVER_LIGHTING exposure=%.2f bloom=%.2f indirect=1 grain=0"),
                Defaults->TestExposureBias, Defaults->TestBloomIntensity);
     }
+#if WITH_EDITOR
+    if (FParse::Param(FCommandLine::Get(), TEXT("AFSReviewNoVehicles")))
+        return;
+#endif
     GetWorld()->SpawnActor<AHoverZombieRange>();
 }
 

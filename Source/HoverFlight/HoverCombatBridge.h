@@ -35,8 +35,22 @@ UCLASS()
 class HOVERFLIGHT_API AHoverMeleeWeapon : public AZE_MeleeWeapon
 {
     GENERATED_BODY()
+  public:
+    AHoverMeleeWeapon();
+    virtual void Tick(float DT) override;
+    virtual void EndPlay(const EEndPlayReason::Type Reason) override;
+    UFUNCTION(BlueprintPure) bool IsSwinging() const;
+    void CancelSwing();
+
   protected:
     virtual void PlayFireAnimation() override;
+    virtual void PerformMeleeTrace() override;
+
+  private:
+    FTimerHandle ContactTimer;
+    float SwingEnd = 0;
+    FVector HandStart;
+    bool bGripConfigured = false;
 };
 
 // Added only in Cyber City; original vendor inventory, purchases and UI remain authoritative.

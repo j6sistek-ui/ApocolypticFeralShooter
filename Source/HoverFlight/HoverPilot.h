@@ -78,6 +78,7 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     AHoverPilot(const FObjectInitializer &ObjectInitializer);
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaSeconds) override;
+    virtual void EndPlay(const EEndPlayReason::Type Reason) override;
     virtual void Landed(const FHitResult &Hit) override;
     virtual void OnStartCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust) override;
     virtual void OnEndCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust) override;
@@ -88,6 +89,12 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly) bool bCLSLocomotion = false;
     UPROPERTY() TObjectPtr<class UHoverLocomotionBridge> LocomotionBridge;
     UPROPERTY(BlueprintReadOnly) TObjectPtr<class UHoverCombatBridge> Combat;
+    UPROPERTY(BlueprintReadOnly) TObjectPtr<class AHoverMeleeWeapon> MeleeWeapon;
+    UFUNCTION(BlueprintCallable) void Melee();
+    UFUNCTION(BlueprintPure) bool IsThirdPersonView() const
+    {
+        return bReview;
+    }
     UFUNCTION(BlueprintPure) bool IsOnFoot() const
     {
         return !bMounted;
@@ -98,6 +105,7 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     UFUNCTION(Exec) void HoverReset();
     UFUNCTION(Exec) void HoverStatus();
     UFUNCTION(BlueprintCallable) void SetParkourCrouch(bool Held);
+    void CancelPostureInput();
     UFUNCTION(BlueprintPure) int32 GetShotsFired() const
     {
         return ShotsFired;

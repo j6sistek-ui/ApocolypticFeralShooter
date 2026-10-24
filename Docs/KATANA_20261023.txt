@@ -1,0 +1,35 @@
+AFS KATANA / CPU CONTINUATION - 2026-10-23
+
+Owner source: bloodied+katana+3d+model_Clone1.glb from Downloads.
+SHA256: 3e77f001234d80c1fdfa3deff6e4b75ff0bf3c95d963754bea17593ee17a5852
+Original preserved. Local Blender export is105cm overall, 2329vertices/3180faces,
+with grip origin11cm from the pommel and blade pointing along local+Z.
+Original UVs and embedded textures retained; 4K source textures, runtime cap2K.
+Runtime asset: /Game/HoverPrototype/Weapons/Katana/SM_BloodiedKatana
+Definition: /Game/HoverPrototype/ZombieEngine/DA_AFS_Melee
+
+R3/controller or V/keyboard swings while on foot. A remains jump. Both maps have
+the common weapon; Cyber City retains native inventory/reload/economy integration.
+The native sphere trace uses160cm reach,20cm radius and50body damage. Existing
+head-hit and city InstaKill rules still apply. No ammunition is consumed.
+The strike occurs0.30s after input, with a0.8s action and1.1 attacks/s limit.
+Inventory and successful ride entry cancel pending contact. The rifle is hidden
+while swinging and returns afterward; blade components are hidden outside swings.
+
+Animation source: /Game/ZESP/ZE/Animations/Knife/AS_Attack_Knife
+Local root-locked copy: /Game/HoverPrototype/Animations/QA_Katana
+Compared with owned CLS unarmed attacks before choosing the native knife slash.
+The third-person grip attaches to hand_r. First-person presentation uses the
+owned hand motion in camera space; it does not move the camera to animate a swing.
+This is a knife-slash adaptation for the katana, not a dedicated sword combo set.
+
+CPU evidence distinguishes gameplay from visuals: delayed50damage, repeat blocking,
+rifle/blade visibility, inventory isolation and PostApo blood event routing are
+measured in NullRHI. CPU Blender replays actual bone transforms for grip/trajectory
+inspection. It does not reproduce Unreal materials, lighting, Niagara or final
+first-person presentation. Those rendered checks remain deferred by owner request.
+
+Preservation: D:/AFS_Comparisons/Quality_Continue_20261023 contains the pre-change
+source ZIP, local melee definition and licensed plugin files, with hash receipts.
+Source-only local Git. No paid assets or plugin source are committed, no GitHub PR,
+and no SpaceSurvival changes. See QUALITY_20261023.txt for the wider feature matrix.

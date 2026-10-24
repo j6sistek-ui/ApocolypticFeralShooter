@@ -33,6 +33,8 @@ Both use the same Parkour movement, wall jump, glider, guns and vehicles.
 Release glider thrust to coast to a stop. B / Ctrl: brief coast assist.
 L2 held / right mouse: gun sights in FPS, external screen zoom in third person.
 On foot R2 / left mouse fires. On glider R1 / left mouse fires; R2 is thrust.
+On foot R3 / V swings the bloodied katana in either level; A remains jump.
+The rifle hides during the slash. Melee is unavailable while riding or in inventory.
 Unscoped third-person fire raises the visible gun. The Ballista has a centred reflex sight.
 PostApo: three body hits or one headshot kills a zombie; population replenishes to20.
 Cyber City: Zombie Engine waves grow in health/count/speed; wave-one body kills take
@@ -45,7 +47,7 @@ F5 / Menu: toggle FPS and external review camera.
 Home: reset Vexa and glider to the test start. R also resets in PostApo.
 
 CYBER CITY COMBAT / INVENTORY
-R3 / V: melee. A remains jump; R3 does not jump or roll.
+R3 does not jump or roll; it uses the common on-foot katana action above.
 Tap X / R: reload. Hold X / F on a focused supply crate or loose item: interact.
 Hold X near a ride still mounts it. Reload is cancelled when mounting or using melee.
 Three street supply crates offer Ballista tiers for500/1250/2500 gold; an owned
@@ -79,7 +81,7 @@ Human slide and prone-entry/exit animations still need suitable source clips;
 the current slide/crawl poses are functional placeholders. Controller cursor feel
 and final visual motion need owner review.
 The earlier B-dive request still needs its intended movement mode clarified.
-The FPS view uses a separate rifle; the full Vexa body/aim pose is shown in F5 review view.
+The FPS view uses separate weapon presentation; the full Vexa body/aim pose is shown in F5 review view.
 
 PRESERVED COMPARISONS
 D:/AFS_Comparisons/CLS_MM_2026-10-23/Before_Parkour/AFS is the preserved original.
