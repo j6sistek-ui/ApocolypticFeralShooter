@@ -12,6 +12,8 @@
 #include "Inventory/ZE_WeaponDefinition.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
+#include "Misc/ConfigCacheIni.h"
+#include "Survival/ZE_SurvivalComponent.h"
 #include "Perception/AISense_Hearing.h"
 #include "EngineUtils.h"
 
@@ -98,7 +100,8 @@ void AHoverPilot::BeginPlay()
 {
     Super::BeginPlay();
     GetMesh()->AddTickPrerequisiteActor(this);
-    SetCanBeDamaged(true); // Receive hit reactions; TakeDamage never reduces sandbox health.
+    SetCanBeDamaged(true); // Hit reactions remain active while invincible.
+    GConfig->GetBool(TEXT("AFS.Graphics"), TEXT("Invincible"), bInvincible, GGameUserSettingsIni);
     StartLocation = GetActorLocation();
     StartRotation = GetActorRotation();
     BodyYaw = StartRotation.Yaw;
@@ -240,6 +243,10 @@ void AHoverPilot::BeginPlay()
 
 void AHoverPilot::EndPlay(const EEndPlayReason::Type Reason)
 {
+    if (bKnockedDown && KnockdownController.IsValid())
+        KnockdownController->SetIgnoreMoveInput(false);
+    if (DefeatedController.IsValid())
+        DefeatedController->SetIgnoreMoveInput(false);
     if (MeleeWeapon)
         MeleeWeapon->Destroy();
     Super::EndPlay(Reason);
@@ -247,7 +254,7 @@ void AHoverPilot::EndPlay(const EEndPlayReason::Type Reason)
 
 void AHoverPilot::Melee()
 {
-    if (!IsOnFoot() || !MeleeWeapon)
+    if (!IsOnFoot() || !MeleeWeapon || IsKnockedDown() || IsDefeated())
         return;
     if (Combat)
         Combat->Melee();
@@ -300,6 +307,8 @@ bool AHoverPilot::CanDismount() const
 
 bool AHoverPilot::PrepareForRide()
 {
+    if (IsKnockedDown() || IsDefeated())
+        return false;
     if (MeleeWeapon)
         MeleeWeapon->CancelSwing();
     GroundSlideTime = 0;
@@ -451,7 +460,7 @@ void AHoverPilot::UpdateCameraPosture(float DT)
     const float CapsuleDrop = bMounted ? 0.f : StandingHeight - GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight();
     // Capsule resizing must not teleport the viewpoint. Compensate immediately,
     // then ease the actual stance height; neither jumping nor animation changes arm length.
-    const float Smoothed = FMath::FInterpTo(CameraPostureHeight, -CapsuleDrop, DT, 8.f);
+    const float Smoothed = FMath::FInterpTo(CameraPostureHeight, bKnockedDown ? -65.f : -CapsuleDrop, DT, 8.f);
     CameraPostureHeight += FMath::Clamp(Smoothed - CameraPostureHeight, -100.f * DT, 100.f * DT);
     const float Offset = CapsuleDrop + CameraPostureHeight;
     ReviewArm->SetRelativeLocation(FVector(0, 0, Offset));
@@ -460,6 +469,16 @@ void AHoverPilot::UpdateCameraPosture(float DT)
 
 void AHoverPilot::HoverReset()
 {
+    bDefeated = false;
+    if (DefeatedController.IsValid())
+        DefeatedController->SetIgnoreMoveInput(false);
+    DefeatedController.Reset();
+    SandboxHealth = 100.f;
+    if (Combat && Combat->Survival)
+        Combat->Survival->SetHealth(100.f);
+    RespawnGraceUntil = GetWorld()->GetTimeSeconds() + 2.f;
+    if (LocomotionBridge)
+        LocomotionBridge->CancelAction();
     if (!BoardActor)
         return;
     BoardActor->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
@@ -500,6 +519,32 @@ void AHoverPilot::UpdateInput(float DT)
     APlayerController *PC = Cast<APlayerController>(GetController());
     if (!PC)
         return;
+    if (bDefeated)
+    {
+        ForwardInput = SideInput = TurnInput = PitchInput = 0;
+        ConsumeMovementInputVector();
+        if (Combat)
+            Combat->SetTrigger(false);
+        if (GetWorld()->GetTimeSeconds() >= DefeatedUntil)
+            HoverReset();
+        return;
+    }
+    if (bKnockedDown)
+    {
+        ForwardInput = SideInput = TurnInput = PitchInput = 0;
+        ConsumeMovementInputVector();
+        if (Combat)
+            Combat->SetTrigger(false);
+        if (GetWorld()->GetTimeSeconds() >= KnockdownUntil)
+        {
+            bKnockedDown = false;
+            if (KnockdownController.IsValid())
+                KnockdownController->SetIgnoreMoveInput(false);
+            KnockdownController.Reset();
+            KnockdownGraceUntil = GetWorld()->GetTimeSeconds() + 1.f;
+        }
+        return;
+    }
     if (Combat && Combat->IsInventoryOpen())
     {
         ForwardInput = SideInput = TurnInput = PitchInput = 0;
@@ -629,6 +674,8 @@ void AHoverPilot::CancelPostureInput()
 
 void AHoverPilot::SetParkourCrouch(bool Held)
 {
+    if (IsKnockedDown() || IsDefeated())
+        return;
     if (bMounted)
         return;
     auto *Move = GetCharacterMovement();
@@ -1190,8 +1237,15 @@ void AHoverPilot::Landed(const FHitResult &Hit)
         ImpactPulse(Hit.ImpactPoint + Hit.ImpactNormal * 2, Hit.ImpactNormal, .07f, .06f, .2f);
 }
 
+float AHoverPilot::GetHealth() const
+{
+    return Combat && Combat->Survival ? Combat->Survival->GetHealth() : SandboxHealth;
+}
+
 float AHoverPilot::TakeDamage(float Damage, const FDamageEvent &Event, AController *EventInstigator, AActor *Causer)
 {
+    if (bDefeated || Damage <= 0 || GetWorld()->GetTimeSeconds() < RespawnGraceUntil)
+        return 0.f;
     if (Damage > 0 && Causer != this && LocomotionBridge && IsOnFoot() &&
         GetWorld()->GetTimeSeconds() - LastHitReaction > .65f && !LocomotionBridge->IsActionPlaying())
     {
@@ -1200,7 +1254,84 @@ float AHoverPilot::TakeDamage(float Damage, const FDamageEvent &Event, AControll
             LoadObject<UAnimSequence>(nullptr, TEXT("/Game/CLS/Example/SetupYourHeroExample/Anims/Rifle/HitReact/"
                                                     "MM_HitReact_Front_Lgt_01.MM_HitReact_Front_Lgt_01")));
     }
-    return 0.f;
+    if (bInvincible)
+        return 0.f;
+    const float Applied =
+        FMath::Min(GetHealth(), FMath::Max(0.f, Super::TakeDamage(Damage, Event, EventInstigator, Causer)));
+    SandboxHealth = FMath::Max(0.f, GetHealth() - Applied);
+    if (Combat && Combat->Survival)
+        Combat->Survival->SetHealth(SandboxHealth);
+    if (SandboxHealth <= 0)
+    {
+        bDefeated = true;
+        DefeatedUntil = GetWorld()->GetTimeSeconds() + 3.f;
+        bKnockedDown = false;
+        if (KnockdownController.IsValid())
+            KnockdownController->SetIgnoreMoveInput(false);
+        KnockdownController.Reset();
+        DefeatedController = Controller;
+        if (Controller)
+            Controller->SetIgnoreMoveInput(true);
+        GetCharacterMovement()->StopMovementImmediately();
+        CancelPostureInput();
+        if (Combat)
+        {
+            Combat->SetTrigger(false);
+            if (Combat->IsInventoryOpen())
+                Combat->ToggleInventory();
+            if (auto *Weapon = Cast<AHoverCyberRifle>(Combat->GetWeapon()))
+                Weapon->CancelReload();
+        }
+        if (MeleeWeapon)
+            MeleeWeapon->CancelSwing();
+        if (LocomotionBridge)
+            LocomotionBridge->PlayAction(
+                LoadObject<UAnimSequence>(
+                    nullptr,
+                    TEXT("/Game/CLS/Example/SetupYourHeroExample/Anims/Death/MM_Death_Back_01.MM_Death_Back_01")),
+                3.f, false);
+    }
+    return Applied;
+}
+
+void AHoverPilot::ShowStompPulse(const FVector &Location, const FVector &Normal, float Radius, bool Close)
+{
+    ImpactPulse(Location + Normal * 3.f, Normal, Radius / 800.f, Close ? .5f : 0.f, .8f);
+}
+
+bool AHoverPilot::ApplyStompKnockdown(FVector Origin)
+{
+    if (!IsOnFoot() || !Controller || bDefeated || bKnockedDown || GetWorld()->GetTimeSeconds() < KnockdownGraceUntil)
+        return false;
+    auto *Clip =
+        LoadObject<UAnimSequence>(nullptr, TEXT("/Game/HoverPrototype/Animations/QA_StompRecovery.QA_StompRecovery"));
+    if (!Clip || !LocomotionBridge)
+        return false;
+    if (Combat)
+    {
+        Combat->SetTrigger(false);
+        if (Combat->IsInventoryOpen())
+            Combat->ToggleInventory();
+        if (auto *Weapon = Cast<AHoverCyberRifle>(Combat->GetWeapon()))
+            Weapon->CancelReload();
+    }
+    if (MeleeWeapon)
+        MeleeWeapon->CancelSwing();
+    CancelPostureInput();
+    GroundSlideTime = 0;
+    bProne = false;
+    UnCrouch();
+    bAiming = false;
+    LocomotionBridge->CancelAction();
+    if (!LocomotionBridge->PlayAction(Clip, 2.1f, false))
+        return false;
+    bKnockedDown = true;
+    KnockdownUntil = GetWorld()->GetTimeSeconds() + 2.1f;
+    KnockdownController = Controller;
+    Controller->SetIgnoreMoveInput(true);
+    LaunchCharacter((GetActorLocation() - Origin).GetSafeNormal2D() * 430.f + FVector(0, 0, 90), true, true);
+    SetView();
+    return true;
 }
 
 void AHoverPilot::BoardHit(UPrimitiveComponent *HitComponent, AActor *OtherActor, UPrimitiveComponent *OtherComponent,
@@ -1256,6 +1387,8 @@ void AHoverPilot::Tick(float DT)
 
 FString AHoverPilot::GetPrompt() const
 {
+    if (bDefeated)
+        return TEXT("Defeated - resetting at the start...");
     if (Combat && !Combat->GetPrompt().IsEmpty())
         return Combat->GetPrompt();
     if (StatusTime > 0)
@@ -1283,15 +1416,20 @@ void AHoverHUD::DrawHUD()
     if (!Canvas)
         return;
     DrawText(TEXT("D-pad Up / F6: graphics + test level"), FLinearColor(.7f, .85f, 1.f), 24, 16);
+    const FString HealthLabel =
+        Pilot ? FString::Printf(TEXT("%s | HP %.0f/100"), Pilot->IsInvincible() ? TEXT("INVINCIBLE") : TEXT("NORMAL"),
+                                Pilot->GetHealth())
+              : TEXT("VEHICLE");
     if (auto *Waves = GetWorld()->GetAuthGameMode<AHoverCyberCityGameMode>())
-        DrawText(FString::Printf(TEXT("INVULNERABLE | Kills: %d | Gold: %d%s"), Waves->GetTotalZombiesKilled(),
+        DrawText(FString::Printf(TEXT("%s | Kills: %d | Gold: %d%s"), *HealthLabel, Waves->GetTotalZombiesKilled(),
                                  Waves->GetGold(),
                                  Waves->GetSpeedBonus() > 1.f ? TEXT(" | SPEED PICKUP 1.5x") : TEXT("")),
                  FLinearColor(.8f, 1.f, .8f), 24, 38);
     for (TActorIterator<AHoverZombieRange> It(GetWorld()); It; ++It)
     {
-        DrawText(FString::Printf(TEXT("INVULNERABLE | Zombies: %d | Kills: %d"), It->GetAliveCount(), It->GetKills()),
-                 FLinearColor(.8f, 1.f, .8f), 24, 38);
+        DrawText(
+            FString::Printf(TEXT("%s | Zombies: %d | Kills: %d"), *HealthLabel, It->GetAliveCount(), It->GetKills()),
+            FLinearColor(.8f, 1.f, .8f), 24, 38);
         break;
     }
     if (!Pilot)

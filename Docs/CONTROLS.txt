@@ -4,8 +4,11 @@ TEST SETTINGS (ALL RIDES AND WALKING)
 D-pad Up / F6: open graphics/level selection and pause the game.
 D-pad / arrow up-down: choose row; left-right: change the pending option.
 A / Enter: apply, save and resume. B / F6: cancel and resume.
-Test level: Post-apocalypse or Cyber City. Applying a different level starts a fresh
+Test level: Post-apocalypse, Cyber City or Chinese Lakeside Town. Applying a different level starts a fresh
 session with Vexa, glider, bike and truck; current positions/kills are not carried over.
+Invincible: On by default; turn Off to test Vexa's health. At zero health she
+resets at the level start after3seconds. A saves; B cancels. Vehicle damage is unchanged.
+Lakeside has its own empty zombie roster, reserved for upcoming new assets.
 Image choices: Native TSR, DLAA, DLSS Quality/Balanced/Performance/Ultra Performance.
 Only supported GPU modes appear. DLAA keeps full resolution; DLSS trades resolution for speed.
 Frame generation: Off, supported fixed multipliers, or Dynamic. Reflex turns on with FG.
@@ -37,11 +40,14 @@ On foot R3 / V swings the bloodied katana in either level; A remains jump.
 The rifle hides during the slash. Melee is unavailable while riding or in inventory.
 Unscoped third-person fire raises the visible gun. The Ballista has a centred reflex sight.
 PostApo: three body hits or one headshot kills a zombie; population replenishes to20.
-Cyber City: Zombie Engine waves grow in health/count/speed; wave-one body kills take
-three shots and headshots remain lethal. The top-right panel shows wave progress.
+Cyber City: Zombie Engine waves grow in health/count/speed. Four standard appearances,
+brute rounds12/14/16... and eight-kid swarm rounds5/15/25... are editable defaults.
+The brute resists ordinary headshot instant kills. Its landing stomp knocks nearby
+on-foot Vexa down within4m; walls block it. The top-right panel shows wave progress.
 Walk/drive over dropped pickups: Nuke clears live zombies; Speed lasts15seconds.
 PostApo ammo is unlimited. Cyber City uses magazine/reserve ammo and reloads.
-Vexa and occupied vehicles are invulnerable. City zombies play pursuit/run,
+Vexa starts invincible; the pause-menu option allows normal health loss.
+Occupied vehicles remain invulnerable. City zombies play pursuit/run,
 attacks, hit reactions and deaths; PostApo remains a replenishing target range.
 F5 / Menu: toggle FPS and external review camera.
 Home: reset Vexa and glider to the test start. R also resets in PostApo.

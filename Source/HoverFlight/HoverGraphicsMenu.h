@@ -36,6 +36,7 @@ class HOVERFLIGHT_API UHoverGraphicsMenu : public UUserWidget
     UPROPERTY() TObjectPtr<UTextBlock> FramesText;
     UPROPERTY() TObjectPtr<UTextBlock> NoteText;
     UPROPERTY() TObjectPtr<UTextBlock> LevelText;
+    UPROPERTY() TObjectPtr<UTextBlock> HealthText;
     FHoverGraphicsOptions Pending;
     int32 SelectedRow = 0;
     int32 PendingLevel = 0;

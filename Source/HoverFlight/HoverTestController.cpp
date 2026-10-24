@@ -76,8 +76,11 @@ void AHoverTestController::CloseGraphicsMenu(bool bApply)
     if (!GraphicsMenu)
         return;
     const int32 Level = GraphicsMenu->GetSelectedLevel();
-    const bool ChangeLevel =
-        bApply && Level != (UGameplayStatics::GetCurrentLevelName(this).Contains(TEXT("Cyber")) ? 1 : 0);
+    const FString CurrentMap = UGameplayStatics::GetCurrentLevelName(this);
+    const int32 CurrentLevel = CurrentMap.Contains(TEXT("L_Showcase")) || CurrentMap.Contains(TEXT("L_Lakeside")) ? 2
+                               : CurrentMap.Contains(TEXT("Cyber"))                                               ? 1
+                                                                                                                  : 0;
+    const bool ChangeLevel = bApply && Level != CurrentLevel;
     if (bApply)
         GraphicsSettings->Apply(GraphicsMenu->GetSelection());
     GraphicsMenu->RemoveFromParent();
@@ -95,15 +98,16 @@ void AHoverTestController::CloseGraphicsMenu(bool bApply)
 
 void AHoverTestController::HoverLoadLevel(int32 Level)
 {
-    const FName Map(Level == 1 ? TEXT("/Game/HoverPrototype/Maps/L_CyberCity")
-                               : TEXT("/Game/JustBStudios/PostApo/Levels/PostApo"));
+    const FName Map(Level == 2   ? TEXT("/Game/Chinese_Lakeside_Town/Levels/L_Showcase")
+                    : Level == 1 ? TEXT("/Game/HoverPrototype/Maps/L_CyberCity")
+                                 : TEXT("/Game/JustBStudios/PostApo/Levels/PostApo"));
     if (!FPackageName::DoesPackageExist(Map.ToString()))
     {
         ClientMessage(TEXT("That test level is not installed yet."));
         return;
     }
     UGameplayStatics::OpenLevel(this, Map, true,
-                                Level == 1
+                                Level != 0
                                     ? TEXT("game=/Game/HoverPrototype/ZombieEngine/BP_CyberWaves.BP_CyberWaves_C")
                                     : TEXT("game=/Script/HoverFlight.HoverGameMode"));
 }
@@ -116,6 +120,13 @@ bool AHoverTestController::InputKey(const FInputKeyEventArgs &Params)
 #endif
     const bool Pressed = Params.Event == IE_Pressed;
     const FKey Key = Params.Key;
+    if (!GraphicsMenu)
+        if (const auto *P = Cast<AHoverPilot>(GetPawn()); P && (P->IsKnockedDown() || P->IsDefeated()))
+        {
+            if (Pressed && (Key == EKeys::F6 || Key == EKeys::Gamepad_DPad_Up))
+                HoverGraphics();
+            return true;
+        }
     if (!GraphicsMenu)
         if (auto *ActivePilot = Cast<AHoverPilot>(GetPawn());
             ActivePilot && ActivePilot->Combat && ActivePilot->Combat->IsInventoryOpen())
@@ -507,19 +518,21 @@ void AHoverTestController::PlayerTick(float DT)
         auto RideStart = [this](FName Tag, FVector Offset) {
             TArray<AActor *> Starts;
             UGameplayStatics::GetAllActorsWithTag(this, Tag, Starts);
-            return Starts.IsEmpty() ? Pilot->GetActorLocation() + Offset : Starts[0]->GetActorLocation();
+            return Starts.IsEmpty() ? FTransform(Pilot->GetActorRotation(), Pilot->GetActorLocation() + Offset)
+                                    : Starts[0]->GetActorTransform();
         };
         UClass *Class =
             LoadClass<APawn>(nullptr, TEXT("/Game/ScifiHoverbike/Vehicles/Blueprint/BP_Hoverbike.BP_Hoverbike_C"));
         if (Class)
         {
-            FVector Location = RideStart(TEXT("AFS_BikeStart"), FVector(550, 120, 80));
+            FTransform Transform = RideStart(TEXT("AFS_BikeStart"), FVector(550, 120, 80));
+            FVector Location = Transform.GetLocation();
             FHitResult Floor;
             FCollisionQueryParams Params(SCENE_QUERY_STAT(BikeSpawn), false, Pilot);
             if (GetWorld()->LineTraceSingleByChannel(Floor, Location + FVector(0, 0, 500),
                                                      Location - FVector(0, 0, 2000), ECC_Visibility, Params))
                 Location.Z = Floor.ImpactPoint.Z + 150;
-            FTransform Transform(Pilot->GetActorRotation(), Location);
+            Transform.SetLocation(Location);
             Bike = GetWorld()->SpawnActorDeferred<APawn>(
                 Class, Transform, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn);
             if (Bike)
@@ -532,13 +545,14 @@ void AHoverTestController::PlayerTick(float DT)
             nullptr, TEXT("/Game/Crossroad_Pickup/Blueprints/BP_Crossroad_Pickup.BP_Crossroad_Pickup_C"));
         if (TruckClass)
         {
-            FVector Location = RideStart(TEXT("AFS_TruckStart"), FVector(350, -650, 150));
+            FTransform Transform = RideStart(TEXT("AFS_TruckStart"), FVector(350, -650, 150));
+            FVector Location = Transform.GetLocation();
             FHitResult Floor;
             FCollisionQueryParams Params(SCENE_QUERY_STAT(TruckSpawn), false, Pilot);
             if (GetWorld()->LineTraceSingleByChannel(Floor, Location + FVector(0, 0, 500),
                                                      Location - FVector(0, 0, 2000), ECC_Visibility, Params))
                 Location.Z = Floor.ImpactPoint.Z + 120;
-            FTransform Transform(Pilot->GetActorRotation(), Location);
+            Transform.SetLocation(Location);
             Truck = GetWorld()->SpawnActorDeferred<APawn>(
                 TruckClass, Transform, nullptr, nullptr,
                 ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn);

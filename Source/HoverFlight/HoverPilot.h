@@ -91,6 +91,25 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     UPROPERTY(BlueprintReadOnly) TObjectPtr<class UHoverCombatBridge> Combat;
     UPROPERTY(BlueprintReadOnly) TObjectPtr<class AHoverMeleeWeapon> MeleeWeapon;
     UFUNCTION(BlueprintCallable) void Melee();
+    UFUNCTION(BlueprintCallable) void SetInvincible(bool Enabled)
+    {
+        bInvincible = Enabled;
+    }
+    UFUNCTION(BlueprintPure) bool IsInvincible() const
+    {
+        return bInvincible;
+    }
+    UFUNCTION(BlueprintPure) bool IsDefeated() const
+    {
+        return bDefeated;
+    }
+    UFUNCTION(BlueprintPure) float GetHealth() const;
+    UFUNCTION(BlueprintCallable) bool ApplyStompKnockdown(FVector Origin);
+    UFUNCTION(BlueprintPure) bool IsKnockedDown() const
+    {
+        return bKnockedDown;
+    }
+    void ShowStompPulse(const FVector &Location, const FVector &Normal, float Radius, bool Close);
     UFUNCTION(BlueprintPure) bool IsThirdPersonView() const
     {
         return bReview;
@@ -122,6 +141,10 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     {
         return bAiming || GunRaisedTime > 0 || !bReview;
     }
+    bool bInvincible = true;
+    bool bDefeated = false;
+    float SandboxHealth = 100.f, DefeatedUntil = 0.f, RespawnGraceUntil = 0.f;
+    TWeakObjectPtr<AController> DefeatedController;
     UFUNCTION(BlueprintPure) FVector GetMuzzlePosition() const;
     UFUNCTION(BlueprintPure) float GetBoostCharge() const
     {
@@ -200,6 +223,9 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     float BoosterSize = 1.f, BoosterSpawnRate = 100.f;
     float LastLandingPulse = -10.f;
     float LastHitReaction = -10.f;
+    bool bKnockedDown = false;
+    float KnockdownUntil = 0, KnockdownGraceUntil = 0;
+    TWeakObjectPtr<AController> KnockdownController;
     bool bSteppingOn = false;
     bool bMounted = false, bAiming = false, bReview = false, bBoost = false;
     bool bHoldConsumed = false, bWasJump = false, bWasView = false, bWasSlide = false;

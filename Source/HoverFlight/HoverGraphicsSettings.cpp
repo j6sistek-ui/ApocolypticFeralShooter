@@ -6,6 +6,8 @@
 #include "HAL/IConsoleManager.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Misc/App.h"
+#include "HoverPilot.h"
+#include "EngineUtils.h"
 
 namespace
 {
@@ -76,6 +78,7 @@ void UHoverGraphicsSettings::Initialize(UWorld *World)
     ReflexBeforePlay = uint8(UStreamlineLibraryReflex::GetReflexMode());
 
     int32 SavedUpscaling = 0, SavedFG = 0;
+    GConfig->GetBool(SettingsSection, TEXT("Invincible"), Current.bInvincible, GGameUserSettingsIni);
     if (GConfig->GetInt(SettingsSection, TEXT("Upscaling"), SavedUpscaling, GGameUserSettingsIni))
     {
         Current.Upscaling = EHoverUpscaling(SavedUpscaling);
@@ -175,10 +178,13 @@ bool UHoverGraphicsSettings::Apply(FHoverGraphicsOptions Options, bool bSave)
     Current = Options;
     if (bSave)
     {
+        GConfig->SetBool(SettingsSection, TEXT("Invincible"), Current.bInvincible, GGameUserSettingsIni);
         GConfig->SetInt(SettingsSection, TEXT("Upscaling"), int32(Current.Upscaling), GGameUserSettingsIni);
         GConfig->SetInt(SettingsSection, TEXT("FrameGeneration"), Current.FrameGeneration, GGameUserSettingsIni);
         GConfig->Flush(false, GGameUserSettingsIni);
     }
+    for (TActorIterator<AHoverPilot> It(PlayWorld); It; ++It)
+        It->SetInvincible(Current.bInvincible);
     UE_LOG(LogTemp, Display, TEXT("HOVER_GRAPHICS applied %s | FG preference=%s saved=%d | %s"),
            *UpscalingName(Current.Upscaling), *FrameGenerationName(Current.FrameGeneration), bSave,
            *GetRuntimeStatus());

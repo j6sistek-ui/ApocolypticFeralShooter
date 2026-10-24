@@ -10,12 +10,20 @@ BloodShot Niagara impacts and ragdoll deaths provide hit feedback; ammo is unlim
 Cyber City uses Zombie Engine's escalating waves, behavior tree, attack/hit/death
 animations, damage numbers, loot and wave display. The local adapter keeps Vexa,
 CLS/Parkour, the Ballista and all three rides. Zombies target the currently possessed
-player or vehicle; Vexa and occupied rides remain invulnerable. Wave one has ten
+player or vehicle; Vexa defaults to invincible and occupied rides remain invulnerable. Wave one has ten
 zombies; later waves grow in count, health and speed. Nuke and timed speed pickups
 work with the AFS player. Cyber City now uses the supplied magazine/reserve,
 reload, melee, inventory, quickbar, gold, loot and wall-buy systems. Three supply
 crates offer Ballista tiers and ammunition. PostApo keeps unlimited ammo and its
 original zombie range; it has no Zombie Engine inventory or waves.
+
+Cyber City now has four new standard appearances, a heavy brute on rounds12/14/16...
+and eight-kid swarm rounds5/15/25... as editable starting settings. The brute uses
+the supplied stomp and smash clips; its landing pulse knocks nearby on-foot Vexa
+down, with walls blocking the effect. Chinese Lakeside Town is a third selectable
+map with all three rides and separate wave data. Its roster is intentionally empty
+until the upcoming new zombie assets arrive. None of the current zombies are used
+there. See `Docs/ZOMBIE_SPECIALS_20261024.txt` for roles, backups and texture reimport.
 
 R3/V uses the supplied bloodied katana on foot in either level. It uses the
 purchased knife slash, native melee contact/cooldown and a local hand attachment.
@@ -113,7 +121,8 @@ with board tilt and a small shockwave. Released thrust coasts with damped pitch 
 wing reactions. Base speed is21.6 m/s; climb reaches18 m/s and descent24 m/s.
 L1 bank now adds substantially stronger heading and velocity curvature.
 L3 boost reaches56 m/s and has a draining/recharging meter.
-Vexa is invulnerable. Home resets the player/glider; R also resets in PostApo,
+Vexa defaults to invincible. Test Settings can enable normal health loss; at zero
+health she resets after3seconds. Home resets the player/glider; R also resets in PostApo,
 while R reloads in Cyber City.
 
 The data asset also exposes booster, muzzle and landing effect references. Local effect
@@ -134,8 +143,9 @@ elapsed time on slow frames; the spring-loaded pads substep independently.
 Landing shockwaves are intentionally brief. Landings request a light
 controller pulse, whose physical feel still needs owner review.
 
-Press D-pad Up or F6 for test settings. The Test level row switches between Post-apocalypse
-and Cyber City (`/Game/HoverPrototype/Maps/L_CyberCity`), starting a fresh test session
+Press D-pad Up or F6 for test settings. The Test level row switches between Post-apocalypse,
+Cyber City (`/Game/HoverPrototype/Maps/L_CyberCity`) and Chinese Lakeside Town
+(`/Game/Chinese_Lakeside_Town/Levels/L_Showcase`), starting a fresh test session
 with Vexa and all three vehicles. Switching levels discards the current test session.
 D-pad/arrows select and adjust, A/Enter
 applies and saves, B/F6 cancels. DLAA, DLSS quality modes and supported frame-generation

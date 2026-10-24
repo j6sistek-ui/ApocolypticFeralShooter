@@ -17,6 +17,12 @@ class HOVERFLIGHT_API UHoverAuthoring : public UBlueprintFunctionLibrary
     static bool PreserveMeshUserData(USkeletalMesh *Source, USkeletalMesh *Target);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static bool SetCyberZombieSkeleton(USkeletalMesh *Mesh, class USkeleton *Skeleton);
+    UFUNCTION(BlueprintCallable, Category = "Hover|Authoring")
+    static bool ConfigureVariantSkeleton(USkeletalMesh *Mesh, class USkeleton *AnimationSkeleton);
+    UFUNCTION(BlueprintCallable, Category = "Hover|Authoring")
+    static class UPhysicsAsset *CreateVariantPhysics(USkeletalMesh *Mesh);
+    UFUNCTION(BlueprintCallable, Category = "Hover|Authoring")
+    static UObject *GetLocalAnimationController(class UAnimSequence *Sequence);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static bool ConfigureCityStartingGear(class UZE_WaveGameModeSettings *Settings);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
@@ -40,6 +46,8 @@ class HOVERFLIGHT_API UHoverAuthoring : public UBlueprintFunctionLibrary
     static TArray<FVector> FindLightingReviewLocations(UWorld *World, FVector Origin);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static bool AddCityNavigation(UWorld *World, FVector Center, FVector Size);
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
+    static FString DescribePartitionNavigation(UWorld *World, bool EnableLakesideStreaming = false);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static TArray<FVector> FindCompleteCityPath(UWorld *World, FVector Start, FVector End);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")

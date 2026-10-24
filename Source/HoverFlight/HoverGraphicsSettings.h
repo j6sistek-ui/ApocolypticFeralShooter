@@ -22,6 +22,7 @@ struct FHoverGraphicsOptions
     UPROPERTY(EditAnywhere, BlueprintReadWrite) EHoverUpscaling Upscaling = EHoverUpscaling::Native;
     // 0 = off, 1 = dynamic, 2..6 = total presented frames per rendered frame.
     UPROPERTY(EditAnywhere, BlueprintReadWrite) int32 FrameGeneration = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) bool bInvincible = true;
 };
 
 UCLASS()

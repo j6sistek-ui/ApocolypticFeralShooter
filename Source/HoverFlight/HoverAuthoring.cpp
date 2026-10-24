@@ -56,6 +56,10 @@
 #include "ActorFactories/ActorFactory.h"
 #include "Components/BrushComponent.h"
 #include "EdGraphSchema_K2.h"
+#include "PhysicsAssetUtils.h"
+#include "PhysicsEngine/PhysicsAsset.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "WorldPartition/WorldPartition.h"
 #endif
 
 bool UHoverAuthoring::ConfigureCityStartingGear(UZE_WaveGameModeSettings *Settings)
@@ -118,10 +122,71 @@ bool UHoverAuthoring::SetCyberZombieSkeleton(USkeletalMesh *Mesh, USkeleton *Ske
 #endif
 }
 
+bool UHoverAuthoring::ConfigureVariantSkeleton(USkeletalMesh *Mesh, USkeleton *AnimationSkeleton)
+{
+#if WITH_EDITOR
+    if (!Mesh || !AnimationSkeleton ||
+        !Mesh->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/ZombieEngine/Variants/")))
+        return false;
+    USkeleton *Skeleton = Mesh->GetSkeleton();
+    if (!Skeleton)
+        return false;
+    Skeleton->Modify();
+    Skeleton->UpdateReferencePoseFromMesh(Mesh);
+    Skeleton->AddCompatibleSkeleton(AnimationSkeleton);
+    Skeleton->SetBoneTranslationRetargetingMode(0, EBoneTranslationRetargetingMode::Skeleton, true);
+    Skeleton->SetBoneTranslationRetargetingMode(0, EBoneTranslationRetargetingMode::Animation);
+    const int32 Pelvis = Skeleton->GetReferenceSkeleton().FindBoneIndex(TEXT("pelvis"));
+    if (Pelvis == INDEX_NONE)
+        return false;
+    Skeleton->SetBoneTranslationRetargetingMode(Pelvis, EBoneTranslationRetargetingMode::AnimationScaled);
+    Skeleton->MarkPackageDirty();
+    return true;
+#else
+    return false;
+#endif
+}
+
+UObject *UHoverAuthoring::GetLocalAnimationController(UAnimSequence *Sequence)
+{
+#if WITH_EDITOR
+    if (Sequence && Sequence->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/")))
+        return Cast<UObject>(&Sequence->GetController());
+#endif
+    return nullptr;
+}
+
+UPhysicsAsset *UHoverAuthoring::CreateVariantPhysics(USkeletalMesh *Mesh)
+{
+#if WITH_EDITOR
+    if (!Mesh || !Mesh->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/ZombieEngine/Variants/")))
+        return nullptr;
+    const FString Name = TEXT("PA_") + Mesh->GetName().RightChop(3);
+    const FString Path = FPackageName::GetLongPackagePath(Mesh->GetOutermost()->GetName()) / Name;
+    if (auto *Existing = LoadObject<UPhysicsAsset>(nullptr, *(Path + TEXT(".") + Name)))
+        return Existing;
+    auto *Asset = NewObject<UPhysicsAsset>(CreatePackage(*Path), *Name, RF_Public | RF_Standalone);
+    FPhysAssetCreateParams Params;
+    Params.MinBoneSize = 3.f;
+    FText Error;
+    if (!FPhysicsAssetUtils::CreateFromSkeletalMesh(Asset, Mesh, Params, Error, true, false))
+    {
+        UE_LOG(LogTemp, Error, TEXT("Variant collision: %s"), *Error.ToString());
+        return nullptr;
+    }
+    FAssetRegistryModule::AssetCreated(Asset);
+    Asset->MarkPackageDirty();
+    Mesh->MarkPackageDirty();
+    return Asset;
+#else
+    return nullptr;
+#endif
+}
+
 bool UHoverAuthoring::AddCityNavigation(UWorld *World, FVector Center, FVector Size)
 {
 #if WITH_EDITOR
-    if (!World || !World->GetName().Contains(TEXT("CyberCity")))
+    if (!World || !(World->GetName().Contains(TEXT("CyberCity")) || World->GetName() == TEXT("L_Showcase")))
         return false;
     ANavMeshBoundsVolume *Bounds = nullptr;
     for (TActorIterator<ANavMeshBoundsVolume> It(World); It; ++It)
@@ -134,7 +199,7 @@ bool UHoverAuthoring::AddCityNavigation(UWorld *World, FVector Center, FVector S
     if (!Bounds)
         return false;
     Bounds->Tags.AddUnique(TEXT("AFS_CityNavigation"));
-    Bounds->SetActorLabel(TEXT("AFS Cyber City Navigation"));
+    Bounds->SetActorLabel(TEXT("AFS Horde Navigation"));
     auto *Builder = NewObject<UCubeBuilder>();
     Builder->X = Size.X;
     Builder->Y = Size.Y;
@@ -147,6 +212,11 @@ bool UHoverAuthoring::AddCityNavigation(UWorld *World, FVector Center, FVector S
     Bounds->SetActorLocation(Center);
     if (auto *Navigation = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World))
     {
+        // A navigation system created after a partitioned map loads can retain
+        // its async-load lock. Finish loading before this explicit authoring build.
+        FlushAsyncLoading();
+        Navigation->RemoveNavigationBuildLock(ENavigationBuildLock::AsyncLoadLock,
+                                              UNavigationSystemV1::ELockRemovalRebuildAction::NoRebuild);
         Navigation->OnNavigationBoundsUpdated(Bounds);
         Navigation->GetDefaultNavDataInstance(FNavigationSystem::Create);
         Navigation->Build();
@@ -161,12 +231,43 @@ bool UHoverAuthoring::AddCityNavigation(UWorld *World, FVector Center, FVector S
 #endif
 }
 
+FString UHoverAuthoring::DescribePartitionNavigation(UWorld *World, bool EnableLakesideStreaming)
+{
+#if WITH_EDITOR
+    if (World)
+        if (auto *Partition = World->GetWorldPartition())
+        {
+            const bool WasStreaming = Partition->IsStreamingEnabled();
+            FString NavigationState;
+            if (auto *Navigation = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World))
+                NavigationState = FString::Printf(TEXT(" MainNavData=%s BuildLocked=%d"),
+                                                  *GetNameSafe(Navigation->GetDefaultNavDataInstance()),
+                                                  Navigation->IsNavigationBuildingLocked());
+            for (TActorIterator<ARecastNavMesh> It(World); It; ++It)
+                NavigationState +=
+                    FString::Printf(TEXT(" Recast=%s ActiveTiles=%d"), *It->GetName(), It->GetNumActiveTiles());
+            if (EnableLakesideStreaming && !WasStreaming && !World->IsGameWorld() &&
+                World->GetOutermost()->GetName() == TEXT("/Game/Chinese_Lakeside_Town/Levels/L_Showcase"))
+            {
+                Partition->Modify();
+                Partition->SetEnableStreaming(true);
+                World->MarkPackageDirty();
+            }
+            return FString::Printf(TEXT("StreamingBefore=%d Streaming=%d EditorBounds=%s RuntimeBounds=%s%s"),
+                                   WasStreaming, Partition->IsStreamingEnabled(),
+                                   *Partition->GetEditorWorldBounds().ToString(),
+                                   *Partition->GetRuntimeWorldBounds().ToString(), *NavigationState);
+        }
+#endif
+    return TEXT("No partition");
+}
+
 TArray<FVector> UHoverAuthoring::FindCompleteCityPath(UWorld *World, FVector Start, FVector End)
 {
     TArray<FVector> Points;
 #if WITH_EDITOR
     if (auto *Navigation = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World))
-        if (auto *Data = Navigation->GetDefaultNavDataInstance())
+        if (auto *Data = Navigation->GetDefaultNavDataInstance(FNavigationSystem::DontCreate))
         {
             FNavLocation From, To;
             if (Navigation->ProjectPointToNavigation(Start, From, FVector(400, 400, 600)) &&

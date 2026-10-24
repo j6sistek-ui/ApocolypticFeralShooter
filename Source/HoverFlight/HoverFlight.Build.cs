@@ -7,6 +7,6 @@ public class HoverFlight : ModuleRules
         PublicDependencyModuleNames.AddRange(new[] { "Core", "CoreUObject", "Engine", "InputCore", "AnimGraphRuntime", "EnhancedInput", "ChaosVehicles", "UMG", "Niagara", "IKRig", "PoseSearch", "GameplayTags", "ZombieEngineStudio", "AIModule", "NavigationSystem" });
         PrivateDependencyModuleNames.AddRange(new[] { "SlateCore", "Slate", "ApplicationCore", "DLSSBlueprint", "StreamlineBlueprint", "StreamlineDLSSGBlueprint", "StreamlineReflexBlueprint" });
         if (Target.bBuildEditor)
-            PrivateDependencyModuleNames.AddRange(new[] { "UnrealEd", "VirtualTexturingEditor", "BlueprintGraph", "KismetCompiler", "AnimGraph" });
+            PrivateDependencyModuleNames.AddRange(new[] { "UnrealEd", "VirtualTexturingEditor", "BlueprintGraph", "KismetCompiler", "AnimGraph", "PhysicsUtilities" });
     }
 }

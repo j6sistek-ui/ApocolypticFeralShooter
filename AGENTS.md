@@ -15,11 +15,14 @@ Preserve the existing vehicle Blueprints. The owner authorized a runtime mapping
 for bike RT throttle, LT brake/reverse, B boost and corrected right-stick camera;
 keyboard and truck bindings remain vendor controls. Scope is free flight, mounting,
 dismounting, rifle aiming/shooting, the supplied bike and Doomsday pickup truck, plus
-respawning zombies with blood impacts and death. Vexa is invulnerable; zombies cannot
-damage her. Cyber City explicitly includes the supplied Zombie Engine inventory,
+respawning zombies with blood impacts and death. Vexa defaults to invincible; the
+pause-menu toggle permits normal health testing and a quick reset at zero health.
+Cyber City explicitly includes the supplied Zombie Engine inventory,
 quickbar, ammo/reload, melee, loot, gold/wall buys, waves and compatible live RGCL
 settings. Preserve Vexa/CLS/Parkour instead of replacing her with the vendor pawn.
-PostApo remains outside Zombie Engine. No main-game integration, network play,
+PostApo remains outside Zombie Engine. Chinese Lakeside Town has separate wave data
+reserved for upcoming new assets; never reuse the current zombie roster there.
+No main-game integration, network play,
 or production release is implied. See Docs/QUALITY_20261023.txt for the feature
 matrix, native plugin patches, animation gaps and acceptance evidence.
 

@@ -42,10 +42,87 @@ void AHoverCyberCityGameMode::InitGame(const FString &MapName, const FString &Op
     HUDClass = AHoverHUD::StaticClass();
     WaveSettings = LoadObject<UZE_WaveGameModeSettings>(
         nullptr, TEXT("/Game/HoverPrototype/ZombieEngine/DA_CyberWaves.DA_CyberWaves"));
+    Encounters = LoadObject<UHoverCyberEncounterSettings>(
+        nullptr, TEXT("/Game/HoverPrototype/ZombieEngine/Variants/DA_CyberEncounters.DA_CyberEncounters"));
+    bLakeside = MapName.Contains(TEXT("L_Showcase")) || MapName.Contains(TEXT("L_Lakeside"));
+    if (bLakeside)
+    {
+        WaveSettings = LoadObject<UZE_WaveGameModeSettings>(
+            nullptr, TEXT("/Game/HoverPrototype/Lakeside/DA_LakesideWaves.DA_LakesideWaves"));
+        Encounters = LoadObject<UHoverCyberEncounterSettings>(
+            nullptr, TEXT("/Game/HoverPrototype/Lakeside/DA_LakesideEncounters.DA_LakesideEncounters"));
+    }
     if (WaveSettings)
         WaveSettings->WaveHUDClass = UHoverCyberWaveHUD::StaticClass();
     // Test settings pauses the complete session, including the wave countdown.
     PrimaryActorTick.bTickEvenWhenPaused = false;
+}
+
+void AHoverCyberCityGameMode::ConfigureWave(int32 Wave, int32 &Count, TArray<UZE_ZombieDataAsset *> &Types)
+{
+    Super::ConfigureWave(Wave, Count, Types);
+    if (bLakeside && (!Encounters || Encounters->Standards.IsEmpty()))
+    {
+        Count = 0;
+        Types.Reset();
+        return;
+    }
+    if (!Encounters)
+        return;
+    if (Encounters->IsSwarmWave(Wave))
+    {
+        Count = FMath::Clamp(Encounters->SwarmCount, 1, 24);
+        Types = {Encounters->Kid};
+    }
+    else if (Encounters->Standards.Num())
+    {
+        Types.Reset();
+        for (const auto &Definition : Encounters->Standards)
+            if (Definition)
+                Types.Add(Definition);
+    }
+}
+
+UZE_ZombieDataAsset *AHoverCyberCityGameMode::SelectZombieData(int32 Wave, int32 SpawnIndex,
+                                                               const TArray<UZE_ZombieDataAsset *> &Types)
+{
+    if (Encounters)
+    {
+        if (Encounters->IsSwarmWave(Wave))
+            return Encounters->Kid;
+        // Exactly one tank; the remaining spawn slots keep the ordinary horde.
+        if (Encounters->IsBruteWave(Wave) && SpawnIndex == 0)
+            return Encounters->Brute;
+        if (Types.Num())
+            return Types[SpawnIndex % Types.Num()];
+    }
+    return Super::SelectZombieData(Wave, SpawnIndex, Types);
+}
+
+float AHoverCyberCityGameMode::GetEffectiveSpawnRate() const
+{
+    return Encounters && Encounters->IsSwarmWave(GetCurrentWave()) ? FMath::Max(.1f, Encounters->SwarmSpawnInterval)
+                                                                   : Super::GetEffectiveSpawnRate();
+}
+
+void AHoverCyberCityGameMode::StartWave()
+{
+    // A separate, empty roster must never fall back to the Cyber City enemies.
+    if (bLakeside && (!Encounters || Encounters->Standards.IsEmpty()))
+        return;
+    Super::StartWave();
+}
+
+FString AHoverCyberCityGameMode::GetEncounterLabel() const
+{
+    if (bLakeside)
+        return !Encounters || Encounters->Standards.IsEmpty() ? TEXT("LAKESIDE - new zombie roster pending")
+                                                              : TEXT("LAKESIDE HORDE");
+    if (Encounters && Encounters->IsSwarmWave(GetCurrentWave()))
+        return TEXT("KID SWARM - stay moving");
+    if (Encounters && Encounters->IsBruteWave(GetCurrentWave()))
+        return TEXT("HEAVY TANK - brute round");
+    return TEXT("CITY HORDE");
 }
 
 AHoverCyberZombieAI::AHoverCyberZombieAI()
@@ -74,7 +151,7 @@ void AHoverCyberCityGameMode::Tick(float DT)
     APawn *Player = PC ? PC->GetPawn() : nullptr;
     if (Player)
     {
-        // Vexa receives reaction events but her override returns zero damage.
+        // Vexa handles reactions and honors the pause-menu invulnerability setting.
         Player->SetCanBeDamaged(Cast<AHoverPilot>(Player) != nullptr);
         if (!IsWaveHUDVisible() && WaveSettings && WaveSettings->WaveHUDClass)
         {
@@ -151,6 +228,9 @@ void AHoverCyberZombieAI::Tick(float DT)
         // for pursuit so the existing walk/run blend space can reach its run pose.
         Zombie->GetCharacterMovement()->MaxWalkSpeed =
             (Board->GetValueAsObject(Key_TargetEnemy) ? Stats.RunSpeed : Stats.WalkSpeed) * SpeedScale;
+        if (const auto *Definition = Cast<UHoverCyberZombieDefinition>(Zombie->ZombieData))
+            Zombie->GetCharacterMovement()->MaxWalkSpeed =
+                FMath::Min(Zombie->GetCharacterMovement()->MaxWalkSpeed, Definition->MaximumRunSpeed);
         Board->SetValueAsFloat(Key_AttackCooldown, Stats.AttackCooldown);
         if (SightConfig->SightRadius != Stats.SightRadius || SightConfig->LoseSightRadius != Stats.LoseSightRadius ||
             SightConfig->PeripheralVisionAngleDegrees != Stats.ViewAngle)
@@ -199,26 +279,95 @@ AHoverCyberZombie::AHoverCyberZombie()
 void AHoverCyberZombie::BeginPlay()
 {
     Super::BeginPlay();
-    if (auto *Body =
-            LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/HoverPrototype/ZombieEngine/SK_CyberZombie.SK_CyberZombie")))
+    auto *Definition = Cast<UHoverCyberZombieDefinition>(ZombieData);
+    if (Definition && Definition->AppearanceMesh)
     {
+        auto *Body = Definition->AppearanceMesh.Get();
+        const FBoxSphereBounds Bounds = Body->GetBounds();
+        const float Scale = Definition->Height / FMath::Max(1.f, Bounds.BoxExtent.Z * 2.f);
+        GetCapsuleComponent()->SetCapsuleSize(Definition->CapsuleRadius, Definition->Height * .5f);
         GetMesh()->SetSkeletalMesh(Body);
         GetMesh()->EmptyOverrideMaterials();
-        GetMesh()->SetMorphTarget(TEXT("Angry"), .75f);
+        GetMesh()->SetRelativeScale3D(FVector(Scale));
+        GetMesh()->SetRelativeLocation(
+            FVector(0, 0, -Definition->Height * .5f - (Bounds.Origin.Z - Bounds.BoxExtent.Z) * Scale));
         GetMesh()->SetDisablePostProcessBlueprint(true);
+        Trousers->SetVisibility(false);
+        Shirt->SetVisibility(false);
+        GetCharacterMovement()->RotationRate.Yaw = Definition->Role == EHoverZombieRole::Brute ? 220.f : 600.f;
+        GetCharacterMovement()->MaxAcceleration = Definition->Role == EHoverZombieRole::Kid ? 2600.f : 1400.f;
     }
-    Trousers->SetSkeletalMesh(LoadObject<USkeletalMesh>(
-        nullptr, TEXT("/Game/HoverPrototype/ZombieEngine/SK_CyberTrousers.SK_CyberTrousers")));
-    Shirt->SetSkeletalMesh(
-        LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/HoverPrototype/ZombieEngine/SK_CyberShirt.SK_CyberShirt")));
-    Trousers->SetLeaderPoseComponent(GetMesh());
-    Shirt->SetLeaderPoseComponent(GetMesh());
-    Shirt->SetVisibility(GetUniqueID() % 2 == 0);
+    else
+    {
+        if (auto *Body = LoadObject<USkeletalMesh>(
+                nullptr, TEXT("/Game/HoverPrototype/ZombieEngine/SK_CyberZombie.SK_CyberZombie")))
+        {
+            GetMesh()->SetSkeletalMesh(Body);
+            GetMesh()->EmptyOverrideMaterials();
+            GetMesh()->SetMorphTarget(TEXT("Angry"), .75f);
+            GetMesh()->SetDisablePostProcessBlueprint(true);
+        }
+        Trousers->SetSkeletalMesh(LoadObject<USkeletalMesh>(
+            nullptr, TEXT("/Game/HoverPrototype/ZombieEngine/SK_CyberTrousers.SK_CyberTrousers")));
+        Shirt->SetSkeletalMesh(
+            LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/HoverPrototype/ZombieEngine/SK_CyberShirt.SK_CyberShirt")));
+        Trousers->SetLeaderPoseComponent(GetMesh());
+        Shirt->SetLeaderPoseComponent(GetMesh());
+        Shirt->SetVisibility(GetUniqueID() % 2 == 0);
+    }
     GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
     GetMesh()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
     GetMesh()->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
     GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
     Blood = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/Rocket/NS1_Blood/NS_NS1_BloodShot.NS_NS1_BloodShot"));
+}
+
+EHoverZombieRole AHoverCyberZombie::GetRole() const
+{
+    const auto *Definition = Cast<UHoverCyberZombieDefinition>(ZombieData);
+    return Definition ? Definition->Role : EHoverZombieRole::Standard;
+}
+
+bool AHoverCyberZombie::StompImpact()
+{
+    if (GetRole() != EHoverZombieRole::Brute || bIsDead || !bIsAttacking ||
+        GetWorld()->GetTimeSeconds() - LastStompTime < .8f)
+        return false;
+    FCollisionQueryParams Query(SCENE_QUERY_STAT(BruteLanding), false, this);
+    FVector Feet = GetActorLocation() - FVector(0, 0, GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+    FHitResult Floor;
+    if (!GetWorld()->LineTraceSingleByChannel(Floor, Feet + FVector(0, 0, 70), Feet - FVector(0, 0, 150),
+                                              ECC_Visibility, Query) ||
+        Floor.ImpactNormal.Z < .5f)
+        return false;
+    LastStompTime = GetWorld()->GetTimeSeconds();
+    ++StompCount;
+    OnAttackHitCheck(); // Purchased damage trace; Vexa honors the Invincible toggle.
+    auto *Definition = Cast<UHoverCyberZombieDefinition>(ZombieData);
+    const float Radius = Definition ? Definition->StompRadius : 400.f;
+    for (TActorIterator<AHoverPilot> It(GetWorld()); It; ++It)
+    {
+        AHoverPilot *Pilot = *It;
+        const FVector Target = Pilot->GetActorLocation();
+        const FVector PlayerFeet = Target - FVector(0, 0, Pilot->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+        const bool Close = FVector::Dist2D(PlayerFeet, Floor.ImpactPoint) <= Radius &&
+                           FMath::Abs(PlayerFeet.Z - Floor.ImpactPoint.Z) < 150.f;
+        Query.AddIgnoredActor(Pilot);
+        const bool Blocked =
+            GetWorld()->LineTraceTestByChannel(Floor.ImpactPoint + FVector(0, 0, 65), Target, ECC_Visibility, Query);
+        Pilot->ShowStompPulse(Floor.ImpactPoint, Floor.ImpactNormal, Radius, Close && !Blocked);
+        if (Close && !Blocked && Pilot->GetController() && Pilot->ApplyStompKnockdown(Floor.ImpactPoint))
+            ++StompKnockdowns;
+        break;
+    }
+    return true;
+}
+
+void UHoverBruteStompNotify::Notify(USkeletalMeshComponent *MeshComp, UAnimSequenceBase *Animation,
+                                    const FAnimNotifyEventReference &EventReference)
+{
+    if (auto *Zombie = MeshComp ? Cast<AHoverCyberZombie>(MeshComp->GetOwner()) : nullptr)
+        Zombie->StompImpact();
 }
 
 float AHoverCyberZombie::TakeDamage(float Damage, const FDamageEvent &Event, AController *EventController,
@@ -237,7 +386,9 @@ float AHoverCyberZombie::TakeDamage(float Damage, const FDamageEvent &Event, ACo
         UE_LOG(LogTemp, Verbose, TEXT("HOVER_ZOMBIE_HIT causer=%s bone=%s damage=%.1f point=%s"), *GetNameSafe(Causer),
                *Hit.BoneName.ToString(), Damage, *Hit.ImpactPoint.ToString());
         if (EventController && Cast<AHoverPilot>(EventController->GetPawn()) && SurvivalComponent &&
-            (Hit.BoneName.ToString().Contains(TEXT("head"), ESearchCase::IgnoreCase) || (Mode && Mode->HasInstaKill())))
+            ((GetRole() != EHoverZombieRole::Brute &&
+              Hit.BoneName.ToString().Contains(TEXT("head"), ESearchCase::IgnoreCase)) ||
+             (Mode && Mode->HasInstaKill())))
             Damage = FMath::Max(Damage, SurvivalComponent->GetHealth());
         if (Blood && Event.IsOfType(FPointDamageEvent::ClassID) && Hit.bBlockingHit && Hit.GetActor() == this)
             HoverEffects::BloodBurst(GetWorld(), Blood, Hit.ImpactPoint, Direction);
@@ -340,7 +491,7 @@ void UHoverCyberWaveHUD::NativeOnInitialized()
     Position->SetAnchors(FAnchors(1, 0));
     Position->SetAlignment(FVector2D(1, 0));
     Position->SetPosition(FVector2D(-24, 24));
-    Position->SetSize(FVector2D(250, 164));
+    Position->SetSize(FVector2D(270, 190));
     auto *Column = WidgetTree->ConstructWidget<UVerticalBox>();
     Background->SetContent(Column);
     auto AddText = [this, Column](FName Name, int32 Size, FLinearColor Color) {
@@ -351,6 +502,7 @@ void UHoverCyberWaveHUD::NativeOnInitialized()
         return Text;
     };
     WaveNumberText = AddText(TEXT("WaveNumberText"), 22, FLinearColor::White);
+    EncounterText = AddText(TEXT("EncounterText"), 13, FLinearColor(1.f, .65f, .25f));
     WaveStateText = AddText(TEXT("WaveStateText"), 13, FLinearColor(.4f, .85f, 1.f));
     ZombiesRemainingText = AddText(TEXT("ZombiesRemainingText"), 16, FLinearColor::White);
     ZombiesKilledText = AddText(TEXT("ZombiesKilledText"), 14, FLinearColor(.7f, .8f, .85f));
@@ -359,4 +511,12 @@ void UHoverCyberWaveHUD::NativeOnInitialized()
     WaveProgressBar->SetFillColorAndOpacity(FLinearColor(.15f, .7f, .9f));
     Column->AddChildToVerticalBox(WaveProgressBar);
     SetVisibility(ESlateVisibility::HitTestInvisible);
+}
+
+void UHoverCyberWaveHUD::NativeTick(const FGeometry &Geometry, float DeltaTime)
+{
+    Super::NativeTick(Geometry, DeltaTime);
+    if (EncounterText)
+        if (const auto *Mode = GetWorld()->GetAuthGameMode<AHoverCyberCityGameMode>())
+            EncounterText->SetText(FText::FromString(Mode->GetEncounterLabel()));
 }

@@ -43,12 +43,16 @@ void UHoverGraphicsMenu::NativeOnInitialized()
         return Label;
     };
     AddText(TEXT("TEST SETTINGS"), 30, FLinearColor::White);
-    AddText(TEXT("Game paused. Choose graphics or a test environment."), 16, FLinearColor(.7f, .76f, .84f));
+    AddText(TEXT("Game paused. Adjust graphics, health or the test environment."), 16, FLinearColor(.7f, .76f, .84f));
     ModeText = AddText(TEXT(""), 23, FLinearColor::White);
     FramesText = AddText(TEXT(""), 23, FLinearColor::White);
     LevelText = AddText(TEXT(""), 23, FLinearColor::White);
-    AddText(TEXT("Changing level starts a fresh test with Vexa, all three vehicles and zombies."), 16,
+    HealthText = AddText(TEXT(""), 23, FLinearColor::White);
+    AddText(TEXT("Invincible off: take damage. At zero health, reset at the start after 3 seconds."), 16,
             FLinearColor(.7f, .76f, .84f));
+    AddText(TEXT("Changing level starts a fresh test with Vexa and all three vehicles. Lakeside awaits its new zombie "
+                 "roster."),
+            16, FLinearColor(.7f, .76f, .84f));
     AddText(TEXT("DLAA keeps full resolution. DLSS Quality is a good starting point for more speed."), 16,
             FLinearColor(.7f, .76f, .84f));
     NoteText = AddText(TEXT(""), 16, FLinearColor(.9f, .78f, .5f));
@@ -61,14 +65,17 @@ void UHoverGraphicsMenu::Open(UHoverGraphicsSettings *InSettings)
 {
     Settings = InSettings;
     Pending = Settings->GetOptions();
-    PendingLevel = UGameplayStatics::GetCurrentLevelName(this).Contains(TEXT("Cyber")) ? 1 : 0;
+    const FString Map = UGameplayStatics::GetCurrentLevelName(this);
+    PendingLevel = Map.Contains(TEXT("L_Showcase")) || Map.Contains(TEXT("L_Lakeside")) ? 2
+                   : Map.Contains(TEXT("Cyber"))                                        ? 1
+                                                                                        : 0;
     SelectedRow = 0;
     Refresh();
 }
 
 void UHoverGraphicsMenu::Navigate(int32 Direction)
 {
-    SelectedRow = (SelectedRow + Direction + 3) % 3;
+    SelectedRow = (SelectedRow + Direction + 4) % 4;
     Refresh();
 }
 
@@ -86,8 +93,10 @@ void UHoverGraphicsMenu::Adjust(int32 Direction)
         const int32 Index = FMath::Max(0, Options.Find(Pending.FrameGeneration));
         Pending.FrameGeneration = Options[(Index + Direction + Options.Num()) % Options.Num()];
     }
+    else if (SelectedRow == 2)
+        PendingLevel = (PendingLevel + Direction + 3) % 3;
     else
-        PendingLevel = 1 - PendingLevel;
+        Pending.bInvincible = !Pending.bInvincible;
     Refresh();
 }
 
@@ -103,7 +112,13 @@ void UHoverGraphicsMenu::Refresh()
     FramesText->SetColorAndOpacity(FSlateColor(SelectedRow == 1 ? FLinearColor(.3f, .8f, 1) : FLinearColor::White));
     LevelText->SetText(
         FText::FromString(FString::Printf(TEXT("%s Test level:  < %s >"), SelectedRow == 2 ? TEXT(">") : TEXT("  "),
-                                          PendingLevel ? TEXT("Cyber City") : TEXT("Post-apocalypse"))));
+                                          PendingLevel == 2   ? TEXT("Chinese Lakeside Town")
+                                          : PendingLevel == 1 ? TEXT("Cyber City")
+                                                              : TEXT("Post-apocalypse"))));
     LevelText->SetColorAndOpacity(FSlateColor(SelectedRow == 2 ? FLinearColor(.3f, .8f, 1) : FLinearColor::White));
     NoteText->SetText(FText::FromString(Settings->GetAvailabilityNote()));
+    HealthText->SetText(
+        FText::FromString(FString::Printf(TEXT("%s Invincible:  < %s >"), SelectedRow == 3 ? TEXT(">") : TEXT("  "),
+                                          Pending.bInvincible ? TEXT("On") : TEXT("Off"))));
+    HealthText->SetColorAndOpacity(FSlateColor(SelectedRow == 3 ? FLinearColor(.3f, .8f, 1) : FLinearColor::White));
 }

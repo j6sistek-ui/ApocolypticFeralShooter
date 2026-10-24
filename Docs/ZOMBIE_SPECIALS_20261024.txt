@@ -1,0 +1,103 @@
+ZOMBIE SPECIALS, HEALTH TESTING AND LAKESIDE
+
+Scope
+Local AFS sandbox only. SpaceSurvival and the supplied Blender originals are unchanged.
+No rendered Unreal/GPU tests were run in this pass, per the owner's instruction.
+CPU pose replays validate deformation and retargeting, not Unreal lighting, VFX
+appearance, controller feel or packaged performance.
+
+Cyber City roster
+Four standard appearances come from Standard Zomd.blend. They retain the purchased
+Zombie Engine behavior tree, movement, attack/hit/death clips, loot and wave scaling.
+Initial editable schedule: one brute on rounds12/14/16..., with standard enemies
+in the remaining slots. Eight fast kids replace the normal roster on5/15/25....
+These are tuning defaults, not an additional requirement imposed on the owner.
+DA_CyberEncounters in /Game/HoverPrototype/ZombieEngine/Variants controls the schedule.
+
+The brute starts with600 health,250cm height,260cm/s run speed (cap380),75damage,
+3.5second attack cooldown and400-500gold. Native wave scaling still applies.
+Ordinary headshots do not instantly kill the brute; the native InstaKill pickup does.
+The kid starts with45health,110cm height,650cm/s run speed (cap820),15damage,
+0.85second attack cooldown and70-90gold. Standard height is180cm.
+
+Brute source jump_down.001 and volleyball clips are adapted into the native attack
+montage pool as stomp and smash. The stomp notify fires at actual landing1.2s into
+the2.367s clip. Smash uses the native hit-check notify at0.8s of1.433s.
+The landing pulse knocks an on-foot, possessed Vexa down within4m; walls and a
+150cm height difference block it. It does not force a vehicle dismount.
+Recovery restores input after2.1s and grants1s knockdown grace. Invincible prevents
+health loss but deliberately does not prevent this physical reaction.
+
+Health option
+D-pad Up / F6 opens Test Settings. Select Invincible, change On/Off, A applies.
+B cancels. Default isOn; the selection persists in GameUserSettings.ini.
+Off allows Vexa health loss. At zero, input is suspended and she resets to the
+level start after3seconds, full health, with2seconds of respawn grace.
+This is the sandbox's quick reset, not a full survival game-over flow.
+Occupied bike/truck damage remains disabled; this option controls Vexa's health.
+The existing Menu-button camera toggle is preserved.
+
+Lakeside separation
+Chinese Lakeside Town is the third Test Settings level. The imported map is
+/Game/Chinese_Lakeside_Town/Levels/L_Showcase. Water and HDRIBackdrop are enabled
+because the source project requires them. No other descriptor fields were changed
+relative to the pre-pass, already modified owner descriptor.
+/Game/HoverPrototype/Lakeside/DA_LakesideWaves and DA_LakesideEncounters are separate
+from Cyber City. Their roster is intentionally empty: ONLY upcoming new assets may
+populate it. No current AFS, standard, brute or kid enemies may be used there.
+The native wave start is gated when this roster is empty; no Cyber City fallback.
+The northern passage contains the player, glider, bike and truck start positions.
+The bike is parked along the western edge facing the passage; its old crosswise
+position blocked all six routes in Play. Vehicle start markers now also supply
+orientation so parking can follow each map's roads.
+Six future entrances have complete navigation routes: North Passage, West Bank,
+Market Back Lane, Upper Bridge, West Pier and Market Corner. The two disconnected
+east/south candidates were omitted. Native visibility/distance/occupancy gates
+still apply; do not spawn beside the player when no fair entrance is available.
+The copied HDRI actor was refreshed against the current engine's sky/floor materials;
+its older missing CenterProjection reference is superseded. Original files remain
+in D:/ChineseLakesideTown.zip and the modified actor/map have separate backups.
+World Partition streaming, partitioned dynamic navigation and an8192-tile fixed
+pool are enabled. Native
+WorldPartitionNavigationDataBuilder creates the base navigation chunks with NullRHI;
+no rendered commandlet is required. UAssetBrowser is disabled only for that command
+because its thumbnail tick requires Slate. The normal editor plugin setting is unchanged.
+After collision/layout edits, rebuild those chunks and recheck complete paths in Play.
+PostApo retains its existing target range and remains outside Zombie Engine.
+
+Asset preservation and later texture updates
+Original three blends remain at their D-drive paths, with hash-matched copies in
+D:/AFS_Comparisons/ZombieSpecials_20261024/Before/Originals.
+The user's segmented source meshes and UVs were not edited. Runtime copies join
+pieces and synchronize coincident seam weights; topology/geometry/UV hashes match
+before and after seam repair.378 sampled poses reduced seam gaps to below0.011mm.
+Prepared/<Name>/<Name>_Runtime.blend is the corrected source in meters.
+<Name>_Unreal.blend and SK_<Name>.fbx are centimeter-normalized export copies.
+Do not reimport the initial scale100 FBX or the superseded direct animation FBXs.
+Current runtime attack/recovery sequences contain inspected native bone-track keys;
+write_native_zombie_clips.py and retarget_brute_cpu.py record their provenance.
+
+Stable asset paths: /Game/HoverPrototype/ZombieEngine/Variants/<Name>/.
+Names: Standard01, Standard02, Standard03, Standard04, Brute, Kid.
+Materials reference BaseColor, Normal and RM textures; source PNGs retain4K,
+runtime maximum texture size is2048. RM green=roughness, blue=metallic.
+For texture-only revisions, export the changed maps with the same UV layout,
+back up the existing texture assets, and reimport those textures at the same paths.
+Do not regenerate skeletons, physics assets, role definitions or native clips for
+a texture update. Geometry/rig changes require a separate reinspection.
+
+Licensed plugin hooks
+Only the local ZombieEngineStudio wave-mode header/cpp are changed in this pass:
+virtual ConfigureWave/SelectZombieData/GetEffectiveSpawnRate/StartWave hooks, and
+deferred spawn so the chosen definition is assigned before BeginPlay caches stats.
+The default vendor selection and state machine remain intact. The patch and full
+before/after files are kept in the D-drive backup, outside source Git.
+
+Verification and open review
+Native build;16 accelerated waves; all6 weapon-hit paths; brute headshot survival;
+near/far/occluded stomp/recovery; invincibility apply/cancel/death/reset; six actual
+runtime-pose CPU replays and source-preservation checks are recorded separately.
+See the workspace outputs/AFS_Test/ZombieSpecials20261024 for exact receipts.
+The earlier human slide/prone-entry/exit/wall-run clip gaps, CLS startup divide
+warning, final rendered effects/UI review and physical controller review remain open.
+Upcoming Lakeside zombies are pending owner assets. No packaged/performance claim.
