@@ -3,6 +3,9 @@
 #include "EngineUtils.h"
 #include "HoverTestController.h"
 #include "HoverPilot.h"
+#include "Survival/ZE_WaveGameModeSettings.h"
+#include "Inventory/ZE_WeaponDefinition.h"
+#include "Inventory/ZE_AmmoDefinition.h"
 #include "GameFramework/PlayerInput.h"
 #include "Engine/Blueprint.h"
 #include "UObject/UnrealType.h"
@@ -54,6 +57,34 @@
 #include "Components/BrushComponent.h"
 #include "EdGraphSchema_K2.h"
 #endif
+
+bool UHoverAuthoring::ConfigureCityStartingGear(UZE_WaveGameModeSettings *Settings)
+{
+#if WITH_EDITOR
+    if (!Settings || !Settings->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/ZombieEngine/")))
+        return false;
+    auto *Weapon = LoadObject<UZE_WeaponDefinition>(
+        nullptr, TEXT("/Game/HoverPrototype/ZombieEngine/DA_AFS_Ballista.DA_AFS_Ballista"));
+    auto *Ammo = LoadObject<UZE_AmmoDefinition>(nullptr, TEXT("/Game/ZESP/ZE/Data/Ammo/DA_AMMO_M16.DA_AMMO_M16"));
+    if (!Weapon || !Ammo)
+        return false;
+    Settings->Modify();
+    auto &Gear = Settings->StartingEquipment;
+    FZE_StartingWeaponConfig Slot;
+    Slot.WeaponDefinition = Weapon;
+    Slot.bAddToQuickbar = true;
+    Slot.QuickbarSlot = 1;
+    Gear.StartingWeapons = {Slot};
+    Gear.StartingAmmo = {Ammo};
+    Gear.AmmoQuantity = 120;
+    Gear.StartingGold = 500;
+    Gear.GrenadeCount = 0;
+    Settings->MarkPackageDirty();
+    return true;
+#else
+    return false;
+#endif
+}
 
 AActor *UHoverAuthoring::SpawnPlaytestActor(TSubclassOf<AActor> ActorClass, FTransform Transform)
 {
@@ -467,6 +498,39 @@ TArray<FVector> UHoverAuthoring::FindLightingReviewLocations(UWorld *World, FVec
         }
 #endif
     return Result;
+}
+
+FString UHoverAuthoring::DescribeNiagaraEffect(UNiagaraSystem *Effect)
+{
+    FString Report;
+#if WITH_EDITOR
+    if (!Effect)
+        return Report;
+    auto DescribeStore = [&Report](const FNiagaraParameterStore &Store) {
+        TArray<FNiagaraVariable> Variables;
+        Store.GetParameters(Variables);
+        for (const auto &Variable : Variables)
+        {
+            Report += Variable.GetName().ToString() + TEXT(" ") + Variable.GetType().GetName();
+            if (Variable.GetType() == FNiagaraTypeDefinition::GetFloatDef())
+                Report += FString::Printf(TEXT(" = %.4f"), Store.GetParameterValue<float>(Variable));
+            else if (Variable.GetType() == FNiagaraTypeDefinition::GetColorDef())
+                Report += TEXT(" = ") + Store.GetParameterValue<FLinearColor>(Variable).ToString();
+            Report += TEXT("\n");
+        }
+    };
+    DescribeStore(Effect->GetExposedParameters());
+    for (auto &Handle : Effect->GetEmitterHandles())
+        if (auto *Data = Handle.GetEmitterData())
+        {
+            Report += TEXT("EMITTER ") + Handle.GetName().ToString() + TEXT("\n");
+            TArray<UNiagaraScript *> Scripts;
+            Data->GetScripts(Scripts);
+            for (auto *Script : Scripts)
+                DescribeStore(Script->RapidIterationParameters);
+        }
+#endif
+    return Report;
 }
 
 FString UHoverAuthoring::ConfigurePrototypeEffect(UNiagaraSystem *Effect, float SpriteScale, bool LocalSpace)

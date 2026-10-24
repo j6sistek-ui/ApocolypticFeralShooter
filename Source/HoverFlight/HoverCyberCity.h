@@ -22,14 +22,8 @@ class HOVERFLIGHT_API AHoverCyberCityGameMode : public AZE_ZombieWaveGameMode
     UFUNCTION(BlueprintPure) bool IsWaveHUDVisible() const;
     UFUNCTION(BlueprintPure) float GetSpeedBonus() const;
     UFUNCTION(BlueprintPure) bool HasInstaKill() const;
-    UFUNCTION(BlueprintPure) int32 GetGold() const
-    {
-        return Gold;
-    }
-    void AddGold(int32 Amount)
-    {
-        Gold += Amount;
-    }
+    UFUNCTION(BlueprintPure) int32 GetGold() const;
+    void AddGold(int32 Amount);
     void ActivatePowerUp(EZE_PowerUpType Type, float Duration);
 
   private:
@@ -46,7 +40,11 @@ class HOVERFLIGHT_API AHoverCyberZombieAI : public AZE_ZombieAIController
     GENERATED_BODY()
   public:
     AHoverCyberZombieAI();
+    virtual void OnPossess(APawn *InPawn) override;
     virtual void Tick(float DeltaSeconds) override;
+
+  private:
+    UFUNCTION() void OnPlayerDetected(AActor *Actor, FAIStimulus Stimulus);
 };
 
 UCLASS()

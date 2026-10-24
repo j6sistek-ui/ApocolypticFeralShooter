@@ -1,5 +1,59 @@
 AFS LOCAL TEST SANDBOX - 2026-10-22
 
+QUALITY PASS - 2026-10-23 (supersedes conflicting historical controls/claims below)
+Current feature scope and limits: Docs/QUALITY_20261023.txt.
+Final build14 succeeded in15.14seconds. Clang-format and git diff whitespace checks pass.
+Combined observation assessment54/54 passed; AFS.HoverMotion.MomentumAndDirection
+automation also passed. Those are bounded checks, not full-product acceptance.
+The installed Docker CLI could not connect to its Linux daemon; no host packages
+were installed. Portable Python syntax checking uses the existing bundled runtime.
+
+Small rendered quality_visual7 run: errors[];11 camera/action checks passed.
+Sampled crouch/prone camera step <=3.34cm, arm430 through jump, TPSzoom72/FPSsight65,
+walk500/run-turn900cm/s, grounded slide, crawl120, prone reload stays low.
+Reviewed selected captures, not a claim of physical feel or final motion approval.
+CPU wallrun11: native wall-run activates with.25 gravity, A launches away/up at
+sampledZ833cm/s, then restores2.5 gravity and lands. Dedicated wall-run pose remains
+an animation gap. Slide/crawl have functional placeholder poses; no human transition
+clips were found in the original Parkour package.
+
+CPU systems11:5shots30->25, quickbar preserves magazine,0 stays0 after swapping,
+reload interruption, hold-X purchase60reserve/250gold, tap does not purchase,
+reload30/30, liveWalk650 and liveReload.5s, actualR3melee50damage, zombie attack
+with player100HP and hit montage, actualriflekill/gold. Inventory12 has30 concrete
+WBP_GridCell widgets; item movement updates the native grid without abstract-widget
+construction errors. Native13 rechecks sight, gunshot hearing, damage perception,
+backpack80->90kg, unequip, hold-X looseammo120->150 and InstaKill overlap.
+
+Full Cyber City CPU run city12:3-shot kill spends30->27, pickup/reward flow,
+Nuke clears wave, wave2count12/HP110/run612, pause and complete city/PostApo/city
+roundtrip. PostApo retains20legacy targets, zeroCyber zombies and no combatbridge;
+each level hasglider/bike/truck. No level content saved by these tests.
+
+Failed attempts remain evidence, not hidden passes: first pickup check aimed
+incorrectly from the moving TPS boom; corrected FPS aim collected the native item.
+First vehicle checks exposed stale parked-bike targeting; OnPossess delegate and
+damage-retaliation filtering were corrected inbuild13. A subsequent glider mount
+was correctly blocked by a live zombie in the corridor; test setup now clears that
+corridor after exercising actual pursuit instead of weakening gameplay collision.
+Final vehicles13b errors[]: bike/truck entry and exit, current-player targeting,
+wave HUD and invulnerability; glider mounts, R1 spends30->26 and low-ground exit
+works. Native RGCL14 errors[]: live damage10/rate2 produces3hits/30damage, then
+damage20/rate4 produces5hits/100damage over the same1.1second trigger hold. Recoil
+test exposed legacy-input inversion; patched view impulse now lifts pitch upward
+(-9.51 to-8.18degrees), with distinct spread directions. No definitions saved by
+the tuning test. Owner descriptor hash remains unchanged.
+
+Effects: point-hit blood guard, bounded emission/lifetime, disabled melee debug,
+larger terrain impact and purchased tracer trail are built. The owner's exact
+random ground-blood cause remains UNCONFIRMED pending a rendered reproduction.
+NullRHI cannot validate Niagara appearance. The owner game occupied~12-14GBVRAM;
+only CPU tests continued. Current effects/city UI/supply placement need visual
+review when GPU headroom exists. Vendor stale mannequin PoseAsset warnings and
+installed-engine deprecations remain; unrelated native assets are not resaved.
+Physical controller, final visual motion, packaged/performance/long-session and
+the earlier intermittent editor-exit crash remain open. No complete-product claim.
+
 ZOMBIE ENGINE / CYBER CITY - 2026-10-23 (current integration)
 Main promotion build passed in51.91seconds. Fresh main rendered Play exited0,
 errors=[], actual three-shot kill, pickups/wave2/pause/invulnerability and complete

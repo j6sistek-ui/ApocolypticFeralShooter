@@ -5,6 +5,8 @@
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Animation/AnimBlueprint.h"
+#include "Animation/AnimSequence.h"
+#include "Animation/AnimMontage.h"
 #include "Animation/AnimNode_LinkedInputPose.h"
 #include "BoneControllers/AnimNode_SpringBone.h"
 #include "UObject/UnrealType.h"
@@ -23,6 +25,10 @@
 #include "AnimGraphNode_LocalToComponentSpace.h"
 #include "AnimGraphNode_ComponentToLocalSpace.h"
 #include "AnimGraphNode_SpringBone.h"
+#include "AnimGraphNode_Slot.h"
+#include "AnimGraphNode_SaveCachedPose.h"
+#include "AnimGraphNode_UseCachedPose.h"
+#include "AnimGraphNode_LayeredBoneBlend.h"
 #endif
 
 namespace
@@ -51,7 +57,10 @@ void UHoverLocomotionBridge::BeginPlay()
     auto *DataClass =
         LoadClass<UActorComponent>(nullptr, TEXT("/Game/HoverPrototype/Hybrid/BPC_CLS_PoseData.BPC_CLS_PoseData_C"));
     auto *AnimClass =
-        LoadClass<UAnimInstance>(nullptr, TEXT("/Game/CLS/Core/Animations/ABP_CLS_Character.ABP_CLS_Character_C"));
+        LoadClass<UAnimInstance>(nullptr, TEXT("/Game/HoverPrototype/Hybrid/ABP_CLS_Actions.ABP_CLS_Actions_C"));
+    if (!AnimClass)
+        AnimClass =
+            LoadClass<UAnimInstance>(nullptr, TEXT("/Game/CLS/Core/Animations/ABP_CLS_Character.ABP_CLS_Character_C"));
     auto *Mesh = LoadObject<USkeletalMesh>(
         nullptr, TEXT("/Game/CLS/Core/Characters/Mannequins/Meshes/SKM_Quinn_Simple.SKM_Quinn_Simple"));
     if (!DataClass || !AnimClass || !Mesh)
@@ -88,12 +97,49 @@ void UHoverLocomotionBridge::TickComponent(float DT, ELevelTick Type, FActorComp
     auto *Pilot = Cast<AHoverPilot>(GetOwner());
     if (!bReady || !Pilot)
         return;
+    auto *DriverAnim = Driver->GetAnimInstance();
+    const int32 NewPosture = bEnabled && Pilot->IsOnFoot() ? (Pilot->IsProne()           ? 2
+                                                              : Pilot->IsGroundSliding() ? 1
+                                                                                         : 0)
+                                                           : 0;
+    if (DriverAnim && NewPosture != PostureMode)
+    {
+        if (Posture)
+            DriverAnim->Montage_Stop(.3f, Posture);
+        Posture = nullptr;
+        PostureMode = NewPosture;
+        if (NewPosture)
+        {
+            auto *Clip = LoadObject<UAnimSequence>(
+                nullptr,
+                NewPosture == 2
+                    ? TEXT("/Game/HoverPrototype/Animations/QA_ProneCrawl.QA_ProneCrawl")
+                    : TEXT("/Game/CLS/Example/SetupYourHeroExample/Anims/Unarmed/Crouch/Crouch_Idle.Crouch_Idle"));
+            if (Clip)
+                Posture =
+                    DriverAnim->PlaySlotAnimationAsDynamicMontage(Clip, TEXT("DefaultSlot"), .35f, .3f, 1.f, 100000);
+        }
+    }
+    if (DriverAnim && Posture && NewPosture == 2)
+        DriverAnim->Montage_SetPlayRate(Posture,
+                                        Pilot->GetVelocity().Size2D() > 5.f
+                                            ? FMath::Clamp(float(Pilot->GetVelocity().Size2D()) / 80.f, .3f, 1.5f)
+                                            : 0.f);
+    if (auto *Lock = FindFProperty<FBoolProperty>(Pilot->GetClass(), TEXT("WallJumpLock")))
+    {
+        const bool Locked = Lock->GetPropertyValue_InContainer(Pilot);
+        if (Locked && !bWasWallJumpLocked && Pilot->GetVelocity().Z > 0 && Pilot->IsOnFoot())
+            PlayAction(
+                LoadObject<UAnimSequence>(nullptr, TEXT("/Game/HoverPrototype/Animations/QA_WallJump.QA_WallJump")),
+                0.f, false);
+        bWasWallJumpLocked = Locked;
+    }
     Driver->SetWorldTransform(Pilot->GetMesh()->GetComponentTransform());
     SetByte(Locomotion, TEXT("CurrentGait"), Pilot->GetCharacterMovement()->MaxWalkSpeed > 600 ? 1 : 0);
     // CLS Stance means Unarmed/Pistol/Rifle, not standing/crouching.
     // Crouching is selected through State.Movement.Crouch below.
     SetByte(Locomotion, TEXT("CurrentStance"), 0);
-    SetByte(Locomotion, TEXT("CurrentRotationMode"), Pilot->IsAiming() ? 1 : 0);
+    SetByte(Locomotion, TEXT("CurrentRotationMode"), Pilot->UsesAimFacing() ? 1 : 0);
     if (auto *Package = Locomotion->FindFunction(TEXT("Package_AnimData")))
         Locomotion->ProcessEvent(Package, nullptr);
     // Parkour keeps a camera-relative capsule for its wall traces. CLS sees the
@@ -101,12 +147,24 @@ void UHoverLocomotionBridge::TickComponent(float DT, ELevelTick Type, FActorComp
     if (auto *Data = FindFProperty<FStructProperty>(Locomotion->GetClass(), TEXT("AnimData")))
     {
         void *Value = Data->ContainerPtrToValuePtr<void>(Locomotion);
+        const FQuat BodyRotation = Driver->GetComponentQuat() * FRotator(0, 90, 0).Quaternion();
         for (TFieldIterator<FStructProperty> It(Data->Struct); It; ++It)
+        {
             if (It->GetName().StartsWith(TEXT("ActorTransform_")))
             {
                 auto *Transform = It->ContainerPtrToValuePtr<FTransform>(Value);
-                Transform->SetRotation((Driver->GetComponentQuat() * FRotator(0, 90, 0).Quaternion()));
+                Transform->SetRotation(BodyRotation);
             }
+            else if (It->GetName().StartsWith(TEXT("OrientationIntent_")) && !Pilot->UsesAimFacing())
+            {
+                // The vendor package uses control rotation. Our free third-person
+                // body faces travel, so steering and torso must share that intent.
+                auto *Intent = It->ContainerPtrToValuePtr<FRotator>(Value);
+                *Intent =
+                    Pilot->GetVelocity().Size2D() > 12.f ? Pilot->GetVelocity().Rotation() : BodyRotation.Rotator();
+                Intent->Pitch = Intent->Roll = 0;
+            }
+        }
     }
     if (auto *Anim = Cast<UHoverAnimInstance>(Pilot->GetMesh()->GetAnimInstance()))
     {
@@ -118,6 +176,27 @@ UActorComponent *UHoverIntegrationAuthoring::GetCLSData(AActor *Owner)
 {
     auto *Bridge = Owner ? Owner->FindComponentByClass<UHoverLocomotionBridge>() : nullptr;
     return Bridge ? Bridge->Locomotion.Get() : nullptr;
+}
+bool UHoverLocomotionBridge::PlayAction(UAnimSequence *Sequence, float Duration, bool UpperBody)
+{
+    if (!Driver || !Driver->GetAnimInstance() || !Sequence || !bEnabled)
+        return false;
+    const float Rate = Duration > 0 ? Sequence->GetPlayLength() / Duration : 1.f;
+    // The purchased skeleton already has a separate AdditiveGroup. Its slot can
+    // carry a normal sequence through our upper-body blend without cancelling
+    // the DefaultSlot used for slide/prone. Original skeleton stays untouched.
+    Action = Driver->GetAnimInstance()->PlaySlotAnimationAsDynamicMontage(
+        Sequence, UpperBody ? TEXT("AdditiveHitReact") : TEXT("DefaultSlot"), .12f, .18f, Rate);
+    return Action != nullptr;
+}
+void UHoverLocomotionBridge::CancelAction()
+{
+    if (Driver && Driver->GetAnimInstance() && Action)
+        Driver->GetAnimInstance()->Montage_Stop(.15f, Action);
+}
+bool UHoverLocomotionBridge::IsActionPlaying() const
+{
+    return Driver && Driver->GetAnimInstance() && Action && Driver->GetAnimInstance()->Montage_IsPlaying(Action);
 }
 USkeletalMeshComponent *UHoverIntegrationAuthoring::GetCLSDriver(AActor *Owner)
 {
@@ -226,6 +305,77 @@ bool Connect(UEdGraphNode *A, const TCHAR *Out, UEdGraphNode *B, const TCHAR *In
     return Ok;
 }
 #endif
+bool UHoverIntegrationAuthoring::BuildActionLayer(UAnimBlueprint *Blueprint)
+{
+#if WITH_EDITOR
+    if (!Blueprint || !Blueprint->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/Hybrid/")))
+        return false;
+    TArray<UEdGraph *> Graphs;
+    Blueprint->GetAllGraphs(Graphs);
+    for (auto *Graph : Graphs)
+    {
+        if (Graph->GetFName() != TEXT("AnimGraph"))
+            continue;
+        UAnimGraphNode_Root *Root = nullptr;
+        for (UEdGraphNode *Node : Graph->Nodes)
+        {
+            if (Node->NodeComment == TEXT("AFS upper body actions"))
+            {
+                if (auto *Layer = Cast<UAnimGraphNode_LayeredBoneBlend>(Node))
+                    Layer->Node.bMeshSpaceRotationBlend = false;
+                FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+                FKismetEditorUtilities::CompileBlueprint(Blueprint);
+                return true;
+            }
+            if (auto *Candidate = Cast<UAnimGraphNode_Root>(Node))
+                Root = Candidate;
+        }
+        if (!Root || Root->FindPin(TEXT("Result"))->LinkedTo.Num() != 1)
+            return false;
+        auto *Input = Root->FindPin(TEXT("Result"));
+        auto *Source = Input->LinkedTo[0];
+        auto *Cache = AddNode<UAnimGraphNode_SaveCachedPose>(Graph);
+        Cache->CacheName = TEXT("AFS locomotion and posture");
+        auto *Base = AddNode<UAnimGraphNode_UseCachedPose>(Graph);
+        auto *ActionBase = AddNode<UAnimGraphNode_UseCachedPose>(Graph);
+        Base->SaveCachedPoseNode = Cache;
+        ActionBase->SaveCachedPoseNode = Cache;
+        auto *Slot = AddNode<UAnimGraphNode_Slot>(Graph);
+        Slot->Node.SlotName = TEXT("AdditiveHitReact");
+        auto *Layer = AddNode<UAnimGraphNode_LayeredBoneBlend>(Graph);
+        Layer->Node.BlendPoses.Reset();
+        Layer->Node.BlendWeights.Reset();
+        Layer->Node.LayerSetup.Reset();
+        Layer->Node.AddPose();
+        FBranchFilter Filter;
+        Filter.BoneName = TEXT("spine_01");
+        Filter.BlendDepth = 3;
+        Layer->Node.LayerSetup[0].BranchFilters.Add(Filter);
+        Layer->Node.BlendWeights[0] = 1.f;
+        Layer->Node.bMeshSpaceRotationBlend = false;
+        Layer->NodeComment = TEXT("AFS upper body actions");
+        Layer->ReconstructNode();
+        Input->BreakLinkTo(Source);
+        if (!Graph->GetSchema()->TryCreateConnection(Source, Cache->FindPin(TEXT("Pose"))) ||
+            !Connect(Base, TEXT("Pose"), Layer, TEXT("BasePose")) ||
+            !Connect(ActionBase, TEXT("Pose"), Slot, TEXT("Source")) ||
+            !Connect(Slot, TEXT("Pose"), Layer, TEXT("BlendPoses_0")) ||
+            !Connect(Layer, TEXT("Pose"), Root, TEXT("Result")))
+            return false;
+        int32 X = 0;
+        for (auto *Node : TArray<UEdGraphNode *>{Cache, Base, ActionBase, Slot, Layer, Root})
+        {
+            Node->NodePosX = X;
+            Node->NodePosY = 500;
+            X += 250;
+        }
+        FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+        FKismetEditorUtilities::CompileBlueprint(Blueprint);
+        return Blueprint->Status != BS_Error;
+    }
+#endif
+    return false;
+}
 bool UHoverIntegrationAuthoring::ConfigureMovementTags(UBlueprint *Blueprint)
 {
 #if WITH_EDITOR

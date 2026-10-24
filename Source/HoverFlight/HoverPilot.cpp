@@ -1,5 +1,6 @@
 #include "HoverPilot.h"
 #include "HoverCyberCity.h"
+#include "HoverCombatBridge.h"
 #include "HoverLocomotionBridge.h"
 #include "HoverTestController.h"
 #include "HoverAnimInstance.h"
@@ -7,6 +8,8 @@
 #include "HoverShotVisual.h"
 #include "HoverMotion.h"
 #include "HoverMovementComponent.h"
+#include "Settings/ZE_PlayerSettings.h"
+#include "Perception/AISense_Hearing.h"
 #include "EngineUtils.h"
 
 #include "Animation/AnimSequence.h"
@@ -92,7 +95,7 @@ void AHoverPilot::BeginPlay()
 {
     Super::BeginPlay();
     GetMesh()->AddTickPrerequisiteActor(this);
-    SetCanBeDamaged(false);
+    SetCanBeDamaged(true); // Receive hit reactions; TakeDamage never reduces sandbox health.
     StartLocation = GetActorLocation();
     StartRotation = GetActorRotation();
     BodyYaw = StartRotation.Yaw;
@@ -208,6 +211,11 @@ void AHoverPilot::BeginPlay()
         LocomotionBridge->RegisterComponent();
     }
     PlayPose(Assets->Stand, true);
+    if (Cast<AHoverCyberCityGameMode>(GetWorld()->GetAuthGameMode()))
+    {
+        Combat = NewObject<UHoverCombatBridge>(this, TEXT("CyberCitySystems"));
+        Combat->RegisterComponent();
+    }
     SetView();
     if (APlayerController *PC = Cast<APlayerController>(GetController()))
     {
@@ -260,6 +268,22 @@ bool AHoverPilot::CanDismount() const
     return FindDismountLocation(Location);
 }
 
+bool AHoverPilot::PrepareForRide()
+{
+    GroundSlideTime = 0;
+    bGroundCrouchHeld = false;
+    UnCrouch();
+    GetCharacterMovement()->UnCrouch(false);
+    if (bIsCrouched)
+        return false;
+    bProne = false;
+    if (Combat)
+        Combat->SuspendForRide();
+    if (LocomotionBridge)
+        LocomotionBridge->CancelAction();
+    return true;
+}
+
 void AHoverPilot::HoverMount()
 {
     if (!Board || TransitionTime > 0)
@@ -284,11 +308,7 @@ void AHoverPilot::HoverMount()
                    *BoardBody->GetPhysicsLinearVelocity().ToString());
             return;
         }
-        GroundSlideTime = 0;
-        bGroundCrouchHeld = false;
-        UnCrouch();
-        Movement->UnCrouch(false);
-        if (bIsCrouched)
+        if (!PrepareForRide())
             return;
         FVector MountPoint = BoardActor->GetActorLocation() + FVector(0, 0, 132);
         FHitResult Hit;
@@ -365,18 +385,44 @@ void AHoverPilot::HoverView()
 
 void AHoverPilot::SetView()
 {
-    const bool FirstPerson = !bReview || bAiming;
+    const bool FirstPerson = !bReview;
     TInlineComponentArray<UCameraComponent *> Cameras(this);
     for (auto *C : Cameras)
         C->SetActive(false);
     FirstPersonCamera->SetActive(FirstPerson);
     ReviewCamera->SetActive(!FirstPerson);
     ViewGun->SetVisibility(FirstPerson, true);
-    WorldGun->SetVisibility(!FirstPerson && GunRaisedTime > 0, true);
+    WorldGun->SetVisibility(!FirstPerson && (bAiming || GunRaisedTime > 0), true);
     // The full-body riding pose crosses the eye camera during pitch and recoil.
     // Keep it for the external view; the FPS camera renders its own rifle.
     for (USkeletalMeshComponent *Part : Parts)
         Part->SetOwnerNoSee(FirstPerson);
+}
+
+void AHoverPilot::OnStartCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust)
+{
+    Super::OnStartCrouch(HalfHeightAdjust, ScaledHalfHeightAdjust);
+    UpdateCameraPosture(0.f);
+}
+
+void AHoverPilot::OnEndCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust)
+{
+    Super::OnEndCrouch(HalfHeightAdjust, ScaledHalfHeightAdjust);
+    UpdateCameraPosture(0.f);
+}
+
+void AHoverPilot::UpdateCameraPosture(float DT)
+{
+    const float StandingHeight =
+        GetClass()->GetDefaultObject<AHoverPilot>()->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight();
+    const float CapsuleDrop = bMounted ? 0.f : StandingHeight - GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight();
+    // Capsule resizing must not teleport the viewpoint. Compensate immediately,
+    // then ease the actual stance height; neither jumping nor animation changes arm length.
+    const float Smoothed = FMath::FInterpTo(CameraPostureHeight, -CapsuleDrop, DT, 8.f);
+    CameraPostureHeight += FMath::Clamp(Smoothed - CameraPostureHeight, -100.f * DT, 100.f * DT);
+    const float Offset = CapsuleDrop + CameraPostureHeight;
+    ReviewArm->SetRelativeLocation(FVector(0, 0, Offset));
+    FirstPersonCamera->SetRelativeLocation(FVector(0, 0, (bMounted ? 33.f : 65.f) + Offset));
 }
 
 void AHoverPilot::HoverReset()
@@ -421,6 +467,12 @@ void AHoverPilot::UpdateInput(float DT)
     APlayerController *PC = Cast<APlayerController>(GetController());
     if (!PC)
         return;
+    if (Combat && Combat->IsInventoryOpen())
+    {
+        ForwardInput = SideInput = TurnInput = PitchInput = 0;
+        Combat->SetTrigger(false);
+        return;
+    }
     auto Down = [PC](FKey Key) { return PC->IsInputKeyDown(Key); };
     ForwardInput = FMath::Clamp(Stick(PC->GetInputAnalogKeyState(EKeys::Gamepad_LeftY)) + float(Down(EKeys::W)) -
                                     float(Down(EKeys::S)),
@@ -438,9 +490,11 @@ void AHoverPilot::UpdateInput(float DT)
     PC->GetInputMouseDelta(MouseX, MouseY);
     FRotator Look = PC->GetControlRotation();
     const bool TemplateOnFoot = bParkourMovement && !bMounted;
-    Look.Yaw += TurnInput * 120.f * DT + (TemplateOnFoot ? 0.f : MouseX * .12f);
+    const auto *LiveSettings = Combat ? GetDefault<UZE_PlayerSettings>() : nullptr;
+    const float Sensitivity = LiveSettings ? LiveSettings->LookSensitivity : 1.f;
+    Look.Yaw += TurnInput * 120.f * DT * Sensitivity + (TemplateOnFoot ? 0.f : MouseX * .12f);
     Look.Pitch = FMath::Clamp(FRotator::NormalizeAxis(Look.Pitch) -
-                                  Stick(PC->GetInputAnalogKeyState(EKeys::Gamepad_RightY)) * 90.f * DT +
+                                  Stick(PC->GetInputAnalogKeyState(EKeys::Gamepad_RightY)) * 90.f * DT * Sensitivity +
                                   (TemplateOnFoot ? 0.f : MouseY * .12f),
                               -75.f, 75.f);
     Look.Roll = 0;
@@ -452,14 +506,17 @@ void AHoverPilot::UpdateInput(float DT)
         const bool Sprint = Down(EKeys::Gamepad_LeftThumbstick);
         const auto *CyberMode = Cast<AHoverCyberCityGameMode>(GetWorld()->GetAuthGameMode());
         const float PowerUpSpeed = CyberMode ? CyberMode->GetSpeedBonus() : 1.f;
-        Move->MaxWalkSpeed = (Sprint ? 900.f : 500.f) * PowerUpSpeed;
+        const float RunSpeed = LiveSettings ? LiveSettings->SprintSpeed : 900.f;
+        const float WalkSpeed = LiveSettings ? LiveSettings->WalkSpeed : 500.f;
+        Move->MaxWalkSpeed = (Sprint ? RunSpeed : WalkSpeed) * PowerUpSpeed;
         // Per-axis controller dead zones reduce diagonal magnitude. A deliberate
         // held sprint retains its gait through a turn; partial walking stays analog.
         Move->MinAnalogWalkSpeed =
-            Sprint && !bIsCrouched && FVector2D(ForwardInput, SideInput).Size() > .6f ? 900.f : 0.f;
+            Sprint && !bIsCrouched && FVector2D(ForwardInput, SideInput).Size() > .6f ? RunSpeed * PowerUpSpeed : 0.f;
     }
     const bool Hold = Down(EKeys::Gamepad_FaceButton_Left) || Down(EKeys::X);
-    if (Hold && !bHoldConsumed)
+    const bool HasInteractable = Combat && !Combat->GetPrompt().IsEmpty();
+    if (Hold && !bHoldConsumed && !HasInteractable)
     {
         HoldTime += DT;
         if (HoldTime >= .65f)
@@ -470,6 +527,8 @@ void AHoverPilot::UpdateInput(float DT)
     }
     if (!Hold)
     {
+        if (Combat && HoldTime > 0 && HoldTime < .65f && !bHoldConsumed && !HasInteractable)
+            Combat->Reload();
         HoldTime = 0;
         bHoldConsumed = false;
     }
@@ -497,7 +556,7 @@ void AHoverPilot::UpdateInput(float DT)
     if (View && !bWasView)
         HoverView();
     bWasView = View;
-    const bool Reset = Down(EKeys::R);
+    const bool Reset = Down(EKeys::Home) || (!Combat && Down(EKeys::R));
     if (Reset && !bWasReset)
         HoverReset();
     bWasReset = Reset;
@@ -521,7 +580,9 @@ void AHoverPilot::UpdateInput(float DT)
     }
     const bool FirePressed = bMounted ? Down(EKeys::Gamepad_RightShoulder)
                                       : PC->GetInputAnalogKeyState(EKeys::Gamepad_RightTriggerAxis) > .2f;
-    if ((FirePressed || Down(EKeys::LeftMouseButton)) && FireCooldown <= 0 && TransitionTime <= 0)
+    if (Combat)
+        Combat->SetTrigger((FirePressed || Down(EKeys::LeftMouseButton)) && TransitionTime <= 0);
+    else if ((FirePressed || Down(EKeys::LeftMouseButton)) && FireCooldown <= 0 && TransitionTime <= 0)
         FireShot();
 }
 
@@ -531,22 +592,63 @@ void AHoverPilot::SetParkourCrouch(bool Held)
         return;
     auto *Move = GetCharacterMovement();
     Move->GetNavAgentPropertiesRef().bCanCrouch = true;
-    Move->SetCrouchedHalfHeight(60.f);
-    Move->MaxWalkSpeedCrouched = 400.f;
-    if (Held && !bGroundCrouchHeld && Move->IsMovingOnGround() && GetVelocity().Size2D() > 600.f)
+    if (Held == bGroundCrouchHeld)
+        return;
+    if (Held)
     {
-        GroundSlideTime = .65f;
-        GroundSlideSpeed = FMath::Min(GetVelocity().Size2D(), 900.f);
+        GroundCrouchHold = 0;
+        bCrouchedAtPress = bIsCrouched;
+        if (Move->IsMovingOnGround() && !bIsCrouched)
+        {
+            Move->SetCrouchedHalfHeight(60.f);
+            if (GetVelocity().Size2D() > 600.f)
+            {
+                GroundSlideTime = .9f;
+                GroundSlideSpeed = FMath::Min(GetVelocity().Size2D(), 900.f);
+            }
+            Crouch();
+        }
     }
-    bGroundCrouchHeld = Held;
-    // CharacterMovement lowers the capsule while preserving its floor contact,
-    // and checks headroom on release. The old template resized around its centre.
-    if (Held && Move->IsMovingOnGround())
-        Crouch();
-    else if (!Held)
+    else if (GroundCrouchHold < .55f && bCrouchedAtPress)
     {
         GroundSlideTime = 0;
         UnCrouch();
+    }
+    bGroundCrouchHeld = Held;
+}
+
+void AHoverPilot::UpdateGroundPosture(float DT)
+{
+    if (bMounted)
+        return;
+    auto *Move = GetCharacterMovement();
+    if (!bIsCrouched)
+        bProne = false;
+    GroundCrouchHold += bGroundCrouchHeld ? DT : 0.f;
+    if (bGroundCrouchHeld && GroundCrouchHold >= .55f && GroundSlideTime <= 0 && Move->IsMovingOnGround() && !bProne)
+    {
+        bProne = true;
+        Move->SetCrouchedHalfHeight(34.f);
+        Crouch();
+        // Apply a second crouched size through CharacterMovement's floor-preserving path.
+        Move->Crouch(false);
+    }
+    if (GroundSlideTime > 0 && Move->IsMovingOnGround())
+    {
+        GroundSlideTime = FMath::Max(0.f, GroundSlideTime - DT);
+        Move->MaxWalkSpeedCrouched = GroundSlideSpeed;
+        // Preserve the purchased Parkour slide's low-friction mechanism, with
+        // CharacterMovement handling capsule/floor and an airborne guard.
+        Move->GroundFriction = .08f;
+        Move->BrakingDecelerationWalking = 450.f;
+    }
+    else if (bIsCrouched)
+    {
+        GroundSlideTime = 0;
+        Move->MaxWalkSpeedCrouched =
+            bProne ? 120.f : (Combat ? GetDefault<UZE_PlayerSettings>()->CrouchedSpeed : 400.f);
+        Move->GroundFriction = 8.f;
+        Move->BrakingDecelerationWalking = 2048.f;
     }
 }
 
@@ -582,9 +684,7 @@ void AHoverPilot::UpdateFlight(float DT)
             AddMovementInput(FRotationMatrix(Facing).GetUnitAxis(EAxis::Y), SideInput);
         }
         const FVector Travel = GetVelocity();
-        const float TargetYaw = bAiming || GunRaisedTime > 0 || !bReview ? Facing.Yaw
-                                : Travel.Size2D() > 12.f                 ? Travel.Rotation().Yaw
-                                                                         : BodyYaw;
+        const float TargetYaw = UsesAimFacing() ? Facing.Yaw : Travel.Size2D() > 12.f ? Travel.Rotation().Yaw : BodyYaw;
         const float TurnRate = LocomotionBridge && LocomotionBridge->bEnabled ? 180.f : 540.f;
         const float Step =
             FMath::Clamp(FMath::FindDeltaAngleDegrees(BodyYaw, TargetYaw), -TurnRate * DT, TurnRate * DT);
@@ -715,6 +815,9 @@ void AHoverPilot::UpdateAppearance(float DT)
 {
     AimExitTime = FMath::Max(0.f, AimExitTime - DT);
     GunRaisedTime = FMath::Max(0.f, GunRaisedTime - DT);
+    if (Combat)
+        if (const auto *Weapon = Combat->GetWeapon(); Weapon && Weapon->IsReloading())
+            GunRaisedTime = FMath::Max(GunRaisedTime, .5f);
     // Grounded aiming keeps the locomotion pose below the spine. The supplied
     // full-body gun clips are glider poses and lift the feet when used on foot.
     if (!bMounted || (!bAiming && AimExitTime <= 0))
@@ -740,8 +843,8 @@ void AHoverPilot::UpdateAppearance(float DT)
     }
     FirstPersonCamera->SetFieldOfView(FMath::FInterpTo(FirstPersonCamera->FieldOfView,
                                                        bAiming ? 65.f : (bBoost && bMounted ? 105.f : 95.f), DT, 10.f));
-    FirstPersonCamera->SetRelativeLocation(
-        FMath::VInterpTo(FirstPersonCamera->GetRelativeLocation(), FVector(0, 0, bMounted ? 33.f : 65.f), DT, 8.f));
+    ReviewCamera->SetFieldOfView(FMath::FInterpTo(ReviewCamera->FieldOfView, bAiming ? 72.f : 90.f, DT, 10.f));
+    UpdateCameraPosture(DT);
     const FQuat GunBasis = FQuat::FindBetweenNormals(Assets->GunForward.GetSafeNormal(), FVector::ForwardVector);
     const FVector SightAligned = FVector(20, 0, 0) - GunBasis.RotateVector(Assets->GunSight);
     WeaponAimAlpha = FMath::FInterpTo(WeaponAimAlpha, bAiming ? 1.f : 0.f, DT, 12.f);
@@ -800,6 +903,7 @@ void AHoverPilot::UpdateAppearance(float DT)
     if (auto *Instance = Cast<UHoverAnimInstance>(GetMesh()->GetAnimInstance()))
     {
         Instance->FootLock = bMounted ? 1.f : 0.f;
+        Instance->bProne = bProne;
         const FVector LocalVelocity =
             FRotator(0, bMounted ? GetActorRotation().Yaw : BodyYaw, 0).UnrotateVector(GetVelocity());
         const float Speed = LocalVelocity.Size2D();
@@ -819,7 +923,8 @@ void AHoverPilot::UpdateAppearance(float DT)
         Instance->RifleAim = bMounted && Assets->RideGunPose ? Assets->RideGunPose : Assets->RifleAim;
         Instance->RifleFire = bMounted ? Assets->Fire.Get() : nullptr;
         Instance->ShotSerial = ShotsFired;
-        Instance->bAiming = bAiming || GunRaisedTime > 0;
+        Instance->bAiming =
+            (bAiming || GunRaisedTime > 0) && !(LocomotionBridge && LocomotionBridge->IsActionPlaying());
         Instance->RiderLean = bMounted ? RiderLean : 0;
         FVector Feet[2];
         for (int32 I = 0; I < 2; ++I)
@@ -838,7 +943,7 @@ void AHoverPilot::UpdateAppearance(float DT)
         Instance->LeftFoot = Feet[0];
         Instance->RightFoot = Feet[1];
     }
-    WorldGun->SetVisibility(bReview && !bAiming && GunRaisedTime > 0, true);
+    WorldGun->SetVisibility(bReview && (bAiming || GunRaisedTime > 0), true);
     UpdateGunTransform();
     const bool Powered = bMounted && TransitionTime <= 0 && !bSteppingOn;
     const float Thrust = FMath::Max(FMath::Abs(ForwardInput), FMath::Abs(SideInput));
@@ -868,7 +973,7 @@ void AHoverPilot::UpdateGunTransform()
 {
     if (!Assets)
         return;
-    const UCameraComponent *Camera = bReview && !bAiming ? ReviewCamera : FirstPersonCamera;
+    const UCameraComponent *Camera = bReview ? ReviewCamera : FirstPersonCamera;
     const FVector Eye = Camera->GetComponentLocation();
     const FVector RayEnd = Eye + Camera->GetForwardVector() * 50000.f;
     FCollisionQueryParams Params(SCENE_QUERY_STAT(HoverWeaponAlignment), true, this);
@@ -899,7 +1004,7 @@ void AHoverPilot::UpdateGunTransform()
     ViewGun->SetWorldLocationAndRotation(SightAnchor - ViewRotation.RotateVector(Assets->GunSight), ViewRotation);
 }
 
-void AHoverPilot::FireShot()
+void AHoverPilot::FireShot(float Damage, float Spread, float Range)
 {
     ++ShotsFired;
     FireCooldown = .18f;
@@ -908,15 +1013,18 @@ void AHoverPilot::FireShot()
     SetView();
     FCollisionQueryParams Params(SCENE_QUERY_STAT(HoverShot), true, this);
     Params.AddIgnoredActor(BoardActor);
-    const UStaticMeshComponent *Gun = bReview && !bAiming ? WorldGun.Get() : ViewGun.Get();
+    const UStaticMeshComponent *Gun = bReview ? WorldGun.Get() : ViewGun.Get();
     const FVector Muzzle = GetMuzzlePosition();
-    const FVector ShotDirection =
+    if (Combat)
+        UAISense_Hearing::ReportNoiseEvent(this, Muzzle, 1.f, this, 3000.f, TEXT("Gunshot"));
+    const FVector BarrelDirection =
         Gun->GetComponentTransform().TransformVectorNoScale(Assets->GunForward).GetSafeNormal();
-    const FVector Target = Muzzle + ShotDirection * 50000.f;
+    const FVector ShotDirection = FMath::VRandCone(BarrelDirection, FMath::DegreesToRadians(Spread));
+    const FVector Target = Muzzle + ShotDirection * Range;
     if (auto *System = Cast<UNiagaraSystem>(Assets->MuzzleEffect))
     {
         auto *Flash = UNiagaraFunctionLibrary::SpawnSystemAttached(
-            System, bReview && !bAiming ? WorldGun : ViewGun, NAME_None, Assets->GunMuzzle,
+            System, bReview ? WorldGun : ViewGun, NAME_None, Assets->GunMuzzle,
             FRotationMatrix::MakeFromZ(Assets->GunForward).Rotator(), EAttachLocation::KeepRelativeOffset, true);
         if (Flash)
         {
@@ -937,11 +1045,11 @@ void AHoverPilot::FireShot()
     if (Tracer)
         Tracer->Launch(Muzzle, Hit.bBlockingHit ? Hit.ImpactPoint : Target);
     if (auto *Zombie = Cast<AHoverZombie>(Hit.GetActor()))
-        UGameplayStatics::ApplyPointDamage(Zombie, 35.f, ShotDirection, Hit, GetController(), this, nullptr);
+        UGameplayStatics::ApplyPointDamage(Zombie, Damage, ShotDirection, Hit, GetController(), this, nullptr);
     else if (auto *CyberZombie = Cast<AHoverCyberZombie>(Hit.GetActor()))
-        UGameplayStatics::ApplyPointDamage(CyberZombie, 35.f, ShotDirection, Hit, GetController(), this, nullptr);
+        UGameplayStatics::ApplyPointDamage(CyberZombie, Damage, ShotDirection, Hit, GetController(), this, nullptr);
     else if (Hit.bBlockingHit && Assets->SurfaceImpact)
-        ImpactPulse(Hit.ImpactPoint + Hit.ImpactNormal * 2, Hit.ImpactNormal, .25f, 0, .65f, Assets->SurfaceImpact);
+        ImpactPulse(Hit.ImpactPoint + Hit.ImpactNormal * 2, Hit.ImpactNormal, 1.f, 0, .9f, Assets->SurfaceImpact);
     if (Assets->ShotSound)
         UGameplayStatics::PlaySoundAtLocation(this, Assets->ShotSound, Muzzle, .60f, FMath::FRandRange(.96f, 1.04f));
     if (bMounted && bAiming && Assets->Fire)
@@ -954,7 +1062,7 @@ void AHoverPilot::FireShot()
 
 FVector AHoverPilot::GetMuzzlePosition() const
 {
-    const UStaticMeshComponent *Gun = bReview && !bAiming ? WorldGun.Get() : ViewGun.Get();
+    const UStaticMeshComponent *Gun = bReview ? WorldGun.Get() : ViewGun.Get();
     return Gun->GetComponentTransform().TransformPosition(Assets ? Assets->GunMuzzle : FVector(0, 46.f, 2.f));
 }
 
@@ -993,9 +1101,9 @@ void AHoverPilot::ImpactPulse(const FVector &Location, const FVector &Normal, fl
         {
             Niagara->SetVariableVec3(TEXT("User.DustOffset"), FVector::ZeroVector);
             Niagara->SetVariableVec3(TEXT("User.RockOffset"), FVector::ZeroVector);
-            Niagara->SetVariableFloat(TEXT("User.DustSize"), 22.f);
-            Niagara->SetVariableFloat(TEXT("User.DustSpawningRate"), 140.f);
-            Niagara->SetVariableFloat(TEXT("User.RockImpulse"), 160.f);
+            Niagara->SetVariableFloat(TEXT("User.DustSize"), 55.f);
+            Niagara->SetVariableFloat(TEXT("User.DustSpawningRate"), 180.f);
+            Niagara->SetVariableFloat(TEXT("User.RockImpulse"), 350.f);
             Niagara->SetVariableInt(TEXT("User.RockSpawningRate"), 8);
             Niagara->SetVariableFloat(TEXT("User.RockSpawnRate"), 45.f);
             Niagara->SetVariableLinearColor(TEXT("User.EffectColor"), FLinearColor(.25f, .20f, .15f, 1));
@@ -1039,6 +1147,19 @@ void AHoverPilot::Landed(const FHitResult &Hit)
         ImpactPulse(Hit.ImpactPoint + Hit.ImpactNormal * 2, Hit.ImpactNormal, .07f, .06f, .2f);
 }
 
+float AHoverPilot::TakeDamage(float Damage, const FDamageEvent &Event, AController *EventInstigator, AActor *Causer)
+{
+    if (Damage > 0 && Causer != this && LocomotionBridge && IsOnFoot() &&
+        GetWorld()->GetTimeSeconds() - LastHitReaction > .65f && !LocomotionBridge->IsActionPlaying())
+    {
+        LastHitReaction = GetWorld()->GetTimeSeconds();
+        LocomotionBridge->PlayAction(
+            LoadObject<UAnimSequence>(nullptr, TEXT("/Game/CLS/Example/SetupYourHeroExample/Anims/Rifle/HitReact/"
+                                                    "MM_HitReact_Front_Lgt_01.MM_HitReact_Front_Lgt_01")));
+    }
+    return 0.f;
+}
+
 void AHoverPilot::BoardHit(UPrimitiveComponent *HitComponent, AActor *OtherActor, UPrimitiveComponent *OtherComponent,
                            FVector NormalImpulse, const FHitResult &Hit)
 {
@@ -1074,21 +1195,7 @@ void AHoverPilot::Tick(float DT)
     FireCooldown = FMath::Max(0.f, FireCooldown - DT);
     StatusTime = FMath::Max(0.f, StatusTime - DT);
     UpdateInput(DT);
-    auto *GroundMove = GetCharacterMovement();
-    if (GroundSlideTime > 0 && !bMounted && GroundMove->IsMovingOnGround() && bGroundCrouchHeld)
-    {
-        GroundSlideTime = FMath::Max(0.f, GroundSlideTime - DT);
-        GroundMove->MaxWalkSpeedCrouched = FMath::Lerp(400.f, GroundSlideSpeed, GroundSlideTime / .65f);
-        GroundMove->GroundFriction = 1.f;
-        GroundMove->BrakingDecelerationWalking = 800.f;
-    }
-    else if (!bMounted && GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight() < 70.f)
-    {
-        GroundSlideTime = 0;
-        GroundMove->MaxWalkSpeedCrouched = 400.f;
-        GroundMove->GroundFriction = 8.f;
-        GroundMove->BrakingDecelerationWalking = 2048.f;
-    }
+    UpdateGroundPosture(DT);
     if (LocomotionBridge && LocomotionBridge->bEnabled && !bMounted && GetCharacterMovement()->IsMovingOnGround() &&
         GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight() >= 70)
     {
@@ -1106,6 +1213,8 @@ void AHoverPilot::Tick(float DT)
 
 FString AHoverPilot::GetPrompt() const
 {
+    if (Combat && !Combat->GetPrompt().IsEmpty())
+        return Combat->GetPrompt();
     if (StatusTime > 0)
         return StatusMessage;
     if (TransitionTime > 0)
@@ -1120,7 +1229,8 @@ FString AHoverPilot::GetPrompt() const
         return CanDismount() ? TEXT("Hold X: get off   |   Hold L1 / Q: stronger bank while steering")
                              : TEXT("Descend and slow down to get off   |   Hold L1 / Q: stronger bank");
     return HasBoardNearby() ? TEXT("Hold X to step on and lock the pads")
-                            : TEXT("Walk to the glider   |   R: reset test");
+                            : (Combat ? TEXT("Walk to the glider   |   Home: reset test")
+                                      : TEXT("Walk to the glider   |   R: reset test"));
 }
 
 void AHoverHUD::DrawHUD()
@@ -1172,8 +1282,9 @@ void AHoverHUD::DrawHUD()
         Pilot->IsMounted()
             ? FString::Printf(TEXT("A / Space hop   L3 / Shift boost   B / Ctrl coast   F5 view   %.0f m/s"),
                               Pilot->GetSpeedMps())
-            : FString::Printf(TEXT("A / Space jump   Hold L3 run   Hold B / Shift crouch   F5 / Menu view   %.0f m/s"),
-                              Pilot->GetSpeedMps());
+            : FString::Printf(
+                  TEXT("A / Space jump   Hold L3 run   Tap B crouch/stand, hold prone   F5 view   %.0f m/s"),
+                  Pilot->GetSpeedMps());
     DrawText(MovementHelp, FLinearColor(.8f, .85f, .9f), 32, Canvas->ClipY - 44);
     if (Pilot->HoldProgress() > 0 && Pilot->HoldProgress() < 1)
         DrawRect(FLinearColor(.9f, .1f, .08f), X - 70, Y + 35, 140 * Pilot->HoldProgress(), 5);
@@ -1183,6 +1294,18 @@ void AHoverHUD::DrawHUD()
         DrawRect(FLinearColor(.08f, .1f, .13f, .9f), 88, Canvas->ClipY - 141, 220, 12);
         DrawRect(FLinearColor(.2f, .7f, 1.f), 88, Canvas->ClipY - 141, 220 * Pilot->GetBoostCharge(), 12);
     }
+    if (Pilot->Combat)
+        if (const auto *Weapon = Pilot->Combat->GetWeapon())
+        {
+            const FString Ammo =
+                FString::Printf(TEXT("%d / %d%s"), Weapon->GetCurrentClipAmmo(), Weapon->GetReserveAmmo(),
+                                Weapon->IsReloading()               ? TEXT("  RELOADING")
+                                : Weapon->GetCurrentClipAmmo() == 0 ? TEXT("  EMPTY - tap X / R")
+                                                                    : TEXT(""));
+            DrawText(Ammo, FLinearColor::White, Canvas->ClipX - 285, Canvas->ClipY - 185, nullptr, 1.4f);
+            DrawText(TEXT("Tap X / R reload | R3 / V melee | D-pad Down / Tab inventory"), FLinearColor(.8f, .85f, .9f),
+                     32, Canvas->ClipY - 120);
+        }
 }
 
 AHoverGameMode::AHoverGameMode()

@@ -12,8 +12,10 @@ animations, damage numbers, loot and wave display. The local adapter keeps Vexa,
 CLS/Parkour, the Ballista and all three rides. Zombies target the currently possessed
 player or vehicle; Vexa and occupied rides remain invulnerable. Wave one has ten
 zombies; later waves grow in count, health and speed. Nuke and timed speed pickups
-work with the AFS player. Gold is a test counter; no shop or inventory is added.
-The original PostApo test range is unchanged.
+work with the AFS player. Cyber City now uses the supplied magazine/reserve,
+reload, melee, inventory, quickbar, gold, loot and wall-buy systems. Three supply
+crates offer Ballista tiers and ammunition. PostApo keeps unlimited ammo and its
+original zombie range; it has no Zombie Engine inventory or waves.
 
 Eight curated entrances use the construction area, shop alcoves, service streets
 and courtyard. Their navigation routes connect to the starting street. Spawns wait
@@ -23,6 +25,9 @@ The local map uses `/Game/HoverPrototype/ZombieEngine/BP_CyberWaves`; its data a
 expose wave and zombie tuning. The copied ZombieEngineStudio plugin is required
 and enabled locally, with isolated UE5.8 compatibility fixes. Licensed plugin
 source, binaries and content remain outside Git; preserve the native installation.
+During Play, use Window > ZESP Control Panel for the purchased live tuning tool.
+`Docs/QUALITY_20261023.txt` lists supported fields, retained Parkour/CLS behavior,
+animation gaps and the exact native integration patches.
 
 Build with `Scripts/Build.ps1`, open `AFS.uproject`, and press Play. The default
 map is `/Game/JustBStudios/PostApo/Levels/PostApo`. If the editor has another level
@@ -44,8 +49,11 @@ On foot, a local copy of ParkourMovementPack's original Blueprint movement graph
 controls movement, wall running, jump buffering and coyote time. Walking is capped at
 500 cm/s and held-L3 running at900 cm/s. The template's1000 cm/s² acceleration,
 2.5 gravity scale and1102.5 cm/s jump velocity remain. A feeds its buffered Space
-jump event; held B/Shift uses floor-preserving native crouch. Pressing it while running
-retains a short decelerating slide before crouch speed; releasing checks headroom.
+jump event. Tap B/Shift to crouch or stand; hold to go prone and crawl. Pressing it
+while running starts a short decelerating slide before crouch. Standing checks
+headroom. The purchased template has movement logic but no skeletal animations:
+the slide currently uses a crouch pose, and prone/crawl uses a root-locked owned
+belly-crawl clip. Dedicated human slide and prone-entry/exit clips remain missing.
 CLS selects and retargets locomotion
 poses through a hidden mannequin while Parkour retains movement and special actions.
 Third-person Vexa faces travel unless aiming. F7 / D-pad Right toggles the original
@@ -100,14 +108,17 @@ with board tilt and a small shockwave. Released thrust coasts with damped pitch 
 wing reactions. Base speed is21.6 m/s; climb reaches18 m/s and descent24 m/s.
 L1 bank now adds substantially stronger heading and velocity curvature.
 L3 boost reaches56 m/s and has a draining/recharging meter.
-Vexa is invulnerable; R resets the player and glider to the test start.
+Vexa is invulnerable. Home resets the player/glider; R also resets in PostApo,
+while R reloads in Cyber City.
 
 The data asset also exposes booster, muzzle and landing effect references. Local effect
 copies preserve vendor originals. Niagara thrust follows direction and boost strength;
 the compact effect reduces heat distortion. The supplied Ballista replaces the first rifle and has a local removable reflex
-sight. Hold L2 for centred first-person ADS, even from third person; release restores
-the selected camera. Its larger muzzle pulse is attached to the measured barrel tip,
-and a straight tracer follows the barrel axis. Solid hits produce dust/debris, and
+sight. L2 uses centred sights in FPS and screen zoom while staying external in
+third person. Crouch height eases without changing camera-arm distance; jump
+animations do not request a zoom. Its muzzle pulse is attached to the measured
+barrel tip, and a straight tracer with a short purchased Niagara trail follows
+the barrel axis. Solid hits produce dust/debris, and
 CP Rifle1 audio004 provides the shot sound. The original gun assets remain intact. Hits remain hitscan; the tracer is
 visual feedback, not simulated ballistic damage. The glider uses dedicated continuous
 turn/movement blends, a held reverse pose and an upper-body gun/recoil layer.

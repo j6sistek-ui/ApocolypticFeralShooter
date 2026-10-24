@@ -19,6 +19,15 @@ class HOVERFLIGHT_API UHoverLocomotionBridge : public UActorComponent
     UPROPERTY(BlueprintReadOnly) TObjectPtr<UActorComponent> Locomotion;
     UPROPERTY(BlueprintReadOnly) bool bReady = false;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) bool bEnabled = true;
+    UFUNCTION(BlueprintCallable) bool PlayAction(UAnimSequence *Sequence, float Duration = 0.f, bool UpperBody = true);
+    UFUNCTION(BlueprintCallable) void CancelAction();
+    bool IsActionPlaying() const;
+
+  private:
+    UPROPERTY() TObjectPtr<class UAnimMontage> Action;
+    UPROPERTY() TObjectPtr<class UAnimMontage> Posture;
+    int32 PostureMode = 0;
+    bool bWasWallJumpLocked = false;
 };
 
 // The Blueprint owns the actual Spring Controller graph. This class only gates
@@ -47,6 +56,7 @@ class HOVERFLIGHT_API UHoverIntegrationAuthoring : public UBlueprintFunctionLibr
     GENERATED_BODY()
   public:
     UFUNCTION(BlueprintCallable) static bool ConfigureHybrid(UBlueprint *Pilot, UBlueprint *DataComponent);
+    UFUNCTION(BlueprintCallable) static bool BuildActionLayer(class UAnimBlueprint *Blueprint);
     UFUNCTION(BlueprintCallable)
     static bool BuildBodyPhysics(class UAnimBlueprint *Blueprint, class UAnimBlueprint *Original);
     UFUNCTION(BlueprintCallable) static bool ConfigureMovementTags(UBlueprint *Blueprint);

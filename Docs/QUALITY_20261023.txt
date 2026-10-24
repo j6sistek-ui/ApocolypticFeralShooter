@@ -1,0 +1,111 @@
+AFS QUALITY PASS - 2026-10-23
+
+Purpose: preserve accepted Vexa/CLS/Parkour movement and fix the reported camera,
+turning, action, combat and Cyber City horde gaps using purchased systems.
+This remains a local proving ground. Nothing is imported into SpaceSurvival.
+
+CAMERAS AND ACTIONS
+TPS aim stays external at72FOV; FPS uses the Ballista sight at65FOV. Default
+FOVs are90/95. The external arm stays430cm; animations do not change its length.
+Crouch capsule changes are compensated immediately and the visible camera height
+eases with a100cm/s limit. Camera collision still shortens the arm near walls;
+this prevents seeing through geometry and is not disabled.
+CLS receives the visible body's orientation and travel intent while not aiming.
+This removes conflicting camera/body yaw intent; aiming retains directional fire.
+Held-L3 running keeps9m/s through steering, walking5m/s.
+TapB crouches/stands; heldB goes prone; grounded runningB slides then crouches.
+Crawl speed120cm/s. A from prone stands first. Airborne input cannot initiate a
+ground slide. Native floor/headroom checks remain enabled.
+Original Parkour wall-run/wall-jump logic remains. The local action graph uses
+owned root-locked melee/wall-jump/crawl clips, plus CLS reload/hit clips. A separate
+upper-body slot lets reload coexist with the prone lower body.
+
+Animation limits: original Parkour pack has9 assets and no skeletal clips.
+Slide is currently a crouch-pose placeholder; prone uses the owned zombie belly
+crawl, blended in/out. Dedicated human slide, prone-entry/exit and wall-run poses
+were not found in the audited owned assets. Functional actions are not finished
+animation quality. Owner review of turning and transitions remains required.
+Selected outfit, skin, body springs, chain and glider motion tuning are preserved.
+
+CYBER CITY: ACTUAL PURCHASED SYSTEMS IN USE
+- Native wave state machine, intermissions/countdown, count/health/speed scaling,
+  wave HUD, navigation/behavior tree and eight curated entrances.
+- Native rifle cadence, recoil/spread and ammo/reload timers feed the existing
+  Ballista presentation. Native melee sphere hit/cooldown feeds the owned action.
+  R3/V melee; A remains jump. Magazines persist across quickbar swaps, including0.
+  Reload cancels on melee, swapping and ride entry. No refill through empty swaps.
+- Native inventory/quickbar, item stacks, weight, equipment capacity, drag/drop,
+  ammo pickups and shared Survival-component gold. Supply crates at street,
+  market and north shop offer tiers1/2/3 for500/1250/2500; owned-weapon ammo is250.
+  Five local Ballista definitions retain the vendor rifle tier ratios.
+- Native probabilistic loot: local ammo plus Nuke, Speed and InstaKill. First
+  successful entry wins after the overall loot roll, as in the supplied code.
+- Native perception senses now accept the possessed AFS pawn. Direct-chase mode
+  follows Vexa or her occupied vehicle; parked vehicles are not player targets.
+  Pursuit uses the supplied RunSpeed instead of remaining at WalkSpeed.
+  Attack, hit and death montages remain the supplied zombie animation path.
+- Vexa receives a short owned hit reaction but zero health damage. Vehicles remain
+  invulnerable. Player death/game-over/respawn is deliberately inactive for testing.
+
+RGCL LIVE CONTROLS (THE SUPPLIED EDITOR PANEL)
+Open Window > ZESP Control Panel during Play. It is an editor tool that changes
+runtime gameplay, not an automatic in-game upgrade screen. The local panel's
+definition browser now includes project-local item, zombie and wave data assets.
+Select DA_AFS_Ballista, DA_CyberZombie or DA_CyberWaves, not the untouched originals.
+- Live: Vexa walk/sprint/crouched speed and controller look sensitivity.
+- Live: weapon damage, range, cadence, recoil/spread, reload duration via the
+  equipped local weapon definition/native weapon. Current magazine is not filled
+  merely because a definition is reapplied. Some capacity changes take effect on
+  the next reload/equip, following the native weapon implementation.
+- Live: zombie run/walk speed, attack cooldown and sight/hearing ranges; attack
+  damage/loot settings are read by the native combat/reward paths.
+- Starting weapons/ammo/gold: next Play session from DA_CyberWaves.StartingEquipment.
+- Wave definitions: applied by the supplied wave state machine at its transition
+  boundaries. Existing damaged zombies are not healed by changing health settings.
+- Deliberate limits: Vexa still uses Parkour jump/air control, CLS animation and
+  AFS cameras. The vendor pawn's animation replacement, FPS-arm and sprint-stamina
+  settings are not substituted for these. Death/respawn settings have no effect
+  on invulnerable Vexa. The native source's wave damage multiplier is unfinished;
+  health/count/speed scaling is active. No blanket 'all vendor settings work' claim.
+The pack's M16/pistol/grenade meshes/definitions are installed for later loadout
+authoring. This pass configures Ballista tiers and melee; it does not present every
+installed gun as a finished Vexa loadout or replace her outfit with vendor armor.
+
+EFFECTS
+The Ballista tracer now has a short purchased Niagara trail and larger solid-hit
+dust/debris. Muzzle placement remains the measured gun tip. Blood requires an
+actual blocking point hit on that zombie; generic damage no longer asks for blood
+at an arbitrary location. Blood emission is stopped after0.15s and cleaned up
+after2s. Purchased melee debug spheres are disabled in the local melee definition.
+The owner's random red ground eruption was not reproduced with rendered telemetry;
+its precise emitter/retrigger cause is UNCONFIRMED. These safeguards address the
+unsafe spawn/lifetime paths but final effect appearance still needs a rendered test.
+NullRHI does not render Niagara and is not evidence of absent particles.
+
+NATIVE PATCHES / PRESERVATION
+Owner AFS.uproject is unchanged by this pass. Source-only local Git; no GitHub/PR.
+Native backup root: D:/AFS_Comparisons/Quality_20261023/Before, with SHA256 receipts.
+Original SpaceSurvival, Parkour, ZombieEngine and ZESP content remain unchanged.
+Local purchased plugin patches (not committed to Git):
+1. ZE_WeaponBase.h: virtual trace hook for the AFS presentation.
+2. ZE_WeaponBase.cpp: generic owner inventory ammo access; definition refresh
+   preserves an empty magazine rather than granting a free refill. Recoil applies
+   as a view impulse so inverted/legacy input scales cannot turn positive kick
+   into a downward camera movement.
+3. ZE_WallBuyActor.cpp: use the inventory's1-based quickbar bounds.
+4. ZE_InventoryWidgetBase.cpp: missing cells use supplied concrete WBP_GridCell,
+   not the abstract native class. Native slot/drag/tooltip behavior is retained.
+5. SZE_ControlPanel.cpp: include local item/zombie/wave definitions in its browser.
+These are in addition to the earlier documented UE5.8 compatibility patches.
+Do not copy a source-only checkout to SpaceSurvival expecting assets or licensed
+plugin changes to follow. Keep the native backups and patch receipt with any port.
+
+VALIDATION AND LIMITS
+See Docs/VALIDATION.txt and the workspace outputs/AFS_Test/Quality20261023 report.
+Small rendered camera/action captures were completed when GPU headroom existed.
+Subsequent full-map/native systems tests used NullRHI while the owner's other game
+occupied most VRAM. No rendered editor was kept running alongside it.
+Physical controller cursor/feel, final effects and city placement visuals, package,
+performance and long-session acceptance remain open. The source checks and injected
+inputs do not replace those gates. Directional thrusters/assisted landing remain
+the earlier plan-only stage; other glider rigs are delivered separately in Blender.

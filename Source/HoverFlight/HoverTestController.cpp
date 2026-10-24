@@ -1,6 +1,7 @@
 #include "HoverTestController.h"
 #include "HoverLocomotionBridge.h"
 #include "HoverPilot.h"
+#include "HoverCombatBridge.h"
 #include "HoverAnimInstance.h"
 #include "InputModifiers.h"
 #include "Animation/AnimInstance.h"
@@ -106,6 +107,48 @@ bool AHoverTestController::InputKey(const FInputKeyEventArgs &Params)
     const FKey Key = Params.Key;
     if (!GraphicsMenu)
     {
+        if (auto *P = Cast<AHoverPilot>(GetPawn());
+            Pressed && P && P->IsProne() && (Key == EKeys::SpaceBar || Key == EKeys::Gamepad_FaceButton_Bottom))
+        {
+            P->UnCrouch();
+            return true;
+        }
+        if (auto *P = Cast<AHoverPilot>(GetPawn()); Pressed && P && P->Combat)
+        {
+            if (P->Combat->IsInventoryOpen() && Key == EKeys::Gamepad_FaceButton_Right)
+            {
+                P->Combat->ToggleInventory();
+                return true;
+            }
+            const FKey Slots[] = {EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five};
+            for (int32 I = 0; I < 5; ++I)
+                if (Key == Slots[I])
+                {
+                    P->Combat->SelectQuickbar(I + 1);
+                    return true;
+                }
+            if (Key == EKeys::Gamepad_DPad_Left)
+            {
+                P->Combat->SelectQuickbar();
+                return true;
+            }
+            if (Key == EKeys::Gamepad_RightThumbstick || Key == EKeys::V)
+            {
+                P->Combat->Melee();
+                return true;
+            }
+            if (Key == EKeys::R)
+            {
+                P->Combat->Reload();
+                return true;
+            }
+            if (Key == EKeys::Tab || Key == EKeys::Gamepad_DPad_Down ||
+                (Key == EKeys::Escape && P->Combat->IsInventoryOpen()))
+            {
+                P->Combat->ToggleInventory();
+                return true;
+            }
+        }
         if (Pressed && (Key == EKeys::F7 || Key == EKeys::Gamepad_DPad_Right))
             if (auto *ActivePilot = Cast<AHoverPilot>(GetPawn());
                 ActivePilot && ActivePilot->IsOnFoot() && !ActivePilot->GetCharacterMovement()->IsFalling())
@@ -222,6 +265,8 @@ bool AHoverTestController::TryEnterBike()
         IsNearTruck() && (!IsNearBike() || FVector::Dist2D(Pilot->GetActorLocation(), Truck->GetActorLocation()) <
                                                FVector::Dist2D(Pilot->GetActorLocation(), Bike->GetActorLocation()));
     if (!bTruck && !IsNearBike())
+        return false;
+    if (!Pilot->PrepareForRide())
         return false;
     Pilot->SetActorHiddenInGame(true);
     Pilot->SetActorEnableCollision(false);

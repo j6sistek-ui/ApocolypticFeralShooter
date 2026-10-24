@@ -1,4 +1,6 @@
 #include "HoverCyberCity.h"
+#include "HoverEffects.h"
+#include "HoverCombatBridge.h"
 #include "HoverPilot.h"
 #include "HoverTestController.h"
 #include "BehaviorTree/BlackboardComponent.h"
@@ -25,6 +27,11 @@
 #include "Components/ProgressBar.h"
 #include "Styling/CoreStyle.h"
 #include "Engine/SkeletalMesh.h"
+#include "Perception/AIPerceptionComponent.h"
+#include "Perception/AISense_Damage.h"
+#include "Perception/AISenseConfig_Hearing.h"
+#include "Perception/AISenseConfig_Sight.h"
+#include "GameFramework/CharacterMovementComponent.h"
 
 void AHoverCyberCityGameMode::InitGame(const FString &MapName, const FString &Options, FString &ErrorMessage)
 {
@@ -45,6 +52,19 @@ AHoverCyberZombieAI::AHoverCyberZombieAI()
 {
     PrimaryActorTick.bCanEverTick = true;
     PrimaryActorTick.TickInterval = .5f;
+    HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
+    HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
+    HearingConfig->DetectionByAffiliation.bDetectFriendlies = true;
+    GetPerceptionComponent()->ConfigureSense(*HearingConfig);
+}
+
+void AHoverCyberZombieAI::OnPossess(APawn *InPawn)
+{
+    Super::OnPossess(InPawn);
+    // Bind on the live instance: a copied Blueprint can retain the parent's
+    // serialized unfiltered delegate despite a native constructor replacement.
+    GetPerceptionComponent()->OnTargetPerceptionUpdated.RemoveAll(this);
+    GetPerceptionComponent()->OnTargetPerceptionUpdated.AddDynamic(this, &AHoverCyberZombieAI::OnPlayerDetected);
 }
 
 void AHoverCyberCityGameMode::Tick(float DT)
@@ -54,7 +74,8 @@ void AHoverCyberCityGameMode::Tick(float DT)
     APawn *Player = PC ? PC->GetPawn() : nullptr;
     if (Player)
     {
-        Player->SetCanBeDamaged(false);
+        // Vexa receives reaction events but her override returns zero damage.
+        Player->SetCanBeDamaged(Cast<AHoverPilot>(Player) != nullptr);
         if (!IsWaveHUDVisible() && WaveSettings && WaveSettings->WaveHUDClass)
         {
             TArray<UUserWidget *> Widgets;
@@ -106,7 +127,7 @@ void AHoverCyberZombieAI::Tick(float DT)
     // The supplied direct-chase lookup requires its own player class. Target the
     // possessed AFS pawn, including vehicles, while retaining its behavior tree.
     APawn *Player = UGameplayStatics::GetPlayerPawn(this, 0);
-    if (GetPawn() && Player)
+    if (GetPawn() && Player && bDirectChaseMode)
     {
         if (auto *Board = GetBlackboardComponent())
         {
@@ -115,6 +136,44 @@ void AHoverCyberZombieAI::Tick(float DT)
             Board->SetValueAsVector(Key_LastKnownLocation, Player->GetActorLocation());
         }
     }
+    auto *Zombie = Cast<AHoverCyberZombie>(GetPawn());
+    auto *Board = GetBlackboardComponent();
+    if (Zombie && Zombie->ZombieData && Board)
+    {
+        if (!bDirectChaseMode && Board->GetValueAsObject(Key_TargetEnemy) != Player)
+            Board->ClearValue(Key_TargetEnemy);
+        const auto &Stats = Zombie->ZombieData->Stats;
+        float HealthScale = 1, DamageScale = 1, SpeedScale = 1;
+        if (const auto *Mode = GetWorld()->GetAuthGameMode<AHoverCyberCityGameMode>(); Mode && Mode->GetWaveSettings())
+            Mode->GetWaveSettings()->GetDifficultyMultipliers(Mode->GetCurrentWave(), HealthScale, DamageScale,
+                                                              SpeedScale);
+        // The supplied character initialized only WalkSpeed. Use its own RunSpeed
+        // for pursuit so the existing walk/run blend space can reach its run pose.
+        Zombie->GetCharacterMovement()->MaxWalkSpeed =
+            (Board->GetValueAsObject(Key_TargetEnemy) ? Stats.RunSpeed : Stats.WalkSpeed) * SpeedScale;
+        Board->SetValueAsFloat(Key_AttackCooldown, Stats.AttackCooldown);
+        if (SightConfig->SightRadius != Stats.SightRadius || SightConfig->LoseSightRadius != Stats.LoseSightRadius ||
+            SightConfig->PeripheralVisionAngleDegrees != Stats.ViewAngle)
+        {
+            SightConfig->SightRadius = Stats.SightRadius;
+            SightConfig->LoseSightRadius = Stats.LoseSightRadius;
+            SightConfig->PeripheralVisionAngleDegrees = Stats.ViewAngle;
+            GetPerceptionComponent()->ConfigureSense(*SightConfig);
+        }
+        if (HearingConfig->HearingRange != Stats.HearingRange)
+        {
+            HearingConfig->HearingRange = Stats.HearingRange;
+            GetPerceptionComponent()->ConfigureSense(*HearingConfig);
+        }
+    }
+}
+
+void AHoverCyberZombieAI::OnPlayerDetected(AActor *Actor, FAIStimulus Stimulus)
+{
+    // Retain the pack's perception/BT path; parked vehicles and the unpossessed
+    // rider are not enemies after a mount or vehicle switch.
+    if (Actor == UGameplayStatics::GetPlayerPawn(this, 0) && GetBlackboardComponent())
+        OnTargetDetected(Actor, Stimulus);
 }
 
 void AHoverCyberZombie::InitializeZombieStats()
@@ -169,18 +228,35 @@ float AHoverCyberZombie::TakeDamage(float Damage, const FDamageEvent &Event, ACo
     auto *Mode = Cast<AHoverCyberCityGameMode>(GetWorld()->GetAuthGameMode());
     if (!bIsDead && Damage > 0)
     {
+        if (EventController && EventController->GetPawn())
+            UAISense_Damage::ReportDamageEvent(this, this, EventController->GetPawn(), Damage,
+                                               EventController->GetPawn()->GetActorLocation(), GetActorLocation());
         FHitResult Hit;
         FVector Direction;
         Event.GetBestHitInfo(this, Causer, Hit, Direction);
-        if (Cast<AHoverPilot>(Causer) && SurvivalComponent &&
+        if (EventController && Cast<AHoverPilot>(EventController->GetPawn()) && SurvivalComponent &&
             (Hit.BoneName.ToString().Contains(TEXT("head"), ESearchCase::IgnoreCase) || (Mode && Mode->HasInstaKill())))
             Damage = FMath::Max(Damage, SurvivalComponent->GetHealth());
-        if (Blood)
-            UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, Blood, Hit.ImpactPoint, (-Direction).Rotation(),
-                                                           FVector(.65f), true, true);
+        if (Blood && Event.IsOfType(FPointDamageEvent::ClassID) && Hit.bBlockingHit && Hit.GetActor() == this)
+            HoverEffects::BloodBurst(GetWorld(), Blood, Hit.ImpactPoint, Direction);
     }
     // Vendor health, hit montages, damage numbers, death, loot and wave callback.
     const float Result = Super::TakeDamage(Damage, Event, EventController, Causer);
+    // Vendor damage retaliation can select an unoccupied collision-causing
+    // vehicle independently of perception. Keep the same player-only rule here.
+    if (!bIsDead)
+        if (auto *AI = Cast<AHoverCyberZombieAI>(GetController()))
+            if (auto *Blackboard = AI->GetBlackboardComponent())
+            {
+                APawn *Player = UGameplayStatics::GetPlayerPawn(this, 0);
+                if (Blackboard->GetValueAsObject(AZE_ZombieAIController::Key_TargetEnemy) != Player)
+                {
+                    if (AI->bDirectChaseMode && Player)
+                        AI->SetTargetEnemy(Player);
+                    else
+                        Blackboard->ClearValue(AZE_ZombieAIController::Key_TargetEnemy);
+                }
+            }
     if (WasAlive && bIsDead && Mode && ZombieData)
         Mode->AddGold(FMath::RandRange(ZombieData->Stats.MinGoldReward, ZombieData->Stats.MaxGoldReward));
     return Result;
@@ -189,6 +265,23 @@ float AHoverCyberZombie::TakeDamage(float Damage, const FDamageEvent &Event, ACo
 float AHoverCyberCityGameMode::GetSpeedBonus() const
 {
     return GetWorld()->GetTimeSeconds() < SpeedBonusUntil ? 1.5f : 1.f;
+}
+int32 AHoverCyberCityGameMode::GetGold() const
+{
+    for (TActorIterator<AHoverPilot> It(GetWorld()); It; ++It)
+        if (It->Combat && It->Combat->Survival)
+            return FMath::RoundToInt(It->Combat->Survival->GetGold());
+    return Gold;
+}
+void AHoverCyberCityGameMode::AddGold(int32 Amount)
+{
+    for (TActorIterator<AHoverPilot> It(GetWorld()); It; ++It)
+        if (It->Combat && It->Combat->Survival)
+        {
+            It->Combat->Survival->ApplyGoldDelta(Amount);
+            return;
+        }
+    Gold += Amount;
 }
 
 bool AHoverCyberCityGameMode::HasInstaKill() const
@@ -222,7 +315,10 @@ void AHoverCyberPowerUp::OnOverlapBegin(UPrimitiveComponent *OverlappedComp, AAc
     }
     else if (PowerUpType == EZE_PowerUpType::Danger)
         UGameplayStatics::ApplyDamage(Pawn, DangerDamage, GetInstigatorController(), this, UDamageType::StaticClass());
-    // Sandbox health and ammunition are unlimited; those pickups remain harmless.
+    else if (PowerUpType == EZE_PowerUpType::MaxAmmo)
+        for (TActorIterator<AHoverPilot> It(GetWorld()); It; ++It)
+            if (It->Combat)
+                It->Combat->RefillAmmo();
     if (PickupSound)
         UGameplayStatics::PlaySoundAtLocation(this, PickupSound, GetActorLocation());
     if (PickupFX)

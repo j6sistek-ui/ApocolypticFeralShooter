@@ -25,22 +25,38 @@ Glider exit needs clear walkable ground within 1.5 m of the pads and speed below
 The unoccupied glider has gravity and collision; wait for it to settle before mounting.
 A / Space: jump on foot; mounted ollie pops up then settles, with a small pulse.
 On glider, L3 held / Shift: boost; the meter drains and recharges after a delay.
-On foot, hold B / Shift to crouch; from a run it starts a short decelerating slide.
-Release to stand when there is headroom. Capsule floor contact stays fixed.
+On foot, tap B / Shift to crouch or stand; hold for prone/crawl.
+From a run it starts a short decelerating slide. A stands up from prone first.
+Standing checks headroom. Capsule floor contact stays fixed.
 F7 / D-pad Right while grounded toggles CLS poses and the original locomotion.
 Both use the same Parkour movement, wall jump, glider, guns and vehicles.
 Release glider thrust to coast to a stop. B / Ctrl: brief coast assist.
-L2 held / right mouse: first-person ADS; release restores the selected view.
+L2 held / right mouse: gun sights in FPS, external screen zoom in third person.
 On foot R2 / left mouse fires. On glider R1 / left mouse fires; R2 is thrust.
 Unscoped third-person fire raises the visible gun. The Ballista has a centred reflex sight.
 PostApo: three body hits or one headshot kills a zombie; population replenishes to20.
 Cyber City: Zombie Engine waves grow in health/count/speed; wave-one body kills take
 three shots and headshots remain lethal. The top-right panel shows wave progress.
 Walk/drive over dropped pickups: Nuke clears live zombies; Speed lasts15seconds.
-Ammo is unlimited. Vexa and occupied vehicles are invulnerable. City zombies still
-play attacks, hit reactions and deaths; the original PostApo range is unchanged.
+PostApo ammo is unlimited. Cyber City uses magazine/reserve ammo and reloads.
+Vexa and occupied vehicles are invulnerable. City zombies play pursuit/run,
+attacks, hit reactions and deaths; PostApo remains a replenishing target range.
 F5 / Menu: toggle FPS and external review camera.
-R: reset Vexa and glider to the test start.
+Home: reset Vexa and glider to the test start. R also resets in PostApo.
+
+CYBER CITY COMBAT / INVENTORY
+R3 / V: melee. A remains jump; R3 does not jump or roll.
+Tap X / R: reload. Hold X / F on a focused supply crate or loose item: interact.
+Hold X near a ride still mounts it. Reload is cancelled when mounting or using melee.
+Three street supply crates offer Ballista tiers for500/1250/2500 gold; an owned
+weapon's crate sells60 reserve rounds for250 gold. Starting gold500, magazine30,
+reserve120. Kills pay the configured zombie reward. Weapon swaps retain spent ammo.
+D-pad Left: cycle equipped quickbar weapons. Keyboard1..5: select a quickbar slot.
+D-pad Down / Tab: inventory. B / Escape: close. Left stick moves its cursor;
+A clicks or holds to drag. Mouse drag/drop uses the supplied inventory UI.
+The native inventory provides item slots, quickbar, weight and equipment capacity.
+ZESP live settings: editor Window > ZESP Control Panel while Play is running.
+See Docs/QUALITY_20261023.txt for supported live fields and deliberate exceptions.
 
 SUPPLIED HOVERBIKE CONTROLS
 Controller: RT accelerate; LT brake, then continue holding to reverse.
@@ -58,10 +74,10 @@ Right stick / mouse: look. View / Tab: toggle camera. Menu / Backspace: reset tr
 Hold Y (controller) or hold X (keyboard): exit and return to Vexa.
 The vendor's controller X throttle and A brake bindings remain intact.
 
-Deferred: ammo/reloading, target locking, R3 barrel roll, multiplayer,
-production tuning, and integration into the main game.
-Walking tap-B crouch / hold-B prone remains separate queued work; the current
-current binding is hold B to crouch/slide and release to stand.
+Deferred: target locking, multiplayer, production tuning and main-game integration.
+Human slide and prone-entry/exit animations still need suitable source clips;
+the current slide/crawl poses are functional placeholders. Controller cursor feel
+and final visual motion need owner review.
 The earlier B-dive request still needs its intended movement mode clarified.
 The FPS view uses a separate rifle; the full Vexa body/aim pose is shown in F5 review view.
 

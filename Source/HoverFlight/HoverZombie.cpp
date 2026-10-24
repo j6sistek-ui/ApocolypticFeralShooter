@@ -1,4 +1,5 @@
 #include "HoverZombie.h"
+#include "HoverEffects.h"
 #include "Animation/AnimSequence.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -112,10 +113,9 @@ float AHoverZombie::TakeDamage(float Damage, const FDamageEvent &Event, AControl
     const bool Headshot = Hit.BoneName.ToString().Contains(TEXT("head"));
     const float Applied = Headshot ? 100.f : Damage;
     Health = FMath::Max(0.f, Health - Applied);
-    if (Blood)
+    if (Blood && Event.IsOfType(FPointDamageEvent::ClassID) && Hit.bBlockingHit && Hit.GetActor() == this)
     {
-        UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, Blood, Hit.ImpactPoint, (-Direction).Rotation(),
-                                                       FVector(.65f), true, true);
+        HoverEffects::BloodBurst(GetWorld(), Blood, Hit.ImpactPoint, Direction);
         if (Range)
             Range->RegisterBloodHit();
     }

@@ -173,6 +173,7 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
     {
         FAnimInstanceProxy::PreUpdate(Instance, DT);
         auto *State = CastChecked<UHoverAnimInstance>(Instance);
+        UpperBody.bMeshSpaceRotationBlend = !State->bProne;
         MotionPose.SourceMeshComponent = State->MotionSource;
         MotionBlend.Alpha = FMath::FInterpConstantTo(
             MotionBlend.Alpha, State->bMotionMatching && State->MotionSource ? 1.f : 0.f, DT, 8.f);

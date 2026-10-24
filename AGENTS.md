@@ -16,7 +16,12 @@ for bike RT throttle, LT brake/reverse, B boost and corrected right-stick camera
 keyboard and truck bindings remain vendor controls. Scope is free flight, mounting,
 dismounting, rifle aiming/shooting, the supplied bike and Doomsday pickup truck, plus
 respawning zombies with blood impacts and death. Vexa is invulnerable; zombies cannot
-damage her. No main-game integration, inventory, network play, or production release is implied.
+damage her. Cyber City explicitly includes the supplied Zombie Engine inventory,
+quickbar, ammo/reload, melee, loot, gold/wall buys, waves and compatible live RGCL
+settings. Preserve Vexa/CLS/Parkour instead of replacing her with the vendor pawn.
+PostApo remains outside Zombie Engine. No main-game integration, network play,
+or production release is implied. See Docs/QUALITY_20261023.txt for the feature
+matrix, native plugin patches, animation gaps and acceptance evidence.
 
 Use offscreen Unreal runs for automated inspection. Do not run captures concurrently.
 The owner explicitly chose no GitHub destination: keep this project local and do not create a PR.

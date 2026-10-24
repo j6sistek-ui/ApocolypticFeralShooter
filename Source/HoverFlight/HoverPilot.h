@@ -79,15 +79,21 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaSeconds) override;
     virtual void Landed(const FHitResult &Hit) override;
+    virtual void OnStartCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust) override;
+    virtual void OnEndCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust) override;
+    virtual float TakeDamage(float Damage, const FDamageEvent &Event, AController *EventInstigator,
+                             AActor *Causer) override;
     virtual void SetupPlayerInputComponent(UInputComponent *Input) override;
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly) bool bParkourMovement = false;
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly) bool bCLSLocomotion = false;
     UPROPERTY() TObjectPtr<class UHoverLocomotionBridge> LocomotionBridge;
+    UPROPERTY(BlueprintReadOnly) TObjectPtr<class UHoverCombatBridge> Combat;
     UFUNCTION(BlueprintPure) bool IsOnFoot() const
     {
         return !bMounted;
     }
     UFUNCTION(Exec) void HoverMount();
+    bool PrepareForRide();
     UFUNCTION(Exec) void HoverView();
     UFUNCTION(Exec) void HoverReset();
     UFUNCTION(Exec) void HoverStatus();
@@ -103,6 +109,10 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     UFUNCTION(BlueprintPure) bool IsAiming() const
     {
         return bAiming;
+    }
+    bool UsesAimFacing() const
+    {
+        return bAiming || GunRaisedTime > 0 || !bReview;
     }
     UFUNCTION(BlueprintPure) FVector GetMuzzlePosition() const;
     UFUNCTION(BlueprintPure) float GetBoostCharge() const
@@ -122,6 +132,14 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
         return WingSweep;
     }
     UFUNCTION(BlueprintPure) bool CanDismount() const;
+    UFUNCTION(BlueprintPure) bool IsProne() const
+    {
+        return bProne;
+    }
+    UFUNCTION(BlueprintPure) bool IsGroundSliding() const
+    {
+        return GroundSlideTime > 0;
+    }
     UFUNCTION(BlueprintPure) FVector GetLocomotionState() const
     {
         return FVector(GroundDirection, GetVelocity().Size2D(), GroundYawRate);
@@ -142,6 +160,7 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> WorldGun;
 
   private:
+    friend class AHoverCyberRifle;
     UPROPERTY() TObjectPtr<UHoverPilotAssets> Assets;
     UPROPERTY() TArray<TObjectPtr<USkeletalMeshComponent>> Parts;
     UPROPERTY() TObjectPtr<AActor> BoardActor;
@@ -152,6 +171,7 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     TMap<FName, FTransform> BoardRest;
     FVector StartLocation, ParkedLocation;
     float WeaponAimAlpha = 0;
+    float CameraPostureHeight = 0;
     FVector MountFrom, MountTo, MountFeet[2];
     FRotator StartRotation;
     float ForwardInput = 0, SideInput = 0, BankInput = 0, TurnInput = 0, PitchInput = 0;
@@ -160,7 +180,8 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     float BodyYaw = 0;
     float HoldTime = 0, TransitionTime = 0, HopTime = 0, SlideTime = 0;
     float GroundSlideTime = 0, GroundSlideSpeed = 0;
-    bool bGroundCrouchHeld = false;
+    bool bGroundCrouchHeld = false, bCrouchedAtPress = false, bProne = false;
+    float GroundCrouchHold = 0;
     float TargetAltitude = 0, FireCooldown = 0, AimExitTime = 0, StatusTime = 0;
     float LockAlpha = 0, LockVelocity = 0, BoardPitch = 0, BoardBank = 0;
     float PitchVelocity = 0, BankVelocity = 0, WingSweep = 0, WingVelocity = 0, RiderLean = 0, LeanVelocity = 0;
@@ -170,6 +191,7 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     float PreviousFlightVerticalSpeed = 0;
     float BoosterSize = 1.f, BoosterSpawnRate = 100.f;
     float LastLandingPulse = -10.f;
+    float LastHitReaction = -10.f;
     bool bSteppingOn = false;
     bool bMounted = false, bAiming = false, bReview = false, bBoost = false;
     bool bHoldConsumed = false, bWasJump = false, bWasView = false, bWasSlide = false;
@@ -178,11 +200,13 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     int32 ShotsFired = 0;
     UPROPERTY() TObjectPtr<class UMaterialInstanceDynamic> ParkourSpeedlines;
     void UpdateInput(float DeltaSeconds);
+    void UpdateGroundPosture(float DeltaSeconds);
     void UpdateFlight(float DeltaSeconds);
     void UpdateAppearance(float DeltaSeconds);
     void PlayPose(UAnimSequence *Animation, bool bLoop);
-    void FireShot();
+    void FireShot(float Damage = 35.f, float Spread = 0.f, float Range = 50000.f);
     void SetView();
+    void UpdateCameraPosture(float DeltaSeconds);
     bool HasBoardNearby() const;
     bool FindDismountLocation(FVector &Location) const;
     void UpdateGunTransform();

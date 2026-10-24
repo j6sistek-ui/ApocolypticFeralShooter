@@ -18,6 +18,8 @@ class HOVERFLIGHT_API UHoverAuthoring : public UBlueprintFunctionLibrary
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static bool SetCyberZombieSkeleton(USkeletalMesh *Mesh, class USkeleton *Skeleton);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
+    static bool ConfigureCityStartingGear(class UZE_WaveGameModeSettings *Settings);
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static bool IntegrateParkourBlueprint(UBlueprint *Blueprint);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static bool RepairParkourTransitions(UBlueprint *Blueprint);
@@ -42,6 +44,8 @@ class HOVERFLIGHT_API UHoverAuthoring : public UBlueprintFunctionLibrary
     static TArray<FVector> FindCompleteCityPath(UWorld *World, FVector Start, FVector End);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static FString ConfigurePrototypeEffect(UNiagaraSystem *Effect, float SpriteScale, bool LocalSpace);
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
+    static FString DescribeNiagaraEffect(UNiagaraSystem *Effect);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static void CapturePlaytest(const FString &Filename);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static void CaptureWorldFrame(const FString &Filename);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static FString InspectCharacterMesh(USkeletalMesh *Mesh);

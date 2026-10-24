@@ -25,6 +25,7 @@ class HOVERFLIGHT_API UHoverAnimInstance : public UAnimInstance
     UPROPERTY(BlueprintReadOnly) TArray<FVector> SecondaryOffsets;
     UPROPERTY(BlueprintReadOnly) TArray<bool> SecondaryBonesEvaluated;
     bool bAiming = false;
+    bool bProne = false;
     bool bLoop = true;
     int32 RestartSerial = 0;
     float FootLock = 0;

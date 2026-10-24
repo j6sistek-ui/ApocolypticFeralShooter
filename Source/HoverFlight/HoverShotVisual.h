@@ -14,6 +14,8 @@ class AHoverShotVisual : public AActor
 
   private:
     UPROPERTY() TObjectPtr<class UStaticMeshComponent> Bullet;
+    UPROPERTY() TObjectPtr<class UNiagaraComponent> Trail;
     FVector Origin, Direction;
-    float Travel = 0, Distance = 0;
+    float Travel = 0, Distance = 0, Age = 0, Duration = 0;
+    bool bArrived = false;
 };
