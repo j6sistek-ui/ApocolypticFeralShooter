@@ -53,7 +53,12 @@ class HOVERFLIGHT_API UHoverAuthoring : public UBlueprintFunctionLibrary
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static FString ConfigurePrototypeEffect(UNiagaraSystem *Effect, float SpriteScale, bool LocalSpace);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
+    static int32 ConfigureSurfaceImpact(UNiagaraSystem *Effect, class UMaterialInterface *DustMaterial);
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static FString DescribeNiagaraEffect(UNiagaraSystem *Effect);
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
+    static void PrepareReviewEffects(const TArray<UNiagaraSystem *> &Effects);
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static FString InspectReviewEffects();
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static void CapturePlaytest(const FString &Filename);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static void CaptureWorldFrame(const FString &Filename);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static FString InspectCharacterMesh(USkeletalMesh *Mesh);

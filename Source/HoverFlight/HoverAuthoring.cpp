@@ -21,6 +21,14 @@
 #include "NiagaraEmitter.h"
 #include "NiagaraEmitterHandle.h"
 #include "NiagaraScript.h"
+#include "NiagaraSpriteRendererProperties.h"
+#include "NiagaraComponent.h"
+#include "NiagaraSystemInstanceController.h"
+#include "NiagaraSystemInstance.h"
+#include "NiagaraEmitterInstance.h"
+#include "NiagaraDataSet.h"
+#include "UObject/UObjectIterator.h"
+#include "AssetCompilingManager.h"
 #include "Engine/StaticMeshActor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
@@ -666,6 +674,17 @@ FString UHoverAuthoring::ConfigurePrototypeEffect(UNiagaraSystem *Effect, float 
             for (const auto &Variable : Variables)
             {
                 const FString Name = Variable.GetName().ToString();
+                // Muzzle sprites must stay on the measured barrel tip. The purchased
+                // source's camera offset moves them a metre toward the viewer.
+                if (Effect->GetName().StartsWith(TEXT("NS_BallistaMuzzle")) &&
+                    Name.EndsWith(TEXT("CameraOffset.Camera Offset Amount")) &&
+                    Variable.GetType() == FNiagaraTypeDefinition::GetFloatDef())
+                {
+                    Script->Modify();
+                    const float Old = Store.GetParameterValue<float>(Variable);
+                    Store.SetParameterValue(0.f, Variable);
+                    Report += FString::Printf(TEXT("%s %.3f -> 0.000\n"), *Name, Old);
+                }
                 if (!Name.Contains(TEXT("InitializeParticle.")) || !Name.Contains(TEXT("Sprite Size")))
                     continue;
                 Script->Modify();
@@ -690,6 +709,89 @@ FString UHoverAuthoring::ConfigurePrototypeEffect(UNiagaraSystem *Effect, float 
     Effect->MarkPackageDirty();
 #endif
     return Report;
+}
+
+int32 UHoverAuthoring::ConfigureSurfaceImpact(UNiagaraSystem *Effect, UMaterialInterface *DustMaterial)
+{
+    int32 Changed = 0;
+#if WITH_EDITOR
+    if (!Effect || !Effect->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/Effects/")) || !DustMaterial ||
+        !DustMaterial->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/Effects/")))
+        return 0;
+    Effect->Modify();
+    for (auto &Handle : Effect->GetEmitterHandles())
+    {
+        auto *Data = Handle.GetEmitterData();
+        if (!Data || Handle.GetName() != TEXT("Dust"))
+            continue;
+        // The vehicle source spreads slowly over five seconds. A bullet needs a
+        // compact, short burst directed out of the actual contact surface.
+        Data->bLocalSpace = true;
+        for (auto *Renderer : Data->GetRenderers())
+            if (auto *Sprite = Cast<UNiagaraSpriteRendererProperties>(Renderer))
+            {
+                Sprite->Modify();
+                Sprite->Material = DustMaterial;
+                ++Changed;
+            }
+        TArray<UNiagaraScript *> Scripts;
+        Data->GetScripts(Scripts);
+        for (auto *Script : Scripts)
+        {
+            Script->Modify();
+            auto &Store = Script->RapidIterationParameters;
+            TArray<FNiagaraVariable> Variables;
+            Store.GetParameters(Variables);
+            for (const auto &Variable : Variables)
+            {
+                const FString Name = Variable.GetName().ToString();
+                if (Variable.GetType() == FNiagaraTypeDefinition::GetFloatDef())
+                {
+                    TOptional<float> Value;
+                    if (Name.EndsWith(TEXT("RandomRangeFloat001.Minimum")))
+                        Value = .45f;
+                    else if (Name.EndsWith(TEXT("RandomRangeFloat001.Maximum")))
+                        Value = .75f;
+                    else if (Name.EndsWith(TEXT("RandomRangeFloat.Minimum")))
+                        Value = .3f;
+                    else if (Name.EndsWith(TEXT("RandomRangeFloat.Maximum")))
+                        Value = .7f;
+                    else if (Name.EndsWith(TEXT("ShapeLocation.Sphere Radius")))
+                        Value = 6.f;
+                    if (Value.IsSet())
+                    {
+                        Store.SetParameterValue(Value.GetValue(), Variable);
+                        ++Changed;
+                    }
+                }
+                else if (Variable.GetType() == FNiagaraTypeDefinition::GetVec2Def() &&
+                         (Name.EndsWith(TEXT("ScaleSpriteSizeBySpeed.Min Scale Factor")) ||
+                          Name.EndsWith(TEXT("ScaleSpriteSizeBySpeed.Max Scale Factor"))))
+                {
+                    Store.SetParameterValue(FVector2f(1, 1), Variable);
+                    ++Changed;
+                }
+                else if (Variable.GetType() == FNiagaraTypeDefinition::GetVec3Def())
+                {
+                    if (Name.EndsWith(TEXT("RandomRangeVector001.Minimum")))
+                    {
+                        Store.SetParameterValue(FVector3f(-65, -65, 80), Variable);
+                        ++Changed;
+                    }
+                    else if (Name.EndsWith(TEXT("RandomRangeVector001.Maximum")))
+                    {
+                        Store.SetParameterValue(FVector3f(65, 65, 160), Variable);
+                        ++Changed;
+                    }
+                }
+            }
+        }
+    }
+    Effect->RequestCompile(true);
+    Effect->WaitForCompilationComplete();
+    Effect->MarkPackageDirty();
+#endif
+    return Changed;
 }
 
 void UHoverAuthoring::CapturePlaytest(const FString &Filename)
@@ -825,6 +927,62 @@ bool UHoverAuthoring::ConvertAppearanceTextures(const TArray<UTexture2D *> &Text
 #else
     return false;
 #endif
+}
+
+void UHoverAuthoring::PrepareReviewEffects(const TArray<UNiagaraSystem *> &Effects)
+{
+#if WITH_EDITOR
+    // Short-lived effects must be compiled before a rendered review begins.
+    // Otherwise the first shot can expire while its shaders are still compiling.
+    for (UNiagaraSystem *Effect : Effects)
+        if (Effect)
+            Effect->WaitForCompilationComplete(true, false);
+    FAssetCompilingManager::Get().FinishAllCompilation();
+#endif
+}
+
+FString UHoverAuthoring::InspectReviewEffects()
+{
+    FString Report;
+#if WITH_EDITOR
+    UWorld *World = GetPlaytestWorld();
+    if (!World)
+        return TEXT("No play world");
+    if (auto *Viewport = World->GetGameViewport())
+        Report = FString::Printf(TEXT("Particles=%d Niagara=%d Translucency=%d\n"), Viewport->EngineShowFlags.Particles,
+                                 Viewport->EngineShowFlags.Niagara, Viewport->EngineShowFlags.Translucency);
+    for (TObjectIterator<UNiagaraComponent> It; It; ++It)
+        if (It->GetWorld() == World)
+        {
+            auto Controller = It->GetSystemInstanceController();
+            Report +=
+                FString::Printf(TEXT("%s active=%d rendering=%d state=%d age=%.3f position=%s bounds=%s\n"),
+                                *GetNameSafe(It->GetAsset()), It->IsActive(), It->GetRenderingEnabled(),
+                                int32(It->GetExecutionState()), Controller.IsValid() ? Controller->GetAge() : -1.f,
+                                *It->GetComponentLocation().ToString(), *It->Bounds.GetBox().ToString());
+            if (Controller.IsValid())
+                if (auto *Instance = Controller->GetSystemInstance_Unsafe())
+                {
+                    Instance->WaitForConcurrentTickAndFinalize();
+                    for (const auto &Emitter : Instance->GetEmitters())
+                    {
+                        Report += FString::Printf(TEXT("  %s particles=%d\n"),
+                                                  *Emitter->GetEmitterHandle().GetName().ToString(),
+                                                  Emitter->GetNumParticles());
+                        if (Emitter->GetEmitterHandle().GetName() == TEXT("Dust"))
+                            if (const auto *Buffer = Emitter->GetParticleData().GetCurrentData();
+                                Buffer && Buffer->GetNumInstances() > 0)
+                            {
+                                FNiagaraDataVariableIterator Values(Buffer);
+                                Values.Get();
+                                for (const auto &Value : Values.GetVariables())
+                                    Report += TEXT("    ") + Value.ToString() + TEXT("\n");
+                            }
+                    }
+                }
+        }
+#endif
+    return Report;
 }
 
 void UHoverAuthoring::CaptureWorldFrame(const FString &Filename)

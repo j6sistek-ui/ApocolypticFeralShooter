@@ -10,6 +10,7 @@
 #include "HoverMovementComponent.h"
 #include "Settings/ZE_PlayerSettings.h"
 #include "Inventory/ZE_WeaponDefinition.h"
+#include "Interaction/ZE_PickupBase.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "Misc/ConfigCacheIni.h"
@@ -51,6 +52,22 @@ namespace
 float Stick(float Value)
 {
     return FMath::Abs(Value) < .16f ? 0.f : FMath::Sign(Value) * (FMath::Abs(Value) - .16f) / .84f;
+}
+
+FHitResult TraceWeaponRay(UWorld *World, const FVector &Start, const FVector &End, FCollisionQueryParams Params)
+{
+    FHitResult Hit;
+    // Loot retains Visibility for interaction, but must not become bullet cover
+    // or pull the muzzle's aim point away from the target behind it.
+    while (World->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params))
+    {
+        AActor *Actor = Hit.GetActor();
+        if (!Actor || (!Actor->IsA<AZE_PickupBase>() && !Actor->IsA<AZE_PowerUpPickup>()))
+            break;
+        Params.AddIgnoredActor(Actor);
+        Hit = FHitResult();
+    }
+    return Hit;
 }
 } // namespace
 
@@ -154,6 +171,8 @@ void AHoverPilot::BeginPlay()
             auto *Optic = NewObject<UStaticMeshComponent>(this);
             Optic->SetupAttachment(Gun);
             Optic->SetStaticMesh(Assets->GunOptic);
+            // The small reflex lens is translucent; Nanite cannot render it.
+            Optic->SetForceDisableNanite(true);
             Optic->SetCollisionEnabled(ECollisionEnabled::NoCollision);
             Optic->SetOnlyOwnerSee(Gun == ViewGun);
             Optic->CastShadow = Gun != ViewGun;
@@ -618,7 +637,7 @@ void AHoverPilot::UpdateInput(float DT)
             HopStartZ = GetActorLocation().Z;
             HopTime = 1.20f;
             bHeightHolding = false;
-            ImpactPulse(BoardActor->GetActorLocation() - FVector(0, 0, 8), FVector::UpVector, .28f, .15f, .40f);
+            ImpactPulse(BoardActor->GetActorLocation() - FVector(0, 0, 8), FVector::UpVector, 1.7f, .15f, .40f);
         }
         else if (!bParkourMovement)
             Jump();
@@ -881,7 +900,7 @@ void AHoverPilot::UpdateFlight(float DT)
                                              ECC_Visibility, FloorParams) &&
         Floor.ImpactNormal.Z > .7f;
     if (Grounded && !bGliderGrounded && FMath::Min(PreviousVelocity.Z, PreviousFlightVerticalSpeed) < -60.f)
-        ImpactPulse(Floor.ImpactPoint + Floor.ImpactNormal * 2, Floor.ImpactNormal, .45f, .18f, .5f);
+        ImpactPulse(Floor.ImpactPoint + Floor.ImpactNormal * 2, Floor.ImpactNormal, 2.2f, .18f, .5f);
     bGliderGrounded = Grounded;
     PreviousFlightVerticalSpeed = Desired.Z;
 }
@@ -1068,8 +1087,7 @@ void AHoverPilot::UpdateGunTransform()
     const FVector RayEnd = Eye + Camera->GetForwardVector() * 50000.f;
     FCollisionQueryParams Params(SCENE_QUERY_STAT(HoverWeaponAlignment), true, this);
     Params.AddIgnoredActor(BoardActor);
-    FHitResult Hit;
-    GetWorld()->LineTraceSingleByChannel(Hit, Eye, RayEnd, ECC_Visibility, Params);
+    const FHitResult Hit = TraceWeaponRay(GetWorld(), Eye, RayEnd, Params);
     const FVector Target = Hit.bBlockingHit ? Hit.ImpactPoint : RayEnd;
     const FQuat Basis = FQuat::FindBetweenNormals(Assets->GunForward.GetSafeNormal(), FVector::ForwardVector);
     const FVector Hand = GetMesh()->GetSocketLocation(TEXT("hand_r"));
@@ -1126,11 +1144,10 @@ void AHoverPilot::FireShot(float Damage, float Spread, float Range)
                     if (WeakFlash.IsValid())
                         WeakFlash->DestroyComponent();
                 },
-                .07f, false);
+                .09f, false);
         }
     }
-    FHitResult Hit;
-    GetWorld()->LineTraceSingleByChannel(Hit, Muzzle, Target + ShotDirection * 3.f, ECC_Visibility, Params);
+    const FHitResult Hit = TraceWeaponRay(GetWorld(), Muzzle, Target + ShotDirection * 3.f, Params);
     auto *Tracer = GetWorld()->SpawnActor<AHoverShotVisual>();
     if (Tracer)
         Tracer->Launch(Muzzle, Hit.bBlockingHit ? Hit.ImpactPoint : Target);
@@ -1177,8 +1194,9 @@ void AHoverPilot::ImpactPulse(const FVector &Location, const FVector &Normal, fl
     const FRotator Rotation = FRotationMatrix::MakeFromZ(Normal).Rotator();
     if (UNiagaraSystem *System = Cast<UNiagaraSystem>(Template))
     {
-        auto *Niagara = UNiagaraFunctionLibrary::SpawnSystemAtLocation(GetWorld(), System, Location, Rotation,
-                                                                       FVector(Scale), true, false);
+        auto *Niagara = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+            GetWorld(), System, Location, Rotation, FVector(Template == Assets->ShockwaveEffect ? 1.f : Scale), true,
+            false);
         if (Niagara && Template == Assets->ShockwaveEffect)
         {
             // This pack exposes world-space size/lifetime controls; component
@@ -1191,8 +1209,8 @@ void AHoverPilot::ImpactPulse(const FVector &Location, const FVector &Normal, fl
         {
             Niagara->SetVariableVec3(TEXT("User.DustOffset"), FVector::ZeroVector);
             Niagara->SetVariableVec3(TEXT("User.RockOffset"), FVector::ZeroVector);
-            Niagara->SetVariableFloat(TEXT("User.DustSize"), 55.f);
-            Niagara->SetVariableFloat(TEXT("User.DustSpawningRate"), 180.f);
+            Niagara->SetVariableFloat(TEXT("User.DustSize"), 65.f);
+            Niagara->SetVariableFloat(TEXT("User.DustSpawningRate"), 240.f);
             Niagara->SetVariableFloat(TEXT("User.RockImpulse"), 350.f);
             Niagara->SetVariableInt(TEXT("User.RockSpawningRate"), 8);
             Niagara->SetVariableFloat(TEXT("User.RockSpawnRate"), 45.f);
@@ -1203,9 +1221,15 @@ void AHoverPilot::ImpactPulse(const FVector &Location, const FVector &Normal, fl
                 StopEmission,
                 [WeakDust]() {
                     if (WeakDust.IsValid())
-                        WeakDust->Deactivate();
+                    {
+                        // Stop the source while letting emitted dust/debris finish.
+                        // The vehicle dust system kills particles on Deactivate.
+                        WeakDust->SetVariableFloat(TEXT("User.DustSpawningRate"), 0.f);
+                        WeakDust->SetVariableInt(TEXT("User.RockSpawningRate"), 0);
+                        WeakDust->SetVariableFloat(TEXT("User.RockSpawnRate"), 0.f);
+                    }
                 },
-                .08f, false);
+                .14f, false);
         }
         if (Niagara)
             Niagara->Activate(true);
@@ -1234,7 +1258,7 @@ void AHoverPilot::Landed(const FHitResult &Hit)
     const float FallSpeed = -GetVelocity().Z;
     Super::Landed(Hit);
     if (!bMounted && FallSpeed > 150.f)
-        ImpactPulse(Hit.ImpactPoint + Hit.ImpactNormal * 2, Hit.ImpactNormal, .07f, .06f, .2f);
+        ImpactPulse(Hit.ImpactPoint + Hit.ImpactNormal * 2, Hit.ImpactNormal, .5f, .06f, .3f);
 }
 
 float AHoverPilot::GetHealth() const
@@ -1296,7 +1320,9 @@ float AHoverPilot::TakeDamage(float Damage, const FDamageEvent &Event, AControll
 
 void AHoverPilot::ShowStompPulse(const FVector &Location, const FVector &Normal, float Radius, bool Close)
 {
-    ImpactPulse(Location + Normal * 3.f, Normal, Radius / 800.f, Close ? .5f : 0.f, .8f);
+    // The local purchased ring measures about 70 cm in radius at scale 1.
+    // Match its visible reach to the actual distance-gated knockdown area.
+    ImpactPulse(Location + Normal * 3.f, Normal, Radius / 70.f, Close ? .5f : 0.f, .8f);
 }
 
 bool AHoverPilot::ApplyStompKnockdown(FVector Origin)
@@ -1338,7 +1364,7 @@ void AHoverPilot::BoardHit(UPrimitiveComponent *HitComponent, AActor *OtherActor
                            FVector NormalImpulse, const FHitResult &Hit)
 {
     if (!bMounted && Hit.ImpactNormal.Z > .6f && NormalImpulse.Size() > 1800.f)
-        ImpactPulse(Hit.ImpactPoint + Hit.ImpactNormal * 2, Hit.ImpactNormal, .35f, .1f, .5f);
+        ImpactPulse(Hit.ImpactPoint + Hit.ImpactNormal * 2, Hit.ImpactNormal, 1.7f, .1f, .5f);
 }
 
 void AHoverPilot::Tick(float DT)

@@ -21,10 +21,12 @@ Cyber City explicitly includes the supplied Zombie Engine inventory,
 quickbar, ammo/reload, melee, loot, gold/wall buys, waves and compatible live RGCL
 settings. Preserve Vexa/CLS/Parkour instead of replacing her with the vendor pawn.
 PostApo remains outside Zombie Engine. Chinese Lakeside Town has separate wave data
-reserved for upcoming new assets; never reuse the current zombie roster there.
+using its own five newly supplied creatures; never reuse the Cyber City or
+PostApo zombie roster there. Keep later texture replacements reimportable.
 No main-game integration, network play,
-or production release is implied. See Docs/QUALITY_20261023.txt for the feature
-matrix, native plugin patches, animation gaps and acceptance evidence.
+or production release is implied. See Docs/NIGHT_QUALITY_20261024.txt for current
+rendered evidence and Docs/QUALITY_20261023.txt for the historical integration
+matrix, native plugin patches and remaining animation gaps.
 
 Use offscreen Unreal runs for automated inspection. Do not run captures concurrently.
 The owner explicitly chose no GitHub destination: keep this project local and do not create a PR.

@@ -6,6 +6,8 @@
 #include "BehaviorTree/BlackboardComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/DamageEvents.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
@@ -32,6 +34,30 @@
 #include "Perception/AISenseConfig_Hearing.h"
 #include "Perception/AISenseConfig_Sight.h"
 #include "GameFramework/CharacterMovementComponent.h"
+
+void AHoverAmmoPickup::BeginPlay()
+{
+    Super::BeginPlay();
+    auto *Box = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/ZESP/ZE/Meshes/Tools/SM_AmmoBox.SM_AmmoBox"));
+    if (!LootStaticMesh || !Box)
+        return;
+    LootStaticMesh->SetStaticMesh(Box);
+    LootStaticMesh->EmptyOverrideMaterials();
+    const float Width = FMath::Max(Box->GetBounds().BoxExtent.X, Box->GetBounds().BoxExtent.Y) * 2.f;
+    LootStaticMesh->SetRelativeScale3D(FVector(35.f / FMath::Max(Width, 1.f)));
+    LootStaticMesh->SetVisibility(true);
+    FHitResult Floor;
+    FCollisionQueryParams Query(SCENE_QUERY_STAT(AmmoDropFloor), false, this);
+    const FVector Origin = GetActorLocation();
+    if (GetWorld()->LineTraceSingleByObjectType(Floor, Origin + FVector(0, 0, 100), Origin - FVector(0, 0, 2000),
+                                                FCollisionObjectQueryParams(ECC_WorldStatic), Query) &&
+        Floor.ImpactNormal.Z > .5f)
+    {
+        const float Bottom = LootStaticMesh->Bounds.Origin.Z - LootStaticMesh->Bounds.BoxExtent.Z;
+        SetActorLocation(Origin + FVector(0, 0, Floor.ImpactPoint.Z + 2.f - Bottom), false, nullptr,
+                         ETeleportType::TeleportPhysics);
+    }
+}
 
 void AHoverCyberCityGameMode::InitGame(const FString &MapName, const FString &Options, FString &ErrorMessage)
 {

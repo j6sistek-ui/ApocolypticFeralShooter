@@ -1,5 +1,9 @@
 ZOMBIE SPECIALS, HEALTH TESTING AND LAKESIDE
 
+Later update: the five new Lakeside creatures are now installed independently.
+See LAKESIDE_CREATURES_20261024.txt and NIGHT_QUALITY_20261024.txt. The CPU-only
+statements below describe this earlier pass; rendered review resumed afterward.
+
 Scope
 Local AFS sandbox only. SpaceSurvival and the supplied Blender originals are unchanged.
 No rendered Unreal/GPU tests were run in this pass, per the owner's instruction.
@@ -43,14 +47,15 @@ Chinese Lakeside Town is the third Test Settings level. The imported map is
 because the source project requires them. No other descriptor fields were changed
 relative to the pre-pass, already modified owner descriptor.
 /Game/HoverPrototype/Lakeside/DA_LakesideWaves and DA_LakesideEncounters are separate
-from Cyber City. Their roster is intentionally empty: ONLY upcoming new assets may
-populate it. No current AFS, standard, brute or kid enemies may be used there.
-The native wave start is gated when this roster is empty; no Cyber City fallback.
+from Cyber City. The later independent roster uses Horror, BogZombie, Mythical,
+Plant and Pirate. BogZombie uses the owner's rigged (3) source. No Cyber City or
+PostApo enemies are used there. An empty roster still gates native wave start;
+there is no Cyber City fallback.
 The northern passage contains the player, glider, bike and truck start positions.
 The bike is parked along the western edge facing the passage; its old crosswise
 position blocked all six routes in Play. Vehicle start markers now also supply
 orientation so parking can follow each map's roads.
-Six future entrances have complete navigation routes: North Passage, West Bank,
+Six entrances have complete navigation routes: North Passage, West Bank,
 Market Back Lane, Upper Bridge, West Pier and Market Corner. The two disconnected
 east/south candidates were omitted. Native visibility/distance/occupancy gates
 still apply; do not spawn beside the player when no fair entrance is available.
@@ -100,4 +105,5 @@ runtime-pose CPU replays and source-preservation checks are recorded separately.
 See the workspace outputs/AFS_Test/ZombieSpecials20261024 for exact receipts.
 The earlier human slide/prone-entry/exit/wall-run clip gaps, CLS startup divide
 warning, final rendered effects/UI review and physical controller review remain open.
-Upcoming Lakeside zombies are pending owner assets. No packaged/performance claim.
+The later Lakeside and night reports supersede the pending-roster/startup-warning
+status. No packaged/performance claim is implied by either pass.

@@ -4,7 +4,8 @@ An isolated Unreal5.8 prototype using Vexa, the black/red personal glider, the
 installed post-apocalyptic environment, the supplied sci-fi rifle and the drivable
 ScifiHoverbike and Doomsday pickup truck. The board spans left-to-right beneath the rider's feet.
 In PostApo, twenty zombies spawn across the surrounding area, wander or approach, and respawn after
-being shot. They cannot hurt Vexa. Rifle body hits deal 35 damage; headshots kill immediately.
+being shot. Vexa starts invincible; the pause menu can enable normal health loss.
+Rifle body hits deal 35 damage; headshots kill immediately.
 BloodShot Niagara impacts and ragdoll deaths provide hit feedback; ammo is unlimited.
 
 Cyber City uses Zombie Engine's escalating waves, behavior tree, attack/hit/death
@@ -21,11 +22,13 @@ Cyber City now has four new standard appearances, a heavy brute on rounds12/14/1
 and eight-kid swarm rounds5/15/25... as editable starting settings. The brute uses
 the supplied stomp and smash clips; its landing pulse knocks nearby on-foot Vexa
 down, with walls blocking the effect. Chinese Lakeside Town is a third selectable
-map with all three rides and separate wave data. Its roster is intentionally empty
-until the upcoming new zombie assets arrive. None of the current zombies are used
-there. See `Docs/ZOMBIE_SPECIALS_20261024.txt` for roles, backups and texture reimport.
+map with all three rides and separate wave data. Its five new creatures are Horror,
+BogZombie, Mythical, Plant and Pirate. BogZombie uses the owner's rigged `(3)` source.
+None of Cyber City's or PostApo's zombies are used there. See
+`Docs/ZOMBIE_SPECIALS_20261024.txt` for Cyber roles and
+`Docs/LAKESIDE_CREATURES_20261024.txt` for the independent roster and texture reimport.
 
-R3/V uses the supplied bloodied katana on foot in either level. It uses the
+R3/V uses the supplied bloodied katana on foot in all three levels. It uses the
 purchased knife slash, native melee contact/cooldown and a local hand attachment.
 The rifle hides during the swing. See `Docs/KATANA_20261023.txt` for provenance,
 timing, rollback files and the distinction between CPU checks and rendered review.
@@ -39,8 +42,9 @@ expose wave and zombie tuning. The copied ZombieEngineStudio plugin is required
 and enabled locally, with isolated UE5.8 compatibility fixes. Licensed plugin
 source, binaries and content remain outside Git; preserve the native installation.
 During Play, use Window > ZESP Control Panel for the purchased live tuning tool.
-`Docs/QUALITY_20261023.txt` lists supported fields, retained Parkour/CLS behavior,
-animation gaps and the exact native integration patches.
+`Docs/QUALITY_20261023.txt` lists supported fields and native integration patches.
+`Docs/NIGHT_QUALITY_20261024.txt` contains the current rendered quality checks,
+remaining animation gaps and the separate engine-only shutdown reproduction.
 
 Build with `Scripts/Build.ps1`, open `AFS.uproject`, and press Play. The default
 map is `/Game/JustBStudios/PostApo/Levels/PostApo`. If the editor has another level
@@ -65,8 +69,11 @@ controls movement, wall running, jump buffering and coyote time. Walking is capp
 jump event. Tap B/Shift to crouch or stand; hold to go prone and crawl. Pressing it
 while running starts a short decelerating slide before crouch. Standing checks
 headroom. The purchased template has movement logic but no skeletal animations:
-the slide currently uses a crouch pose, and prone/crawl uses a root-locked owned
-belly-crawl clip. Dedicated human slide and prone-entry/exit clips remain missing.
+the slide uses a local leg/torso variant of the owned crouch pose, and prone/crawl
+uses a root-locked owned belly-crawl clip. Full-body actions run after CLS root/foot
+corrections so they stay centred on the moving capsule. Dedicated human slide and
+prone-entry/exit clips remain missing. See `Docs/NIGHT_QUALITY_20261024.txt` for
+the latest rendered review and effect/loot fixes.
 CLS selects and retargets locomotion
 poses through a hidden mannequin while Parkour retains movement and special actions.
 Third-person Vexa faces travel unless aiming. F7 / D-pad Right toggles the original

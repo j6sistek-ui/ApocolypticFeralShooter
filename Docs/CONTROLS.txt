@@ -8,7 +8,8 @@ Test level: Post-apocalypse, Cyber City or Chinese Lakeside Town. Applying a dif
 session with Vexa, glider, bike and truck; current positions/kills are not carried over.
 Invincible: On by default; turn Off to test Vexa's health. At zero health she
 resets at the level start after3seconds. A saves; B cancels. Vehicle damage is unchanged.
-Lakeside has its own empty zombie roster, reserved for upcoming new assets.
+Lakeside uses its own Horror, BogZombie, Mythical, Plant and Pirate creatures.
+It has separate Zombie Engine waves/ammo/inventory and never uses the Cyber City roster.
 Image choices: Native TSR, DLAA, DLSS Quality/Balanced/Performance/Ultra Performance.
 Only supported GPU modes appear. DLAA keeps full resolution; DLSS trades resolution for speed.
 Frame generation: Off, supported fixed multipliers, or Dynamic. Reflex turns on with FG.
@@ -36,7 +37,7 @@ Both use the same Parkour movement, wall jump, glider, guns and vehicles.
 Release glider thrust to coast to a stop. B / Ctrl: brief coast assist.
 L2 held / right mouse: gun sights in FPS, external screen zoom in third person.
 On foot R2 / left mouse fires. On glider R1 / left mouse fires; R2 is thrust.
-On foot R3 / V swings the bloodied katana in either level; A remains jump.
+On foot R3 / V swings the bloodied katana in all three levels; A remains jump.
 The rifle hides during the slash. Melee is unavailable while riding or in inventory.
 Unscoped third-person fire raises the visible gun. The Ballista has a centred reflex sight.
 PostApo: three body hits or one headshot kills a zombie; population replenishes to20.
@@ -45,7 +46,7 @@ brute rounds12/14/16... and eight-kid swarm rounds5/15/25... are editable defaul
 The brute resists ordinary headshot instant kills. Its landing stomp knocks nearby
 on-foot Vexa down within4m; walls block it. The top-right panel shows wave progress.
 Walk/drive over dropped pickups: Nuke clears live zombies; Speed lasts15seconds.
-PostApo ammo is unlimited. Cyber City uses magazine/reserve ammo and reloads.
+PostApo ammo is unlimited. Cyber City and Lakeside use magazine/reserve ammo and reloads.
 Vexa starts invincible; the pause-menu option allows normal health loss.
 Occupied vehicles remain invulnerable. City zombies play pursuit/run,
 attacks, hit reactions and deaths; PostApo remains a replenishing target range.
@@ -83,8 +84,9 @@ Hold Y (controller) or hold X (keyboard): exit and return to Vexa.
 The vendor's controller X throttle and A brake bindings remain intact.
 
 Deferred: target locking, multiplayer, production tuning and main-game integration.
-Human slide and prone-entry/exit animations still need suitable source clips;
-the current slide/crawl poses are functional placeholders. Controller cursor feel
+Dedicated human slide and prone-entry/exit clips remain an asset gap. The local
+slide is now a grounded leg/torso variant of the owned crouch pose; crawl reuses
+the owned belly-crawl clip. Controller cursor feel
 and final visual motion need owner review.
 The earlier B-dive request still needs its intended movement mode clarified.
 The FPS view uses separate weapon presentation; the full Vexa body/aim pose is shown in F5 review view.

@@ -1,0 +1,39 @@
+Chinese Lakeside Town -- new creature roster, 2026-10-24
+
+The Lakeside encounter and wave data use five new owner-supplied creatures:
+Horror 16,433 triangles; BogZombie 21,967; Mythical 26,182; Plant 26,028;
+Pirate 15,571. Each supplied rig has61 bones. BogZombie explicitly uses
+zombie+creature+3d+model (3).glb, including its matching UVs and textures.
+The unrigged (2) source and abandoned auto-weight trial are not imported.
+All five are standard enemies. Cyber City's brute and kid schedules do not
+run in Lakeside, and its four standard models are not reused here.
+
+Sources remain unchanged in Downloads and in the hash-backed D-drive archive.
+Runtime copies join the rig-bound mesh parts, match coincident seam weights,
+exclude the glTF bone-display helper and export with unit root scale. Source
+geometry and UVs are retained. Native materials preserve matched base color,
+normal and roughness/metallic textures; runtime texture resolution is capped
+at2048. These are the owner's current textures, not a finished texture pass.
+
+Native assets: /Game/HoverPrototype/ZombieEngine/Variants/Lakeside/<Name>/
+Each folder contains SK_<Name>, its skeleton/physics, material/textures and
+DA_<Name>. Roster data live in /Game/HoverPrototype/Lakeside/.
+Owned Zombie Engine walk/run/attack/hit/death animations provide the current
+animation set; the five incoming GLBs did not contain animation clips.
+
+Reimport later textures using the same source and material slot assignments.
+Do not replace (3)'s textures with (2)'s: their UVs/images differ. Mesh/rig edits
+need a new seam, scale and animation check. Keep native data-asset references
+stable so a texture revision does not change wave roles or spawn routing.
+
+Evidence so far: all16 accelerated native Lakeside waves pass with only these
+five types; all five actual rifle tests reduce100HP to30HP, and attack/hit/death
+montages run.315 Blender deformation samples have seam gaps below0.009mm.
+Rendered fresh-load full-map review now passes all five materials/characters,
+three rides and six complete routes. A copied-map exposure incompatibility
+was corrected; see Docs/NIGHT_QUALITY_20261024.txt. Owner visual acceptance,
+physical-controller, packaged-performance and long-session gates remain open.
+
+Backup/provenance: D:/AFS_Comparisons/LakesideCreatures_20261024
+Reports: workspace work/lakeside_creatures and work/camera_actions/
+Lakeside remains separate from SpaceSurvival and from the other two rosters.

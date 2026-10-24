@@ -1,5 +1,10 @@
 AFS QUALITY PASS - 2026-10-23
 
+HISTORICAL REPORT: current rendered fixes, five-creature Lakeside roster,
+health toggle and acceptance limits are in Docs/NIGHT_QUALITY_20261024.txt
+and Docs/ZOMBIE_SPECIALS_20261024.txt. The CPU-only limitations and older
+placeholder descriptions below record the state at this report's date.
+
 Purpose: preserve accepted Vexa/CLS/Parkour movement and fix the reported camera,
 turning, action, combat and Cyber City horde gaps using purchased systems.
 This remains a local proving ground. Nothing is imported into SpaceSurvival.

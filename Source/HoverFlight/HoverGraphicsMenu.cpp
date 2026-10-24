@@ -50,8 +50,8 @@ void UHoverGraphicsMenu::NativeOnInitialized()
     HealthText = AddText(TEXT(""), 23, FLinearColor::White);
     AddText(TEXT("Invincible off: take damage. At zero health, reset at the start after 3 seconds."), 16,
             FLinearColor(.7f, .76f, .84f));
-    AddText(TEXT("Changing level starts a fresh test with Vexa and all three vehicles. Lakeside awaits its new zombie "
-                 "roster."),
+    AddText(TEXT("Changing level starts a fresh test with Vexa and all three vehicles. Lakeside uses its own five "
+                 "creatures."),
             16, FLinearColor(.7f, .76f, .84f));
     AddText(TEXT("DLAA keeps full resolution. DLSS Quality is a good starting point for more speed."), 16,
             FLinearColor(.7f, .76f, .84f));

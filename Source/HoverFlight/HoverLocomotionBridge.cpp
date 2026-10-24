@@ -29,6 +29,7 @@
 #include "AnimGraphNode_SaveCachedPose.h"
 #include "AnimGraphNode_UseCachedPose.h"
 #include "AnimGraphNode_LayeredBoneBlend.h"
+#include "Kismet/KismetMathLibrary.h"
 #endif
 
 namespace
@@ -84,8 +85,13 @@ void UHoverLocomotionBridge::BeginPlay()
     Driver->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
     Driver->RegisterComponent();
     Driver->AddTickPrerequisiteComponent(this);
-    Driver->SetAnimInstanceClass(AnimClass);
     SetObject(Locomotion, TEXT("MeshComponent"), Driver);
+    Driver->SetWorldTransform(Pilot->GetMesh()->GetComponentTransform());
+    // CLS evaluates once when the animation instance is created. Supply real
+    // movement limits first so its acceleration normalization never starts at 0/0.
+    if (auto *Package = Locomotion->FindFunction(TEXT("Package_AnimData")))
+        Locomotion->ProcessEvent(Package, nullptr);
+    Driver->SetAnimInstanceClass(AnimClass);
     AddTickPrerequisiteActor(Pilot);
     AddTickPrerequisiteComponent(Pilot->GetCharacterMovement());
     Pilot->GetMesh()->AddTickPrerequisiteComponent(Driver);
@@ -111,13 +117,11 @@ void UHoverLocomotionBridge::TickComponent(float DT, ELevelTick Type, FActorComp
         if (NewPosture)
         {
             auto *Clip = LoadObject<UAnimSequence>(
-                nullptr,
-                NewPosture == 2
-                    ? TEXT("/Game/HoverPrototype/Animations/QA_ProneCrawl.QA_ProneCrawl")
-                    : TEXT("/Game/CLS/Example/SetupYourHeroExample/Anims/Unarmed/Crouch/Crouch_Idle.Crouch_Idle"));
+                nullptr, NewPosture == 2 ? TEXT("/Game/HoverPrototype/Animations/QA_ProneCrawl.QA_ProneCrawl")
+                                         : TEXT("/Game/HoverPrototype/Animations/QA_GroundSlide.QA_GroundSlide"));
             if (Clip)
-                Posture =
-                    DriverAnim->PlaySlotAnimationAsDynamicMontage(Clip, TEXT("DefaultSlot"), .35f, .3f, 1.f, 100000);
+                Posture = DriverAnim->PlaySlotAnimationAsDynamicMontage(
+                    Clip, TEXT("DefaultSlot"), NewPosture == 2 ? .55f : .22f, .3f, 1.f, 100000);
         }
     }
     if (DriverAnim && Posture && NewPosture == 2)
@@ -314,8 +318,71 @@ bool UHoverIntegrationAuthoring::BuildActionLayer(UAnimBlueprint *Blueprint)
     Blueprint->GetAllGraphs(Graphs);
     for (auto *Graph : Graphs)
     {
+        if (Graph->GetFName() != TEXT("Update_Lean"))
+            continue;
+        const bool Guarded = Graph->Nodes.ContainsByPredicate(
+            [](const UEdGraphNode *Node) { return Node->NodeComment == TEXT("AFS safe acceleration normalization"); });
+        if (Guarded)
+            continue;
+        for (UEdGraphNode *Node : TArray<TObjectPtr<UEdGraphNode>>(Graph->Nodes))
+        {
+            if (Node->GetFName() != TEXT("K2Node_PromotableOperator_0"))
+                continue;
+            auto *Denominator = Node->FindPin(TEXT("B"));
+            if (!Denominator || Denominator->LinkedTo.Num() != 1)
+                return false;
+            UEdGraphPin *Value = Denominator->LinkedTo[0];
+            auto *Guard = NewObject<UK2Node_CallFunction>(Graph);
+            Guard->SetFromFunction(UKismetMathLibrary::StaticClass()->FindFunctionByName(TEXT("FMax")));
+            Graph->AddNode(Guard, false, false);
+            Guard->CreateNewGuid();
+            Guard->PostPlacedNewNode();
+            Guard->AllocateDefaultPins();
+            Guard->NodeComment = TEXT("AFS safe acceleration normalization");
+            Guard->FindPin(TEXT("B"))->DefaultValue = TEXT("1.0");
+            Denominator->BreakAllPinLinks();
+            if (!Graph->GetSchema()->TryCreateConnection(Value, Guard->FindPin(TEXT("A"))) ||
+                !Graph->GetSchema()->TryCreateConnection(Guard->GetReturnValuePin(), Denominator))
+                return false;
+            break;
+        }
+    }
+    for (auto *Graph : Graphs)
+    {
         if (Graph->GetFName() != TEXT("AnimGraph"))
             continue;
+        // Authored full-body postures already define their ground contacts.
+        // Applying CLS root offset/standing foot placement AFTER a slide holds
+        // it behind the capsule and pulls the body forward when the action ends.
+        for (UEdGraphNode *Node : Graph->Nodes)
+            if (auto *Slot = Cast<UAnimGraphNode_Slot>(Node); Slot && Slot->Node.SlotName == TEXT("DefaultSlot"))
+            {
+                Slot->Node.bAlwaysUpdateSourcePose = true;
+                if (Slot->NodeComment == TEXT("AFS full body after locomotion correction"))
+                    break;
+                UEdGraphNode *History = nullptr;
+                for (UEdGraphNode *Candidate : Graph->Nodes)
+                    if (Candidate->GetClass()->GetName() == TEXT("AnimGraphNode_PoseSearchHistoryCollector"))
+                        History = Candidate;
+                auto *SlotInput = Slot->FindPin(TEXT("Source"));
+                auto *SlotOutput = Slot->FindPin(TEXT("Pose"));
+                auto *HistoryInput = History ? History->FindPin(TEXT("Source")) : nullptr;
+                if (!SlotInput || !SlotOutput || !HistoryInput || SlotInput->LinkedTo.Num() != 1 ||
+                    SlotOutput->LinkedTo.Num() != 1 || HistoryInput->LinkedTo.Num() != 1)
+                    return false;
+                auto *BeforeSlot = SlotInput->LinkedTo[0];
+                auto *AfterSlot = SlotOutput->LinkedTo[0];
+                auto *CorrectedPose = HistoryInput->LinkedTo[0];
+                SlotInput->BreakAllPinLinks();
+                SlotOutput->BreakAllPinLinks();
+                HistoryInput->BreakAllPinLinks();
+                if (!Graph->GetSchema()->TryCreateConnection(BeforeSlot, AfterSlot) ||
+                    !Graph->GetSchema()->TryCreateConnection(CorrectedPose, SlotInput) ||
+                    !Graph->GetSchema()->TryCreateConnection(SlotOutput, HistoryInput))
+                    return false;
+                Slot->NodeComment = TEXT("AFS full body after locomotion correction");
+                break;
+            }
         UAnimGraphNode_Root *Root = nullptr;
         for (UEdGraphNode *Node : Graph->Nodes)
         {

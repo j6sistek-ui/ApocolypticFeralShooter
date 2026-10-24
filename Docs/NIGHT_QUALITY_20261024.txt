@@ -1,0 +1,126 @@
+Night quality pass -- 2026-10-24 (current rendered review)
+
+The owner released the GPU for rendered checks. This supersedes the earlier
+CPU-only testing constraint; previous CPU reports remain historical evidence.
+
+Confirmed fixes in this pass:
+- Rifle aim and damage traces ignore native loot/power-up pickups. They retain
+  Visibility collision for interaction; walls and solid geometry still block.
+  Dropped ammo had caused later creature shooting tests to miss their targets.
+- Lazy native death/sound assets now load when their soft paths are assigned,
+  rather than requiring the asset to already be in memory. Death montages run
+  on fresh creature tests instead of falling immediately into ragdoll.
+- Local creature materials save skeletal-mesh usage. The local Ballista mesh
+  uses local material copies with Nanite usage. Its small translucent optic
+  explicitly renders without Nanite. Purchased originals remain intact.
+- Local CLS Update_Lean guards its acceleration divisor against zero.
+- Full-body actions now run after CLS root/foot corrections in the local
+  animation Blueprint. Running-slide root drift of114.6cm was reproduced;
+  after reordering the full slide keeps a zero root offset. CLS continues to
+  update under actions so returning to locomotion does not resume a stale pose.
+
+Additional implemented and rendered work:
+- QA_GroundSlide is a local variant of the owned crouch pose, with an extended
+  leading leg and adjusted torso. It is not a newly purchased motion-capture
+  clip. Rendered slide and prone transitions keep the body grounded; the
+  source/root telemetry remains centred. Dedicated human transition clips
+  are still a documented asset gap, not represented as supplied mocap.
+- Ammo pickup presentation now uses the supplied ammo-box mesh and floor
+  placement while preserving native inventory definitions and interaction.
+  Its bottom is2cm above the traced floor; controller hold-X consumes the
+  pickup and increases native rifle reserve120->150.
+- The purchased muzzle source had a100cm camera offset and a slow flame start.
+  NS_BallistaMuzzle_Pulse removes that offset, warms its flame and uses a
+  bounded0.09s burst. Actual TPS firing shows a compact blue barrel flash;
+  FPS aiming uses the centred reflex sight. Original vendor effects remain.
+- Shockwave sizing no longer applies scale twice. Board hop/landing pulses
+  and the brute's4m stomp now have readable radii. Foot landing stays subtle.
+- Solid-hit dust now uses a local copy of the supplied vehicle material with
+  its radius-dependent opacity mask replaced,8cm intersection fade and reduced
+  density. Its local emitter uses a compact outward burst and0.45-0.75s particle
+  life. Fresh FPS/TPS rifle shots show a visible dust puff plus debris, and both
+  clear within the bounded0.9s lifetime. Vendor materials/effects are unchanged.
+- Lakeside's imported post-process volume used700 as legacy brightness. AFS
+  interprets this field as EV100, causing a black scene and a pre-exposure
+  ensure. The copied, hash-backed actor now uses9.45121EV, visually selected
+  from rendered comparisons. The original map/project and AFS global exposure
+  mode are unchanged. Fresh reload renders the map and all five creatures.
+
+Rendered behavior checked:
+- City native rifle kill, wave1->2, Speed/Nuke, pause and PostApo roundtrip.
+  Inventory shows30 concrete slots; item movement and quickbar remain native.
+- Bike/truck/glider controller entry/exit, current-player AI targeting, wave
+  HUD restoration, vehicle-entry height gate and glider shooting pass.
+- Lakeside has all five independent creatures, three rides, and six complete
+  navigation routes with5/14/12/8/12/26 path points. No City roster leaks.
+- Ground walk/run/turns remain5/9/9m/s. Standing jump rises2.48m in the isolated
+  test. Actual post-process spring measurements show ground motion and much
+  smaller quiet-flight displacement; this is measured bone output, not merely
+  a claim based on Blueprint nodes being present.
+- Glider thrust21.6m/s, climb18m/s, descent24m/s and boost56m/s pass. Coasting
+  remains after throttle release. Enhanced bank reaches35degrees vs18normal;
+  right stick remains independent look. Hop peaks about2.93m then settles at
+  the established1.66m rise. High dismount is blocked; low dismount enables
+  gravity on the released board.
+- Brute's actual stomp knocks down a nearby player, not a600cm-away player
+  or a player behind a solid wall; recovery restores movement and100HP.
+- A solid wall blocks real bullets; removing it allows100->30HP on the Plant
+  target despite the intervening loot. Blood appears on those actual zombie
+  hits, never the wall shot, and is gone after the bounded cleanup interval.
+- A182-second real-time, accelerated native City soak completes waves1-6,
+  including the kid swarm on5, with100HP and61kills. This checks progression,
+  deaths and loot; it is not a balanced full-length session or FPS benchmark.
+- The chain's actual accessory graph runs CopyPose followed by damped angular
+  integration. Its second joint moves from a resting-6.7degree sample to21.6
+  after stopping, then returns to-6.73 by4seconds. A separate post-process
+  instance is intentionally absent: this simulation is in the accessory graph.
+
+Open review/limits:
+- Physical controller feel/cursor/rumble, owner visual acceptance, packaged
+  performance and production-duration soak are not established by injected
+  inputs or offscreen/fixed-step captures.
+- Human prone entry/exit and wall-run clips remain absent from audited owned
+  assets. Ground slide is an authored variant; crawl reuses the owned clip.
+- Intermittent editor-exit0xc0000005 occurs after normal log closure. Windows
+  reports ntdll; local dump address candidates include late Slate destruction.
+  It also reproduces in an isolated engine-only project after simulate/end/exit,
+  with no AFS module/assets loaded (exit-1073741819, PID24624). Disabling engine
+  UAssetBrowser did not prevent the AFS reproduction. This establishes that AFS
+  gameplay code is not required, not a specific root cause. No engine/plugin
+  workaround or permanent disable was guessed. First three minimal trials were
+  cancelled test-script failures and are excluded from clean-exit evidence.
+- City VSM non-Nanite marking-queue warnings remain under investigation; do
+  not hide them or claim a performance pass. Legacy UDIM texture warnings and
+  installed-engine header deprecations are separate from gameplay success.
+- Directional thrusters/assisted landing remain the earlier planning stage;
+  other three glider rigs are delivered in Blender. Jetpack and wider audio/
+  haptics remain separately tracked backlog. SpaceSurvival is untouched.
+
+Keep all current open animation/feature topics in the workspace checklist.
+Do not infer completion from component counts or a successful build alone.
+The owner's AFS.uproject and graphics preferences are preserved separately.
+Native backups: D:/AFS_Comparisons/NightQuality_20261024/Before and After.
+The licensed ZombieEngineStudio source patch remains local, outside Git.
+ClickUp connector is at its300-call quota and the fallback browser is logged
+out. Updates are queued locally; no successful remote update is claimed.
+
+Exposure reference checked2026-10-24: Epic Unreal5.8 Auto Exposure documentation,
+https://dev.epicgames.com/documentation/en-us/unreal-engine/auto-exposure-in-unreal-engine
+The source value-to-EV mismatch is confirmed by local settings and rendered
+comparison; the chosen final exposure is a visual calibration for this map.
+
+Final engineering evidence,2026-10-24:
+- Build13 succeeds9.01s; only installed-engine header deprecation warnings.
+- clang-format --dry-run --Werror and git diff --check pass.38 selected Python
+  reproduction/authoring scripts pass AST parsing. Docker daemon unavailable;
+  installed native tools used without installing host packages.
+- Existing AFS.HoverMotion.MomentumAndDirection automation succeeds1/1,0warnings.
+- Twenty recorded report groups pass their checks, including fresh FPS/TPS
+  dust cleanup. This is not twenty independent play sessions or an FPS result.
+- Eight owner GLB/Blender sources and the owner project descriptor hash unchanged.
+  Owner graphics settings restored byte-identically; automated editors closed.
+- Native files, supporting scripts, reports and images have a162-file verified
+  snapshot on Ddrive. Two unused failed/older effect candidates have zero saved
+  referencers and were archived outside active Content. Source ZIP is separate.
+- ClickUp updates remain LOCAL_DRY_RUN_NOT_POSTED under the workspace
+  outputs/AFS_ClickUp/NIGHT_QUALITY_20261024_PENDING.json. Do not infer remote sync.

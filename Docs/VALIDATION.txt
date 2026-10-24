@@ -1,4 +1,14 @@
-AFS LOCAL TEST SANDBOX - 2026-10-22
+AFS LOCAL TEST SANDBOX - CURRENT NIGHT REVIEW 2026-10-24
+
+The owner released the GPU; the CPU-only notes below are historical. See
+Docs/NIGHT_QUALITY_20261024.txt and the workspace NightQuality20261024/RESULTS.json
+for current rendered movement, cameras, effects, five Lakeside creatures,
+native horde, three rides, body springs/chain and jump evidence. Physical input,
+owner acceptance, packaging and production performance remain unverified.
+Editor-exit access violation reproduces in an isolated engine-only project;
+no AFS gameplay code/assets are required. VSM legacy-mesh warning remains open.
+
+HISTORICAL VALIDATION RECORD
 
 CPU CONTINUATION - 2026-10-24 (latest changes; no new GPU acceptance)
 Owner explicitly requested continued work without GPU tests. Build23 passed8.53s.
