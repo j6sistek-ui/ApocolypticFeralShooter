@@ -51,6 +51,7 @@ class HOVERFLIGHT_API AHoverMeleeWeapon : public AZE_MeleeWeapon
     float SwingEnd = 0;
     FVector HandStart;
     bool bGripConfigured = false;
+    void ConfigureGrip(AHoverPilot *Pilot);
 };
 
 // Added only in Cyber City; original vendor inventory, purchases and UI remain authoritative.

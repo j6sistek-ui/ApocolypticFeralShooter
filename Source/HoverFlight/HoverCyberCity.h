@@ -7,7 +7,28 @@
 #include "Interaction/ZE_PickupBase.h"
 #include "UI/ZE_WaveHUDWidget.h"
 #include "HoverCyberVariants.h"
+#include "NavigationSystem.h"
 #include "HoverCyberCity.generated.h"
+
+// Lakeside's large creatures need full-height routes around its raised porches.
+// A world-specific navigation class keeps other test maps' agent profiles intact.
+UCLASS()
+class HOVERFLIGHT_API UHoverLakesideNavigationSystem : public UNavigationSystemV1
+{
+    GENERATED_BODY()
+  public:
+    virtual void PostInitProperties() override;
+};
+
+USTRUCT(BlueprintType)
+struct FHoverZombieTuning
+{
+    GENERATED_BODY()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) float Health = 1.f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) float Speed = 1.f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) float Count = 1.f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite) float SpawnInterval = 1.f;
+};
 
 // Cyber City uses the vendor wave state machine and assets, with the AFS player.
 UCLASS()
@@ -18,6 +39,9 @@ class HOVERFLIGHT_API AHoverCyberCityGameMode : public AZE_ZombieWaveGameMode
     virtual void InitGame(const FString &MapName, const FString &Options, FString &ErrorMessage) override;
     virtual void Tick(float DeltaSeconds) override;
     virtual void StartWave() override;
+    UPROPERTY(BlueprintReadOnly) FHoverZombieTuning Tuning;
+    UFUNCTION(BlueprintCallable) void ApplyTuning(FHoverZombieTuning Value);
+    void RecordSpawn(const FVector &Position);
     UFUNCTION(BlueprintPure) int32 GetActiveSpawnCount() const
     {
         return ActiveSpawnCount;
@@ -48,6 +72,12 @@ class HOVERFLIGHT_API AHoverCyberCityGameMode : public AZE_ZombieWaveGameMode
     UPROPERTY() TObjectPtr<class UUserWidget> WaveDisplay;
     UPROPERTY() TObjectPtr<UHoverCyberEncounterSettings> Encounters;
     bool bLakeside = false;
+    TMap<TWeakObjectPtr<AActor>, float> SpawnLastUsed;
+    FVector LastSpawnPosition = FVector::ZeroVector;
+    TMap<TWeakObjectPtr<AActor>, bool> ReachableSpawns;
+    FVector LastNavigationTarget = FVector::ZeroVector;
+    float NextReachabilityCheck = 0;
+    bool CanReachPlayer(AActor *Spawn, APawn *Player);
 };
 
 UCLASS()

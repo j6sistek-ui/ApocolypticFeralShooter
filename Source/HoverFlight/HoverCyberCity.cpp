@@ -34,6 +34,22 @@
 #include "Perception/AISenseConfig_Hearing.h"
 #include "Perception/AISenseConfig_Sight.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Navigation/CrowdFollowingComponent.h"
+#include "NavMesh/RecastNavMesh.h"
+
+void UHoverLakesideNavigationSystem::PostInitProperties()
+{
+    Super::PostInitProperties();
+    if (SupportedAgents.IsEmpty())
+    {
+        FNavDataConfig Agent;
+        Agent.Name = TEXT("Default");
+        Agent.SetNavDataClass(ARecastNavMesh::StaticClass());
+        SupportedAgents.Add(Agent);
+    }
+    for (FNavDataConfig &Agent : SupportedAgents)
+        Agent.AgentHeight = 210.f;
+}
 
 void AHoverAmmoPickup::BeginPlay()
 {
@@ -107,6 +123,62 @@ void AHoverCyberCityGameMode::ConfigureWave(int32 Wave, int32 &Count, TArray<UZE
             if (Definition)
                 Types.Add(Definition);
     }
+    Count = FMath::Clamp(FMath::RoundToInt(Count * Tuning.Count), 1, 200);
+}
+
+void AHoverCyberCityGameMode::ApplyTuning(FHoverZombieTuning Value)
+{
+    Tuning.Health = FMath::Clamp(Value.Health, .25f, 3.f);
+    Tuning.Speed = FMath::Clamp(Value.Speed, .25f, 2.f);
+    Tuning.Count = FMath::Clamp(Value.Count, .25f, 3.f);
+    Tuning.SpawnInterval = FMath::Clamp(Value.SpawnInterval, .25f, 3.f);
+}
+
+void AHoverCyberCityGameMode::RecordSpawn(const FVector &Position)
+{
+    LastSpawnPosition = Position;
+    AActor *Closest = nullptr;
+    float Distance = 500.f;
+    for (TActorIterator<AZE_ZombieSpawnPoint> It(GetWorld()); It; ++It)
+    {
+        const float D = FVector::Dist2D(Position, It->GetActorLocation());
+        if (D < Distance)
+        {
+            Closest = *It;
+            Distance = D;
+        }
+    }
+    if (Closest)
+        SpawnLastUsed.Add(Closest, GetWorld()->GetTimeSeconds());
+}
+
+bool AHoverCyberCityGameMode::CanReachPlayer(AActor *Spawn, APawn *Player)
+{
+    const FVector Target = Player->GetNavAgentLocation();
+    const float Now = GetWorld()->GetTimeSeconds();
+    if (Now >= NextReachabilityCheck || FVector::DistSquared(Target, LastNavigationTarget) > FMath::Square(200.f))
+    {
+        ReachableSpawns.Reset();
+        LastNavigationTarget = Target;
+        NextReachabilityCheck = Now + 1.f;
+    }
+    if (const bool *Cached = ReachableSpawns.Find(Spawn))
+        return *Cached;
+    bool Reachable = false;
+    if (auto *Navigation = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()))
+        if (auto *Data = Navigation->GetDefaultNavDataInstance(FNavigationSystem::DontCreate))
+        {
+            FNavLocation From, To;
+            if (Navigation->ProjectPointToNavigation(Spawn->GetActorLocation(), From, FVector(120, 120, 200)) &&
+                Navigation->ProjectPointToNavigation(Target, To, FVector(100, 100, 120)))
+            {
+                FPathFindingQuery Query(Player, *Data, From.Location, To.Location);
+                Query.SetAllowPartialPaths(false);
+                Reachable = Navigation->TestPathSync(Query);
+            }
+        }
+    ReachableSpawns.Add(Spawn, Reachable);
+    return Reachable;
 }
 
 UZE_ZombieDataAsset *AHoverCyberCityGameMode::SelectZombieData(int32 Wave, int32 SpawnIndex,
@@ -127,8 +199,10 @@ UZE_ZombieDataAsset *AHoverCyberCityGameMode::SelectZombieData(int32 Wave, int32
 
 float AHoverCyberCityGameMode::GetEffectiveSpawnRate() const
 {
-    return Encounters && Encounters->IsSwarmWave(GetCurrentWave()) ? FMath::Max(.1f, Encounters->SwarmSpawnInterval)
-                                                                   : Super::GetEffectiveSpawnRate();
+    const float Interval = Encounters && Encounters->IsSwarmWave(GetCurrentWave())
+                               ? FMath::Max(.1f, Encounters->SwarmSpawnInterval)
+                               : Super::GetEffectiveSpawnRate();
+    return Interval * Tuning.SpawnInterval;
 }
 
 void AHoverCyberCityGameMode::StartWave()
@@ -163,6 +237,22 @@ AHoverCyberZombieAI::AHoverCyberZombieAI()
 
 void AHoverCyberZombieAI::OnPossess(APawn *InPawn)
 {
+    // Use UE's navmesh-aware crowd steering, retaining the purchased behavior tree.
+    // Install before the tree starts so requests bind to the correct follower.
+    if (!Cast<UCrowdFollowingComponent>(GetPathFollowingComponent()))
+    {
+        auto *Old = GetPathFollowingComponent();
+        auto *Crowd = NewObject<UCrowdFollowingComponent>(this, TEXT("AFSCrowdFollowing"));
+        Crowd->RegisterComponent();
+        SetPathFollowingComponent(Crowd);
+        if (Old)
+            Old->DestroyComponent();
+        Crowd->SetCrowdSeparation(true);
+        Crowd->SetCrowdSeparationWeight(3.f);
+        Crowd->SetCrowdCollisionQueryRange(500.f);
+        Crowd->SetCrowdAvoidanceQuality(ECrowdAvoidanceQuality::High);
+        Crowd->SetCrowdAnticipateTurns(true);
+    }
     Super::OnPossess(InPawn);
     // Bind on the live instance: a copied Blueprint can retain the parent's
     // serialized unfiltered delegate despite a native constructor replacement.
@@ -190,11 +280,18 @@ void AHoverCyberCityGameMode::Tick(float DT)
         FVector Eye;
         FRotator View;
         PC->GetPlayerViewPoint(Eye, View);
+        AZE_ZombieSpawnPoint *Chosen = nullptr;
+        float BestScore = -1.f;
         for (TActorIterator<AZE_ZombieSpawnPoint> It(GetWorld()); It; ++It)
         {
             const FVector Position = It->GetActorLocation();
             const float Distance = FVector::Dist2D(Position, Player->GetActorLocation());
             bool Safe = Distance >= 1400.f && Distance <= 10000.f;
+            // Do not spend a wave slot on a disconnected porch/island. Refresh
+            // paths at most once a second; airborne/vehicle targeting is unchanged.
+            if (const auto *Pilot = Cast<AHoverPilot>(Player);
+                Safe && Pilot && Pilot->IsOnFoot() && Pilot->GetCharacterMovement()->IsMovingOnGround())
+                Safe = CanReachPlayer(*It, Player);
             FCollisionQueryParams Query;
             Query.AddIgnoredActor(Player);
             Query.AddIgnoredActor(*It);
@@ -209,9 +306,22 @@ void AHoverCyberCityGameMode::Tick(float DT)
                         Safe = false;
                         break;
                     }
-            It->bIsEnabled = Safe;
+            It->bIsEnabled = false;
             ActiveSpawnCount += Safe ? 1 : 0;
+            if (Safe)
+            {
+                const float *Last = SpawnLastUsed.Find(*It);
+                const float Age = Last ? FMath::Min(60.f, GetWorld()->GetTimeSeconds() - *Last) : 60.f;
+                const float Score = Age + FMath::Min(20.f, FVector::Dist2D(Position, LastSpawnPosition) / 300.f);
+                if (Score > BestScore)
+                {
+                    Chosen = *It;
+                    BestScore = Score;
+                }
+            }
         }
+        if (Chosen)
+            Chosen->bIsEnabled = true;
     }
     // The vendor otherwise falls back to PlayerStart when all points are disabled.
     // Wait for a fair entrance instead of spawning beside Vexa or inside a vehicle.
@@ -257,6 +367,20 @@ void AHoverCyberZombieAI::Tick(float DT)
         if (const auto *Definition = Cast<UHoverCyberZombieDefinition>(Zombie->ZombieData))
             Zombie->GetCharacterMovement()->MaxWalkSpeed =
                 FMath::Min(Zombie->GetCharacterMovement()->MaxWalkSpeed, Definition->MaximumRunSpeed);
+        if (const auto *Mode = GetWorld()->GetAuthGameMode<AHoverCyberCityGameMode>())
+        {
+            Zombie->GetCharacterMovement()->MaxWalkSpeed *= Mode->Tuning.Speed;
+            if (auto *Health = Zombie->SurvivalComponent; Health && Health->GetHealth() > 0)
+            {
+                const float Maximum = Stats.MaxHealth * HealthScale * Mode->Tuning.Health;
+                if (!FMath::IsNearlyEqual(Health->GetMaxHealth(), Maximum))
+                {
+                    const float Fraction = Health->GetHealth() / FMath::Max(1.f, Health->GetMaxHealth());
+                    Health->SetMaxHealth(Maximum);
+                    Health->SetHealth(Maximum * Fraction);
+                }
+            }
+        }
         Board->SetValueAsFloat(Key_AttackCooldown, Stats.AttackCooldown);
         if (SightConfig->SightRadius != Stats.SightRadius || SightConfig->LoseSightRadius != Stats.LoseSightRadius ||
             SightConfig->PeripheralVisionAngleDegrees != Stats.ViewAngle)
@@ -312,6 +436,10 @@ void AHoverCyberZombie::BeginPlay()
         const FBoxSphereBounds Bounds = Body->GetBounds();
         const float Scale = Definition->Height / FMath::Max(1.f, Bounds.BoxExtent.Z * 2.f);
         GetCapsuleComponent()->SetCapsuleSize(Definition->CapsuleRadius, Definition->Height * .5f);
+        // Spawned variants resize after the movement component registered.
+        // Keep path queries and crowd avoidance consistent with the live capsule.
+        GetCharacterMovement()->SetUpdateNavAgentWithOwnersCollisions(true);
+        GetCharacterMovement()->UpdateNavAgent(*GetCapsuleComponent());
         GetMesh()->SetSkeletalMesh(Body);
         GetMesh()->EmptyOverrideMaterials();
         GetMesh()->SetRelativeScale3D(FVector(Scale));
@@ -342,10 +470,20 @@ void AHoverCyberZombie::BeginPlay()
         Shirt->SetVisibility(GetUniqueID() % 2 == 0);
     }
     GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
+    GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
     GetMesh()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
     GetMesh()->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+    // The capsule handles pawn separation; animated limbs must not shove the rider.
+    GetMesh()->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+    GetMesh()->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+    // Lakeside's dock boards have 45-degree collision bevels. Recast accepts
+    // their short steps, but the default 44.76-degree movement slope blocks them.
+    if (Cast<UHoverLakesideNavigationSystem>(GetWorld()->GetNavigationSystem()))
+        GetCharacterMovement()->SetWalkableFloorAngle(46.f);
     GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
     Blood = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/Rocket/NS1_Blood/NS_NS1_BloodShot.NS_NS1_BloodShot"));
+    if (auto *Mode = GetWorld()->GetAuthGameMode<AHoverCyberCityGameMode>())
+        Mode->RecordSpawn(GetActorLocation());
 }
 
 EHoverZombieRole AHoverCyberZombie::GetRole() const

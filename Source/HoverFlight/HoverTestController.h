@@ -66,6 +66,9 @@ class HOVERFLIGHT_API AHoverTestController : public APlayerController
     UPROPERTY() TObjectPtr<AActor> DressedDriver;
     float ExitHold = 0;
     bool bExitConsumed = true, bSpawnAttempted = false;
+    TWeakObjectPtr<AHoverPilot> MeleeInputPilot;
+    float MeleeHoldTime = 0;
+    bool bMeleeHoldConsumed = false;
     void DressDriver();
     void ExitTruck();
 };

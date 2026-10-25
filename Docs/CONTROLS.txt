@@ -2,6 +2,9 @@ AFS FREE FLIGHT TEST
 
 TEST SETTINGS (ALL RIDES AND WALKING)
 D-pad Up / F6: open graphics/level selection and pause the game.
+L1 / R1 / Tab: switch to Zombie Settings in Cyber City or Lakeside.
+Zombie health and speed apply to living enemies; wave size changes next round.
+Spawn interval: larger means slower spawning. These adjustments last for this session.
 D-pad / arrow up-down: choose row; left-right: change the pending option.
 A / Enter: apply, save and resume. B / F6: cancel and resume.
 Test level: Post-apocalypse, Cyber City or Chinese Lakeside Town. Applying a different level starts a fresh
@@ -22,23 +25,28 @@ VEXA / GLIDER
 On foot: left stick / WASD moves relative to the camera; Vexa turns into travel.
 Hold L3 to run: walk 5 m/s, run 9 m/s. While aiming she strafes.
 Glider: R2 / E thrust; LS / WASD forward-back climbs/dives, left-right steers.
-Right stick / mouse: aim/look only, independent of glider heading and climb.
+Right stick / mouse: aim/look offset, independent of glider heading and climb.
+The camera follows glider turns while retaining that look offset.
 L1 / Q held while steering increases bank for a tighter turn. Release levels it.
 Hold X (0.65 seconds): mount nearby glider/bike/truck, or safely dismount glider.
 Glider exit needs clear walkable ground within 1.5 m of the pads and speed below 3 m/s.
 The unoccupied glider has gravity and collision; wait for it to settle before mounting.
 A / Space: jump on foot; mounted ollie pops up then settles, with a small pulse.
 On glider, L3 held / Shift: boost; the meter drains and recharges after a delay.
-On foot, tap B / Shift to crouch or stand; hold for prone/crawl.
-From a run it starts a short decelerating slide. A stands up from prone first.
+On foot, tap B / Shift while moving to slide; hold for a forward dive into prone.
+While stationary, tap crouches/stands and hold goes prone. A stands up from prone first.
 Standing checks headroom. Capsule floor contact stays fixed.
 F7 / D-pad Right while grounded toggles CLS poses and the original locomotion.
 Both use the same Parkour movement, wall jump, glider, guns and vehicles.
 Release glider thrust to coast to a stop. B / Ctrl: brief coast assist.
 L2 held / right mouse: gun sights in FPS, external screen zoom in third person.
 On foot R2 / left mouse fires. On glider R1 / left mouse fires; R2 is thrust.
-On foot R3 / V swings the bloodied katana in all three levels; A remains jump.
-The rifle hides during the slash. Melee is unavailable while riding or in inventory.
+On foot tap R3 / V quickly slashes with the katana; A remains jump.
+Hold R3 for0.45seconds to equip the katana. R2 / left mouse swings while equipped.
+Hold R3 again to return to the gun. Switching while holding R2 requires releasing
+the trigger before using the new weapon. The katana uses no ammo; reload is inactive.
+The rifle hides while swinging or while the katana is equipped. Melee is unavailable
+while riding, knocked down, defeated or in inventory. Mounting returns to gun selection.
 Unscoped third-person fire raises the visible gun. The Ballista has a centred reflex sight.
 PostApo: three body hits or one headshot kills a zombie; population replenishes to20.
 Cyber City: Zombie Engine waves grow in health/count/speed. Four standard appearances,
@@ -88,7 +96,7 @@ Dedicated human slide and prone-entry/exit clips remain an asset gap. The local
 slide is now a grounded leg/torso variant of the owned crouch pose; crawl reuses
 the owned belly-crawl clip. Controller cursor feel
 and final visual motion need owner review.
-The earlier B-dive request still needs its intended movement mode clarified.
+The dive uses the existing prone pose in flight; dedicated dive transition animation remains an asset gap.
 The FPS view uses separate weapon presentation; the full Vexa body/aim pose is shown in F5 review view.
 
 PRESERVED COMPARISONS

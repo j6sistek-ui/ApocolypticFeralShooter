@@ -126,7 +126,7 @@ void UHoverLocomotionBridge::TickComponent(float DT, ELevelTick Type, FActorComp
     }
     if (DriverAnim && Posture && NewPosture == 2)
         DriverAnim->Montage_SetPlayRate(Posture,
-                                        Pilot->GetVelocity().Size2D() > 5.f
+                                        !Pilot->IsDiving() && Pilot->GetVelocity().Size2D() > 5.f
                                             ? FMath::Clamp(float(Pilot->GetVelocity().Size2D()) / 80.f, .3f, 1.5f)
                                             : 0.f);
     if (auto *Lock = FindFProperty<FBoolProperty>(Pilot->GetClass(), TEXT("WallJumpLock")))

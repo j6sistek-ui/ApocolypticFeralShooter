@@ -1,0 +1,92 @@
+AFS OWNER BUG PASS - OCTOBER 25, 2026
+
+Scope: the owner's seven reports reopen acceptance of the previous night pass.
+This pass uses Unreal NullRHI and CPU Blender pose replay. No rendered Unreal,
+physical-controller, packaged-performance or owner visual acceptance is claimed.
+
+1. LAKESIDE CREATURE DEFORMATION
+The purchased motions use an 89-bone skeleton; the five creatures have 61 bones,
+different spine/neck lengths and no finger metacarpals. Compatibility flags alone
+were insufficient. Each creature now has native UE IK chain retargeters and
+12 copied movement/attack/hit/death assets in its Retargeted folder. The native
+Zombie Engine graph/AI remains in use. Five data definitions select these copies.
+Original meshes, textures, UVs and vendor animation assets are preserved.
+CPU replay inspected walking, attacks and deaths; final in-game appearance remains
+subject to rendered review. The native clips include deliberately hunched poses.
+
+2. ACCESSIBLE ZOMBIE ADJUSTMENTS
+D-pad Up / F6 opens Test Settings. L1 / R1 / Tab switches to Zombie Settings in
+Cyber City and Lakeside. Adjust with D-pad, A applies, B cancels. Health and speed
+affect live enemies; wave size affects the next round; a larger spawn interval
+means slower spawning. Session-only values reset on changing levels.
+The full purchased editor interface is Window > ZESP Control Panel during Play;
+Shift+F1 releases the mouse. The new game menu does not replace that interface.
+CPU controller-event test applied 1.25x health and verified Cancel discards edits.
+
+3. CLOSE-RANGE GUN ALIGNMENT
+Camera hits behind the muzzle could rotate the rifle backward. Convergence now
+stays ahead of the barrel, and a breech-to-muzzle obstruction trace catches close
+enemies/walls before the normal bullet trace. Animated enemy limbs no longer
+collide with the player capsule; capsules retain character separation. Enemies
+do not push the camera in. World camera collision remains enabled.
+CPU FPS/TPS alignment dots were above .996; a close shot reduced health50->15.
+
+4. R3 MELEE
+The physical-controller failure is not reproduced. Injected R3 follows the real
+controller handler, displays the katana action and reduced enemy health100->50.
+Added HOVER_MELEE accepted/rejected context and brief strike feedback for diagnosis.
+Owner's additional request: tap R3 quick-strikes on release; holding0.45s equips the
+katana. R2 swings while equipped; hold R3 again returns the rifle. Switching requires
+releasing a held trigger before using the new weapon, preventing accidental shots.
+CPU tests in both combat modes confirm tap1000->950, equip does no damage, R2 slash950->900 with no rifle
+shots, FPS/TPS blade visibility state, return-to-gun fire and menu cancellation.
+Melee remains on foot; riding, inventory and knockdown intentionally block it.
+Do not label the reported physical-input failure fixed from injected tests alone.
+
+5. HORDE CLUMPING / NAVIGATION
+Spawn selection rotates among safe entrances instead of repeatedly choosing the
+same area. UE crowd following retains the purchased behavior tree and adds local
+separation. A100-second Lakeside run distributed15spawns among6entrances, but exposed
+two real route blockages. A lone enemy also stuck; spacing was not the sole cause.
+The original navigation used144cm clearance for180-205cm creatures. Lakeside now has
+a dedicated210cm navigation-system profile; other levels retain their profiles.
+World-partition navigation rebuild succeeded. Capsule resizing now updates navigation
+agent size. While the player is grounded on foot, a cached complete-path check excludes
+disconnected spawn entrances. Existing airborne/vehicle targeting remains.
+Dock collision bevels are45degrees, above the default44.76degree walking limit;
+Lakeside enemies now allow46degrees. Other maps retain their movement slope.
+Fresh100second CPU run:15spawns across5reachable entrances;15/15 reach within6m of
+the stationary player, all5creatures represented,100HP/invincible. The disconnected
+southern entrance is excluded. This resolves observed route stalls; natural crowds
+still converge on a stationary player and narrow docks remain physical bottlenecks.
+
+6. GLIDER CONTROL AND DIRECTIONAL JETS
+Mappings retained: R2thrust, LSclimb/dive/steer, RSlook/aim, L1strongerbank,
+R1fire, Ahop, L3boost. The camera now follows board turns while preserving RS offset.
+Added8compact nozzles: paired lift/down, left/right, paired forward-facing braking.
+Rear exhaust follows forward thrust. CPU reads confirm valid Niagara parameters,
+correct directional demand and zero idle demand. NullRHI cannot validate particles.
+Flight sampled21.6m/s forward,18climb/24descent,18/35degree bank and independent look.
+
+7. TAP B SLIDE / HOLD B DIVE
+Moving B tap slides at walking or running speed; holding .38seconds launches a
+forward dive and lands prone. Stationary tap crouches/stands; hold goes prone.
+Reset, mount and knockdown clear dive state. Existing camera posture compensation
+and accepted ground body physics remain. The dive holds the owned prone pose;
+a dedicated human dive transition remains an animation asset gap.
+CPU test:500cm/s walking slide,900cm/s dive,34cm prone capsule,120cm/s landed crawl.
+
+VALIDATION / PRESERVATION
+Latest native build: Build11 succeeded10.63s. Eleven changedC++/header files pass
+clang-format; git diff whitespace check and20projectPythonAST checks pass. Native
+AFS.HoverMotion automation passes1/1 with0warnings. Fresh combined regression also
+passes slide/dive, tapR3damage, close FPS/TPS gun alignment, tuningApply/Cancel and
+creature death lifecycle. Katana equip tests pass both with and without ZE combat.
+Reproduction scripts/reports are in the local Codex workspace work directory.
+Hash-backed originals and native definitions: D:/AFS_Comparisons/OwnerBugs_20261025.
+Map backup contains1686files/181536128bytes, verified before any navigation save.
+Restore selected files only; never overwrite later owner work wholesale.
+No GitHub publication or SpaceSurvival changes. Licensed assets remain local.
+Carried-open items: physical controller/visual review, dedicated human transitions,
+packaged/performance testing, legacy VSM warning and previously isolated engine
+shutdown crash. Older engine-header deprecation warnings are not suppressed.

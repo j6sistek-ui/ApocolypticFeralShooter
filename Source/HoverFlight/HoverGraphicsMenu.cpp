@@ -42,22 +42,23 @@ void UHoverGraphicsMenu::NativeOnInitialized()
         Rows->AddChildToVerticalBox(Label)->SetPadding(FMargin(0, 8));
         return Label;
     };
-    AddText(TEXT("TEST SETTINGS"), 30, FLinearColor::White);
-    AddText(TEXT("Game paused. Adjust graphics, health or the test environment."), 16, FLinearColor(.7f, .76f, .84f));
+    PageText = AddText(TEXT("TEST SETTINGS"), 30, FLinearColor::White);
+    HelpText = AddText(TEXT(""), 16, FLinearColor(.7f, .76f, .84f));
     ModeText = AddText(TEXT(""), 23, FLinearColor::White);
     FramesText = AddText(TEXT(""), 23, FLinearColor::White);
     LevelText = AddText(TEXT(""), 23, FLinearColor::White);
     HealthText = AddText(TEXT(""), 23, FLinearColor::White);
-    AddText(TEXT("Invincible off: take damage. At zero health, reset at the start after 3 seconds."), 16,
-            FLinearColor(.7f, .76f, .84f));
+    DetailText = AddText(TEXT("Invincible off: take damage. At zero health, reset at the start after 3 seconds."), 16,
+                         FLinearColor(.7f, .76f, .84f));
     AddText(TEXT("Changing level starts a fresh test with Vexa and all three vehicles. Lakeside uses its own five "
                  "creatures."),
             16, FLinearColor(.7f, .76f, .84f));
-    AddText(TEXT("DLAA keeps full resolution. DLSS Quality is a good starting point for more speed."), 16,
-            FLinearColor(.7f, .76f, .84f));
+    ImageHelpText = AddText(TEXT("DLAA keeps full resolution. DLSS Quality is a good starting point for more speed."),
+                            16, FLinearColor(.7f, .76f, .84f));
     NoteText = AddText(TEXT(""), 16, FLinearColor(.9f, .78f, .5f));
-    AddText(TEXT("D-pad / arrows: choose and adjust\nA / Enter: apply and resume    B / F6: cancel"), 17,
-            FLinearColor(.7f, .85f, 1));
+    AddText(
+        TEXT("L1 / R1 / Tab: settings page    D-pad / arrows: adjust\nA / Enter: apply and resume    B / F6: cancel"),
+        17, FLinearColor(.7f, .85f, 1));
     SetVisibility(ESlateVisibility::HitTestInvisible);
 }
 
@@ -70,7 +71,24 @@ void UHoverGraphicsMenu::Open(UHoverGraphicsSettings *InSettings)
                    : Map.Contains(TEXT("Cyber"))                                        ? 1
                                                                                         : 0;
     SelectedRow = 0;
+    bZombiePage = false;
+    if (const auto *Mode = GetWorld()->GetAuthGameMode<AHoverCyberCityGameMode>())
+        PendingZombies = Mode->Tuning;
     Refresh();
+}
+
+void UHoverGraphicsMenu::ChangePage()
+{
+    if (GetWorld()->GetAuthGameMode<AHoverCyberCityGameMode>())
+        bZombiePage = !bZombiePage;
+    SelectedRow = 0;
+    Refresh();
+}
+
+void UHoverGraphicsMenu::ApplyZombieSettings()
+{
+    if (auto *Mode = GetWorld()->GetAuthGameMode<AHoverCyberCityGameMode>())
+        Mode->ApplyTuning(PendingZombies);
 }
 
 void UHoverGraphicsMenu::Navigate(int32 Direction)
@@ -81,7 +99,14 @@ void UHoverGraphicsMenu::Navigate(int32 Direction)
 
 void UHoverGraphicsMenu::Adjust(int32 Direction)
 {
-    if (SelectedRow == 0)
+    if (bZombiePage)
+    {
+        float *Values[] = {&PendingZombies.Health, &PendingZombies.Speed, &PendingZombies.Count,
+                           &PendingZombies.SpawnInterval};
+        *Values[SelectedRow] =
+            FMath::Clamp(*Values[SelectedRow] + Direction * .25f, .25f, SelectedRow == 1 ? 2.f : 3.f);
+    }
+    else if (SelectedRow == 0)
     {
         const auto Options = Settings->GetUpscalingOptions();
         const int32 Index = FMath::Max(0, Options.Find(Pending.Upscaling));
@@ -102,6 +127,35 @@ void UHoverGraphicsMenu::Adjust(int32 Direction)
 
 void UHoverGraphicsMenu::Refresh()
 {
+    PageText->SetText(FText::FromString(bZombiePage ? TEXT("ZOMBIE SETTINGS") : TEXT("TEST SETTINGS")));
+    HelpText->SetText(FText::FromString(GetWorld()->GetAuthGameMode<AHoverCyberCityGameMode>()
+                                            ? TEXT("L1 / R1 switches between test and zombie settings.")
+                                            : TEXT("Zombie wave settings are available in Cyber City and Lakeside.")));
+    if (bZombiePage)
+    {
+        UTextBlock *Labels[] = {ModeText, FramesText, LevelText, HealthText};
+        const TCHAR *Names[] = {TEXT("Zombie health"), TEXT("Zombie speed"), TEXT("Wave size"), TEXT("Spawn interval")};
+        const float Values[] = {PendingZombies.Health, PendingZombies.Speed, PendingZombies.Count,
+                                PendingZombies.SpawnInterval};
+        for (int32 I = 0; I < 4; ++I)
+        {
+            Labels[I]->SetText(FText::FromString(FString::Printf(
+                TEXT("%s %s:  < %.2fx >"), SelectedRow == I ? TEXT(">") : TEXT("  "), Names[I], Values[I])));
+            Labels[I]->SetColorAndOpacity(
+                FSlateColor(SelectedRow == I ? FLinearColor(.3f, .8f, 1) : FLinearColor::White));
+        }
+        DetailText->SetText(FText::FromString(TEXT("Health/speed apply to living enemies. Wave size changes next "
+                                                   "round. Higher spawn interval means slower spawning.")));
+        ImageHelpText->SetText(FText::FromString(TEXT(
+            "Full purchased editor tools: Window > ZESP Control Panel during Play (Shift+F1 releases the mouse).")));
+        NoteText->SetText(FText::FromString(
+            TEXT("Session-only adjustments. Apply resumes play; Cancel discards changes. New levels start at 1x.")));
+        return;
+    }
+    DetailText->SetText(
+        FText::FromString(TEXT("Invincible off: take damage. At zero health, reset at the start after 3 seconds.")));
+    ImageHelpText->SetText(
+        FText::FromString(TEXT("DLAA keeps full resolution. DLSS Quality is a good starting point for more speed.")));
     ModeText->SetText(
         FText::FromString(FString::Printf(TEXT("%s Image:  < %s >"), SelectedRow == 0 ? TEXT(">") : TEXT("  "),
                                           *UHoverGraphicsSettings::UpscalingName(Pending.Upscaling))));

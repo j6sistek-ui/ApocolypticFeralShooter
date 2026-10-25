@@ -8,13 +8,17 @@ Original UVs and embedded textures retained; 4K source textures, runtime cap2K.
 Runtime asset: /Game/HoverPrototype/Weapons/Katana/SM_BloodiedKatana
 Definition: /Game/HoverPrototype/ZombieEngine/DA_AFS_Melee
 
-R3/controller or V/keyboard swings while on foot. A remains jump. Both maps have
-the common weapon; Cyber City retains native inventory/reload/economy integration.
+Updated2026-10-25: tap R3/controller or V/keyboard swings while on foot. A remains jump.
+Hold R3 for0.45seconds toggles katana/gun; R2 or left mouse swings when equipped.
+All three maps have the common weapon; Cyber City and Lakeside retain native
+inventory/reload/economy integration. Switching blocks the currently held trigger
+until release. Reload does nothing with the katana selected. Menus cancel pending
+R3 holds; mounting returns to the gun. Selection persists after a quick slash.
 The native sphere trace uses160cm reach,20cm radius and50body damage. Existing
 head-hit and city InstaKill rules still apply. No ammunition is consumed.
-The strike occurs0.30s after input, with a0.8s action and1.1 attacks/s limit.
+The strike occurs0.30s after swing start, with a0.8s action and1.1 attacks/s limit.
 Inventory and successful ride entry cancel pending contact. The rifle is hidden
-while swinging and returns afterward; blade components are hidden outside swings.
+while swinging or equipped. The blade remains visible while equipped in FPS/TPS.
 
 Animation source: /Game/ZESP/ZE/Animations/Knife/AS_Attack_Knife
 Local root-locked copy: /Game/HoverPrototype/Animations/QA_Katana

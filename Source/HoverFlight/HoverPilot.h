@@ -91,6 +91,11 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     UPROPERTY(BlueprintReadOnly) TObjectPtr<class UHoverCombatBridge> Combat;
     UPROPERTY(BlueprintReadOnly) TObjectPtr<class AHoverMeleeWeapon> MeleeWeapon;
     UFUNCTION(BlueprintCallable) void Melee();
+    UFUNCTION(BlueprintCallable) void ToggleMeleeWeapon();
+    UFUNCTION(BlueprintPure) bool IsMeleeEquipped() const
+    {
+        return bMeleeEquipped;
+    }
     UFUNCTION(BlueprintCallable) void SetInvincible(bool Enabled)
     {
         bInvincible = Enabled;
@@ -139,7 +144,7 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     }
     bool UsesAimFacing() const
     {
-        return bAiming || GunRaisedTime > 0 || !bReview;
+        return bMeleeEquipped || bAiming || GunRaisedTime > 0 || !bReview;
     }
     bool bInvincible = true;
     bool bDefeated = false;
@@ -171,6 +176,10 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     {
         return GroundSlideTime > 0;
     }
+    UFUNCTION(BlueprintPure) bool IsDiving() const
+    {
+        return bDiving;
+    }
     UFUNCTION(BlueprintPure) FVector GetLocomotionState() const
     {
         return FVector(GroundDirection, GetVelocity().Size2D(), GroundYawRate);
@@ -198,6 +207,7 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     UPROPERTY() TObjectPtr<UPoseableMeshComponent> Board;
     UPROPERTY() TObjectPtr<UBoxComponent> BoardBody;
     UPROPERTY() TArray<TObjectPtr<UNiagaraComponent>> Boosters;
+    UPROPERTY() TArray<TObjectPtr<UNiagaraComponent>> DirectionalBoosters;
     UPROPERTY() TObjectPtr<UAnimSequence> CurrentAnimation;
     TMap<FName, FTransform> BoardRest;
     FVector StartLocation, ParkedLocation;
@@ -211,6 +221,8 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     float BodyYaw = 0;
     float HoldTime = 0, TransitionTime = 0, HopTime = 0, SlideTime = 0;
     float GroundSlideTime = 0, GroundSlideSpeed = 0;
+    FVector PostureTravel = FVector::ForwardVector;
+    bool bMovingAtPosturePress = false, bDiving = false;
     bool bGroundCrouchHeld = false, bCrouchedAtPress = false, bProne = false;
     float GroundCrouchHold = 0;
     float TargetAltitude = 0, FireCooldown = 0, AimExitTime = 0, StatusTime = 0;
@@ -228,6 +240,7 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     TWeakObjectPtr<AController> KnockdownController;
     bool bSteppingOn = false;
     bool bMounted = false, bAiming = false, bReview = false, bBoost = false;
+    bool bMeleeEquipped = false, bSuppressFireUntilRelease = false;
     bool bHoldConsumed = false, bWasJump = false, bWasView = false, bWasSlide = false;
     bool bWasReset = false, bHeightHolding = false;
     FString StatusMessage;

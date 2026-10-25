@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "HoverGraphicsSettings.h"
+#include "HoverCyberCity.h"
 #include "HoverGraphicsMenu.generated.h"
 class UTextBlock;
 
@@ -14,6 +15,8 @@ class HOVERFLIGHT_API UHoverGraphicsMenu : public UUserWidget
     void Open(UHoverGraphicsSettings *InSettings);
     void Navigate(int32 Direction);
     void Adjust(int32 Direction);
+    void ChangePage();
+    void ApplyZombieSettings();
     FHoverGraphicsOptions GetSelection() const
     {
         return Pending;
@@ -37,6 +40,12 @@ class HOVERFLIGHT_API UHoverGraphicsMenu : public UUserWidget
     UPROPERTY() TObjectPtr<UTextBlock> NoteText;
     UPROPERTY() TObjectPtr<UTextBlock> LevelText;
     UPROPERTY() TObjectPtr<UTextBlock> HealthText;
+    UPROPERTY() TObjectPtr<UTextBlock> PageText;
+    UPROPERTY() TObjectPtr<UTextBlock> HelpText;
+    UPROPERTY() TObjectPtr<UTextBlock> DetailText;
+    UPROPERTY() TObjectPtr<UTextBlock> ImageHelpText;
+    FHoverZombieTuning PendingZombies;
+    bool bZombiePage = false;
     FHoverGraphicsOptions Pending;
     int32 SelectedRow = 0;
     int32 PendingLevel = 0;

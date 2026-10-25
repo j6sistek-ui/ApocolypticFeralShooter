@@ -47,6 +47,7 @@ void AHoverTestController::EndPlay(const EEndPlayReason::Type Reason)
 
 void AHoverTestController::HoverGraphics()
 {
+    MeleeInputPilot.Reset();
     if (GraphicsMenu)
     {
         CloseGraphicsMenu(false);
@@ -82,7 +83,10 @@ void AHoverTestController::CloseGraphicsMenu(bool bApply)
                                                                                                                   : 0;
     const bool ChangeLevel = bApply && Level != CurrentLevel;
     if (bApply)
+    {
         GraphicsSettings->Apply(GraphicsMenu->GetSelection());
+        GraphicsMenu->ApplyZombieSettings();
+    }
     GraphicsMenu->RemoveFromParent();
     GraphicsMenu = nullptr;
     if (PlayerInput)
@@ -142,7 +146,24 @@ bool AHoverTestController::InputKey(const FInputKeyEventArgs &Params)
         }
     if (!GraphicsMenu)
     {
-        if (Pressed && (Key == EKeys::Gamepad_RightThumbstick || Key == EKeys::V))
+        if (Key == EKeys::Gamepad_RightThumbstick)
+        {
+            auto *ActivePilot = Cast<AHoverPilot>(GetPawn());
+            if (Pressed && ActivePilot && ActivePilot->IsOnFoot())
+            {
+                MeleeInputPilot = ActivePilot;
+                MeleeHoldTime = 0;
+                bMeleeHoldConsumed = false;
+            }
+            else if (Params.Event == IE_Released)
+            {
+                if (MeleeInputPilot.IsValid() && MeleeInputPilot.Get() == ActivePilot && !bMeleeHoldConsumed)
+                    ActivePilot->Melee();
+                MeleeInputPilot.Reset();
+            }
+            return true;
+        }
+        if (Pressed && Key == EKeys::V)
             if (auto *ActivePilot = Cast<AHoverPilot>(GetPawn()))
             {
                 ActivePilot->Melee();
@@ -220,7 +241,9 @@ bool AHoverTestController::InputKey(const FInputKeyEventArgs &Params)
     // Intercept before pawn/vendor input, including axes and trigger input while paused.
     if (Pressed || Params.Event == IE_Repeat)
     {
-        if (Key == EKeys::Up || Key == EKeys::Gamepad_DPad_Up)
+        if (Pressed && (Key == EKeys::Tab || Key == EKeys::Gamepad_LeftShoulder || Key == EKeys::Gamepad_RightShoulder))
+            GraphicsMenu->ChangePage();
+        else if (Key == EKeys::Up || Key == EKeys::Gamepad_DPad_Up)
             GraphicsMenu->Navigate(-1);
         else if (Key == EKeys::Down || Key == EKeys::Gamepad_DPad_Down)
             GraphicsMenu->Navigate(1);
@@ -509,6 +532,22 @@ void AHoverTestController::PlayerTick(float DT)
     Super::PlayerTick(DT);
     if (GraphicsMenu)
         return;
+    if (MeleeInputPilot.IsValid())
+    {
+        auto *MeleePilot = MeleeInputPilot.Get();
+        if (MeleePilot != GetPawn() || !MeleePilot->IsOnFoot() || MeleePilot->IsKnockedDown() ||
+            MeleePilot->IsDefeated() || (MeleePilot->Combat && MeleePilot->Combat->IsInventoryOpen()))
+            MeleeInputPilot.Reset();
+        else if (!bMeleeHoldConsumed)
+        {
+            MeleeHoldTime += DT;
+            if (MeleeHoldTime >= .45f)
+            {
+                bMeleeHoldConsumed = true;
+                MeleePilot->ToggleMeleeWeapon();
+            }
+        }
+    }
     if (auto *P = Cast<AHoverPilot>(GetPawn()))
         Pilot = P;
     UpdateBikeMappings();
