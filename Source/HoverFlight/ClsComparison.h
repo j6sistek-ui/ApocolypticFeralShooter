@@ -69,4 +69,8 @@ class HOVERFLIGHT_API UClsComparisonAuthoring : public UBlueprintFunctionLibrary
     UFUNCTION(BlueprintCallable) static bool ConfigureCharacter(UBlueprint *Blueprint, UObject *Profile);
     UFUNCTION(BlueprintCallable) static FString MotionMatchingResult(ACharacter *Character);
     UFUNCTION(BlueprintCallable) static bool BuildMappings(class UInputMappingContext *Mappings);
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
+    static bool SetLocalAnimationProperty(UObject *Asset, FName PropertyName, const FString &Value);
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
+    static bool BuildLocalPoseDatabase(class UPoseSearchDatabase *Database, const TArray<class UAnimSequence *> &Clips);
 };

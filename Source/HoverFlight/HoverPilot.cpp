@@ -10,15 +10,20 @@
 #include "HoverMovementComponent.h"
 #include "Settings/ZE_PlayerSettings.h"
 #include "Inventory/ZE_WeaponDefinition.h"
+#include "Weapons/ZE_Projectile.h"
+#include "Components/SphereComponent.h"
+#include "GameFramework/ProjectileMovementComponent.h"
 #include "Interaction/ZE_PickupBase.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Survival/ZE_SurvivalComponent.h"
+#include "Survival/ZE_WaveGameModeSettings.h"
 #include "Perception/AISense_Hearing.h"
 #include "EngineUtils.h"
 
 #include "Animation/AnimSequence.h"
+#include "Animation/AnimMontage.h"
 #include "Animation/AnimSingleNodeInstance.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -45,6 +50,7 @@
 #include "InputCoreTypes.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
 #include "UObject/UnrealType.h"
 
 namespace
@@ -107,6 +113,16 @@ AHoverPilot::AHoverPilot(const FObjectInitializer &ObjectInitializer)
     ViewGun->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     ViewGun->CastShadow = false;
     ViewGun->SetOnlyOwnerSee(true);
+    ViewArms = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("FPSArms"));
+    ViewArms->SetupAttachment(FirstPersonCamera);
+    ViewArms->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    ViewArms->SetGenerateOverlapEvents(false);
+    ViewArms->SetOnlyOwnerSee(true);
+    ViewArms->CastShadow = false;
+    // This arms-only mesh has no physics asset to expand its animated bounds.
+    // The FPS reach extends beyond its imported A-pose bounds near the camera.
+    ViewArms->BoundsScale = 3.f;
+    ViewArms->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
     WorldGun = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("HeldGun"));
     // The hand supplies position; its animated rotation must not rotate the aim twice.
     WorldGun->SetupAttachment(GetRootComponent());
@@ -162,6 +178,13 @@ void AHoverPilot::BeginPlay()
         Parts.Add(Component);
     }
     ViewGun->SetStaticMesh(Assets->Gun);
+    ViewArms->SetSkeletalMesh(LoadObject<USkeletalMesh>(
+        nullptr, TEXT("/Game/HoverPrototype/Weapons/FirstPerson/SK_Vexa_FPSArms.SK_Vexa_FPSArms")));
+    ViewArms->SetAnimInstanceClass(UHoverViewAnimInstance::StaticClass());
+    ViewArms->AddTickPrerequisiteActor(this);
+    ViewArms->SetDisablePostProcessBlueprint(true);
+    ViewPoseHandle = ViewArms->RegisterOnBoneTransformsFinalizedDelegate(
+        FOnBoneTransformsFinalizedMultiCast::FDelegate::CreateUObject(this, &AHoverPilot::FinalizeViewPose));
     ViewGun->SetRelativeLocation(FVector(35, 18, -20));
     ViewGun->SetRelativeRotation(FRotator(0, -90, 0));
     WorldGun->SetStaticMesh(Assets->Gun);
@@ -263,6 +286,8 @@ void AHoverPilot::BeginPlay()
         Combat->RegisterComponent();
     }
     SetView();
+    WeaponPoseHandle = GetMesh()->RegisterOnBoneTransformsFinalizedDelegate(
+        FOnBoneTransformsFinalizedMultiCast::FDelegate::CreateUObject(this, &AHoverPilot::UpdateGunTransform));
     if (APlayerController *PC = Cast<APlayerController>(GetController()))
     {
         PC->SetInputMode(FInputModeGameOnly());
@@ -276,6 +301,8 @@ void AHoverPilot::BeginPlay()
 
 void AHoverPilot::EndPlay(const EEndPlayReason::Type Reason)
 {
+    GetMesh()->UnregisterOnBoneTransformsFinalizedDelegate(WeaponPoseHandle);
+    ViewArms->UnregisterOnBoneTransformsFinalizedDelegate(ViewPoseHandle);
     if (bKnockedDown && KnockdownController.IsValid())
         KnockdownController->SetIgnoreMoveInput(false);
     if (DefeatedController.IsValid())
@@ -448,6 +475,7 @@ void AHoverPilot::HoverMount()
         bSteppingOn = true;
         bMounted = true;
         FlightPitch = FlightPitchVelocity = HopTilt = 0;
+        FlightEffectAcceleration = FVector::ZeroVector;
         Movement->SetMovementMode(MOVE_Flying);
         Movement->StopMovementImmediately();
         TargetAltitude = GetActorLocation().Z;
@@ -501,6 +529,7 @@ void AHoverPilot::SetView()
     ReviewCamera->SetActive(!FirstPerson);
     const bool Swinging = bMeleeEquipped || (MeleeWeapon && MeleeWeapon->IsSwinging());
     ViewGun->SetVisibility(!Swinging && FirstPerson, true);
+    ViewArms->SetVisibility(!Swinging && FirstPerson);
     WorldGun->SetVisibility(!Swinging && !FirstPerson && (bAiming || GunRaisedTime > 0), true);
     // The full-body riding pose crosses the eye camera during pitch and recoil.
     // Keep it for the external view; the FPS camera renders its own rifle.
@@ -806,7 +835,8 @@ void AHoverPilot::UpdateGroundPosture(float DT)
     {
         bProne = true;
         GroundSlideTime = 0;
-        Move->SetCrouchedHalfHeight(34.f);
+        // The supplied hands-and-knees crawl is taller than the old belly crawl.
+        Move->SetCrouchedHalfHeight(42.f);
         Crouch();
         // Apply a second crouched size through CharacterMovement's floor-preserving path.
         Move->Crouch(false);
@@ -964,6 +994,7 @@ void AHoverPilot::UpdateFlight(float DT)
     if (bHeightHolding && FMath::Abs(Move->Velocity.Z) < 1.f && FMath::Abs(TargetAltitude - GetActorLocation().Z) < 1.f)
         Move->Velocity.Z = 0;
     const FVector Acceleration = (Move->Velocity - PreviousVelocity) / FMath::Max(DT, .001f);
+    FlightEffectAcceleration = FMath::VInterpTo(FlightEffectAcceleration, Acceleration, DT, 8.f);
     const float ForwardForce =
         FMath::Clamp(FVector::DotProduct(Acceleration, GetActorForwardVector()) / 3000.f, -1.f, 1.f);
     const float Travel = FMath::Clamp(AlongSpeed / 2160.f, -1.f, 1.f);
@@ -1104,16 +1135,29 @@ void AHoverPilot::UpdateAppearance(float DT)
         Instance->bGroundLocomotion = !bMounted && !GetCharacterMovement()->IsFalling() && !Turning;
         Instance->SequenceRate = Turning ? FMath::Clamp(FMath::Abs(GroundYawRate) / 95.f, .25f, 1.4f) : 1.f;
         Instance->RideBlend = Assets->RideBlend;
+        Instance->RideAssets = Assets;
         Instance->bRiding = bMounted;
+        Instance->bMountedReload = bMounted && Combat && Combat->GetWeapon() && Combat->GetWeapon()->IsReloading() &&
+                                   LocomotionBridge && LocomotionBridge->IsActionPlaying();
         const float Along = FVector::DotProduct(GetVelocity(), GetActorForwardVector());
         const float PitchDemand = FlightPitch;
-        Instance->RideInput = FVector(FMath::Clamp((BoardBank + SideInput * 12.f + TurnInput * 12.f) / 28.f, -1.f, 1.f),
-                                      FMath::Clamp(Along / 1800.f - PitchDemand / 50.f, -1.f, 1.f), 0);
+        Instance->RideInput = FVector(FMath::Clamp((BoardBank + SideInput * 12.f) / 28.f, -1.f, 1.f),
+                                      FMath::Clamp(Along / 1800.f, -1.f, 1.f), 0);
+        Instance->RidePitch = FMath::Clamp(PitchDemand / 45.f, -1.f, 1.f);
+        Instance->bRideThrust = ForwardInput > .08f;
+        Instance->RideAimInput = FVector(
+            FMath::Clamp(FMath::FindDeltaAngleDegrees(GetActorRotation().Yaw, GetControlRotation().Yaw) / 90.f, -1.f,
+                         1.f),
+            FMath::Clamp((FRotator::NormalizeAxis(GetControlRotation().Pitch) - BoardPitch) / 60.f, -1.f, 1.f), 0);
         Instance->RifleAim = bMounted && Assets->RideGunPose ? Assets->RideGunPose : Assets->RifleAim;
         Instance->RifleFire = bMounted ? Assets->Fire.Get() : nullptr;
         Instance->ShotSerial = ShotsFired;
         Instance->bAiming =
             (bAiming || GunRaisedTime > 0) && !(LocomotionBridge && LocomotionBridge->IsActionPlaying());
+        Instance->SupportGripOffset = Assets->GunSupportGrip - Assets->GunGrip;
+        Instance->WeaponRotation =
+            GetMesh()->GetComponentQuat().Inverse() * GetControlRotation().Quaternion() *
+            FQuat::FindBetweenNormals(Assets->GunForward.GetSafeNormal(), FVector::ForwardVector);
         Instance->RiderLean = bMounted ? RiderLean : 0;
         FVector Feet[2];
         for (int32 I = 0; I < 2; ++I)
@@ -1133,8 +1177,9 @@ void AHoverPilot::UpdateAppearance(float DT)
         Instance->RightFoot = Feet[1];
     }
     const bool Swinging = bMeleeEquipped || (MeleeWeapon && MeleeWeapon->IsSwinging());
-    WorldGun->SetVisibility(!Swinging && bReview && (bAiming || GunRaisedTime > 0), true);
+    WorldGun->SetVisibility(!Swinging && bReview && (bAiming || GunRaisedTime > 0 || AimExitTime > 0), true);
     ViewGun->SetVisibility(!Swinging && !bReview, true);
+    ViewArms->SetVisibility(!Swinging && !bReview);
     UpdateGunTransform();
     const bool Powered = bMounted && TransitionTime <= 0 && !bSteppingOn;
     const float Thrust = FMath::Max(0.f, ForwardInput);
@@ -1142,9 +1187,11 @@ void AHoverPilot::UpdateAppearance(float DT)
     {
         const bool Active = Powered && Thrust > .05f;
         const float Scale = bBoost ? .70f : .30f + .10f * Thrust;
-        Effect->SetVariableFloat(TEXT("User.ThrustAlpha"), bBoost ? .80f : .40f * Thrust);
-        Effect->SetVariableFloat(TEXT("User.ThrustSize"), BoosterSize * Scale);
-        Effect->SetVariableFloat(TEXT("User.ThurstSpawningRate"), BoosterSpawnRate * (bBoost ? 1.f : .40f * Thrust));
+        Effect->SetVariableFloat(TEXT("User.ThrustAlpha"), bBoost ? 1.f : .85f * Thrust);
+        // Size is already reduced in the local asset and by component scale.
+        // Multiplying this parameter too made the directional jets disappear.
+        Effect->SetVariableFloat(TEXT("User.ThrustSize"), BoosterSize);
+        Effect->SetVariableFloat(TEXT("User.ThurstSpawningRate"), BoosterSpawnRate * (bBoost ? 1.f : .7f * Thrust));
         if (Active && !Effect->IsActive())
             Effect->Activate(true);
         else if (!Active && Effect->IsActive())
@@ -1152,32 +1199,43 @@ void AHoverPilot::UpdateAppearance(float DT)
         Effect->SetRelativeScale3D(FVector(Scale));
         if (Thrust > .05f)
         {
-            const FVector ThrustDirection = FRotator(BoardPitch, GetActorRotation().Yaw, 0).Vector() * ForwardInput +
-                                            GetActorRightVector() * SideInput;
+            const FVector ThrustDirection = FRotator(BoardPitch, GetActorRotation().Yaw, 0).Vector();
             Effect->SetWorldRotation(
                 FRotationMatrix::MakeFromXZ(ThrustDirection.GetSafeNormal(), Board->GetUpVector()).Rotator());
         }
     }
     const float ForwardSpeed = FVector::DotProduct(GetVelocity(), GetActorForwardVector());
-    const float Brake = ForwardInput < .05f ? FMath::Clamp(ForwardSpeed / 1200.f, 0.f, 1.f) : 0.f;
+    const float Brake =
+        ForwardInput < .05f
+            ? FMath::Clamp(FMath::Max(ForwardSpeed / 1200.f,
+                                      -FVector::DotProduct(FlightEffectAcceleration, GetActorForwardVector()) / 1800.f),
+                           0.f, 1.f)
+            : 0.f;
+    const float Lift = FMath::Clamp(.18f + FMath::Max(0.f, PitchInput) * .55f +
+                                        FMath::Max(0.f, float(FlightEffectAcceleration.Z)) / 5000.f,
+                                    .18f, 1.f);
+    const float Down = FMath::Clamp(
+        FMath::Max(0.f, -PitchInput) * .7f + FMath::Max(0.f, -float(FlightEffectAcceleration.Z)) / 5000.f, 0.f, 1.f);
+    const float SideForce = FVector::DotProduct(FlightEffectAcceleration, GetActorRightVector()) / 1800.f;
     for (int32 I = 0; I < DirectionalBoosters.Num(); ++I)
     {
         auto *Effect = DirectionalBoosters[I].Get();
-        const float Demand = I < 2    ? FMath::Max(0.f, PitchInput)
-                             : I < 4  ? FMath::Max(0.f, -PitchInput)
-                             : I == 4 ? FMath::Max(0.f, -SideInput)
-                             : I == 5 ? FMath::Max(0.f, SideInput)
+        const float Target = I < 2    ? Lift
+                             : I < 4  ? Down
+                             : I == 4 ? FMath::Clamp(FMath::Max(-SideInput * .7f, -SideForce), 0.f, 1.f)
+                             : I == 5 ? FMath::Clamp(FMath::Max(SideInput * .7f, SideForce), 0.f, 1.f)
                                       : Brake;
+        const float Demand = JetDemands[I] = FMath::FInterpTo(JetDemands[I], Powered ? Target : 0.f, DT, 8.f);
         const FVector Force = I < 2    ? FVector::UpVector
                               : I < 4  ? -FVector::UpVector
                               : I == 4 ? -GetActorRightVector()
                               : I == 5 ? GetActorRightVector()
                                        : -GetActorForwardVector();
         const bool Active = Powered && Demand > .08f;
-        const float Scale = .20f + .16f * Demand;
-        Effect->SetVariableFloat(TEXT("User.ThrustAlpha"), Demand * .5f);
-        Effect->SetVariableFloat(TEXT("User.ThrustSize"), BoosterSize * Scale);
-        Effect->SetVariableFloat(TEXT("User.ThurstSpawningRate"), BoosterSpawnRate * .5f * Demand);
+        const float Scale = .22f + .20f * Demand;
+        Effect->SetVariableFloat(TEXT("User.ThrustAlpha"), .2f + Demand * .8f);
+        Effect->SetVariableFloat(TEXT("User.ThrustSize"), BoosterSize);
+        Effect->SetVariableFloat(TEXT("User.ThurstSpawningRate"), BoosterSpawnRate * (.22f + .6f * Demand));
         Effect->SetRelativeScale3D(FVector(Scale));
         Effect->SetWorldRotation(FRotationMatrix::MakeFromX(Force).Rotator());
         if (Active && !Effect->IsActive())
@@ -1185,6 +1243,21 @@ void AHoverPilot::UpdateAppearance(float DT)
         else if (!Active && Effect->IsActive())
             Effect->Deactivate();
     }
+}
+
+void AHoverPilot::FinalizeViewPose()
+{
+    // Capture only after the FPS idle pose has evaluated, never from the
+    // skeleton's A-pose while another component finishes its first tick.
+    if (!bViewReferenceReady)
+    {
+        ViewReferenceHand = ViewArms->GetSocketTransform(TEXT("hand_r"), RTS_Component);
+        ViewReferenceHand.SetLocation(
+            FMath::Lerp(ViewReferenceHand.GetLocation(),
+                        ViewArms->GetSocketTransform(TEXT("middle_01_r"), RTS_Component).GetLocation(), .5f));
+        bViewReferenceReady = ViewReferenceHand.GetLocation().Size() > 20.f;
+    }
+    UpdateGunTransform();
 }
 
 void AHoverPilot::UpdateGunTransform()
@@ -1238,9 +1311,37 @@ void AHoverPilot::UpdateGunTransform()
     ViewRotation = ViewRotation * Basis.Inverse() * Kick * Basis;
     ViewGun->SetWorldLocationAndRotation(ViewGrip - KickBack - ViewRotation.RotateVector(Assets->GunGrip),
                                          ViewRotation);
+    if (ViewArms->GetSkeletalMeshAsset())
+    {
+        FTransform HandPose = ViewArms->GetSocketTransform(TEXT("hand_r"), RTS_Component);
+        HandPose.SetLocation(FMath::Lerp(HandPose.GetLocation(),
+                                         ViewArms->GetSocketTransform(TEXT("middle_01_r"), RTS_Component).GetLocation(),
+                                         .5f));
+        if (bViewReferenceReady)
+        {
+            const FQuat ArmsRotation = FirstPersonCamera->GetComponentQuat() * FRotator(0, -90, 0).Quaternion();
+            const FVector RestGrip = ViewGrip - KickBack;
+            ViewArms->SetWorldLocationAndRotation(RestGrip - ArmsRotation.RotateVector(ViewReferenceHand.GetLocation()),
+                                                  ArmsRotation);
+            const FQuat Delta = ArmsRotation * HandPose.GetRotation() * ViewReferenceHand.GetRotation().Inverse() *
+                                ArmsRotation.Inverse();
+            const FQuat AnimatedRotation = Delta * ViewRotation;
+            const FVector AnimatedGrip = ViewArms->GetComponentTransform().TransformPosition(HandPose.GetLocation());
+            ViewGun->SetWorldLocationAndRotation(AnimatedGrip - AnimatedRotation.RotateVector(Assets->GunGrip),
+                                                 AnimatedRotation);
+            if (auto *View = Cast<UHoverViewAnimInstance>(ViewArms->GetAnimInstance()))
+            {
+                // ADS moves the complete view model to its sight anchor. Keeping
+                // the same hand reference prevents an extra animation sight drift.
+                View->AimAlpha = 0.f;
+                View->SupportGripOffset = Assets->GunSupportGrip - Assets->GunGrip;
+                View->WeaponRotation = ArmsRotation.Inverse() * AnimatedRotation;
+            }
+        }
+    }
 }
 
-void AHoverPilot::FireShot(float Damage, float Spread, float Range)
+void AHoverPilot::FireShot(float Damage, float Spread, float Range, AZE_WeaponBase *SourceWeapon)
 {
     ++ShotsFired;
     FireCooldown = .18f;
@@ -1248,7 +1349,9 @@ void AHoverPilot::FireShot(float Damage, float Spread, float Range)
     UpdateGunTransform();
     SetView();
     FCollisionQueryParams Params(SCENE_QUERY_STAT(HoverShot), true, this);
+    Params.bReturnPhysicalMaterial = true;
     Params.AddIgnoredActor(BoardActor);
+    Params.AddIgnoredActor(SourceWeapon);
     const UStaticMeshComponent *Gun = bReview ? WorldGun.Get() : ViewGun.Get();
     const FVector Muzzle = GetMuzzlePosition();
     if (Combat)
@@ -1257,13 +1360,18 @@ void AHoverPilot::FireShot(float Damage, float Spread, float Range)
         Gun->GetComponentTransform().TransformVectorNoScale(Assets->GunForward).GetSafeNormal();
     const FVector ShotDirection = FMath::VRandCone(BarrelDirection, FMath::DegreesToRadians(Spread));
     const FVector Target = Muzzle + ShotDirection * Range;
-    if (auto *System = Cast<UNiagaraSystem>(Assets->MuzzleEffect))
+    const auto *Definition = SourceWeapon ? SourceWeapon->GetWeaponDefinition() : nullptr;
+    auto *MuzzleSystem = Definition && Definition->MuzzleFlashFX.EffectType == EZE_EffectType::Niagara
+                             ? Definition->MuzzleFlashFX.NiagaraFX.LoadSynchronous()
+                             : Cast<UNiagaraSystem>(Assets->MuzzleEffect);
+    if (auto *System = MuzzleSystem)
     {
         auto *Flash = UNiagaraFunctionLibrary::SpawnSystemAttached(
             System, bReview ? WorldGun : ViewGun, NAME_None, Assets->GunMuzzle,
             FRotationMatrix::MakeFromZ(Assets->GunForward).Rotator(), EAttachLocation::KeepRelativeOffset, true);
         if (Flash)
         {
+            Flash->SetRelativeScale3D(FVector(Definition ? Definition->MuzzleFlashFX.Scale : 1.f));
             TWeakObjectPtr<UNiagaraComponent> WeakFlash(Flash);
             FTimerHandle Timer;
             GetWorld()->GetTimerManager().SetTimer(
@@ -1278,19 +1386,86 @@ void AHoverPilot::FireShot(float Damage, float Spread, float Range)
     // Catch enemies/walls intersecting the barrel instead of starting beyond them.
     const FVector Breech = Gun->GetComponentTransform().TransformPosition(Assets->GunGrip);
     FHitResult Hit = TraceWeaponRay(GetWorld(), Breech, Muzzle, Params);
-    if (!Hit.bBlockingHit)
+    const bool ProjectileShot =
+        Definition && Definition->CombatStats.bUseProjectiles && Definition->CombatStats.ProjectileClass;
+    bool ProjectileLaunched = false;
+    if (!Hit.bBlockingHit && ProjectileShot)
+    {
+        const auto &Stats = Definition->CombatStats;
+        const FTransform LaunchTransform(ShotDirection.Rotation(), Muzzle);
+        if (auto *Projectile =
+                GetWorld()->SpawnActorDeferred<AZE_Projectile>(Stats.ProjectileClass, LaunchTransform, SourceWeapon,
+                                                               this, ESpawnActorCollisionHandlingMethod::AlwaysSpawn))
+        {
+            Projectile->Damage = Damage;
+            Projectile->InstigatorPawn = this;
+            Projectile->SourceWeapon = SourceWeapon;
+            if (Projectile->CollisionComp)
+            {
+                Projectile->CollisionComp->IgnoreActorWhenMoving(this, true);
+                Projectile->CollisionComp->IgnoreActorWhenMoving(BoardActor, true);
+                Projectile->CollisionComp->IgnoreActorWhenMoving(SourceWeapon, true);
+                for (TActorIterator<AZE_PickupBase> It(GetWorld()); It; ++It)
+                    Projectile->CollisionComp->IgnoreActorWhenMoving(*It, true);
+            }
+            if (auto *Movement = Projectile->ProjectileMovement)
+            {
+                Movement->InitialSpeed = Stats.InitialProjectileSpeed;
+                Movement->MaxSpeed = Stats.MaxProjectileSpeed;
+                Movement->ProjectileGravityScale = Stats.ProjectileGravityScale;
+            }
+            Projectile->FinishSpawning(LaunchTransform);
+            Projectile->InitVelocity(ShotDirection);
+            Projectile->SetLifeSpan(FMath::Clamp(Range / FMath::Max(1.f, Stats.InitialProjectileSpeed), .05f, 30.f));
+            ProjectileLaunched = true;
+        }
+    }
+    if (!Hit.bBlockingHit && !ProjectileLaunched)
         Hit = TraceWeaponRay(GetWorld(), Muzzle, Target + ShotDirection * 3.f, Params);
-    if (!Hit.bBlockingHit || FVector::DotProduct(Hit.ImpactPoint - Muzzle, ShotDirection) > 2.f)
+    if (!ProjectileLaunched &&
+        (!Hit.bBlockingHit || FVector::DotProduct(Hit.ImpactPoint - Muzzle, ShotDirection) > 2.f))
         if (auto *Tracer = GetWorld()->SpawnActor<AHoverShotVisual>())
             Tracer->Launch(Muzzle, Hit.bBlockingHit ? Hit.ImpactPoint : Target);
-    if (auto *Zombie = Cast<AHoverZombie>(Hit.GetActor()))
-        UGameplayStatics::ApplyPointDamage(Zombie, Damage, ShotDirection, Hit, GetController(), this, nullptr);
-    else if (auto *CyberZombie = Cast<AHoverCyberZombie>(Hit.GetActor()))
-        UGameplayStatics::ApplyPointDamage(CyberZombie, Damage, ShotDirection, Hit, GetController(), this, nullptr);
-    else if (Hit.bBlockingHit && Assets->SurfaceImpact)
-        ImpactPulse(Hit.ImpactPoint + Hit.ImpactNormal * 2, Hit.ImpactNormal, 1.f, 0, .9f, Assets->SurfaceImpact);
-    if (Assets->ShotSound)
-        UGameplayStatics::PlaySoundAtLocation(this, Assets->ShotSound, Muzzle, .60f, FMath::FRandRange(.96f, 1.04f));
+    AActor *DamageSource = SourceWeapon ? static_cast<AActor *>(SourceWeapon) : this;
+    if (Hit.bBlockingHit)
+    {
+        if (SourceWeapon)
+            SourceWeapon->ProcessHit(Hit);
+        else if (Hit.GetActor())
+            UGameplayStatics::ApplyPointDamage(Hit.GetActor(), Damage, ShotDirection, Hit, GetController(),
+                                               DamageSource, nullptr);
+        // Zombie damage owns blood. World materials use the purchased weapon's
+        // impact map; the local dust remains a fallback for unassigned surfaces.
+        if (!Cast<AHoverZombie>(Hit.GetActor()) && !Cast<AHoverCyberZombie>(Hit.GetActor()))
+        {
+            bool HasImpactFX = false;
+            if (Definition)
+            {
+                const FZE_SurfaceImpactData *Impact = &Definition->DefaultImpactEffects;
+                const FString Surface = GetNameSafe(Hit.PhysMaterial.Get());
+                for (const auto &Candidate : Definition->ImpactEffectsMap)
+                    if (!Candidate.SurfaceTag.IsNone() && Surface.Contains(Candidate.SurfaceTag.ToString()))
+                    {
+                        Impact = &Candidate;
+                        break;
+                    }
+                HasImpactFX = Impact->ImpactFX.EffectType == EZE_EffectType::Niagara
+                                  ? !Impact->ImpactFX.NiagaraFX.IsNull()
+                                  : !Impact->ImpactFX.CascadeFX.IsNull();
+                SourceWeapon->SpawnImpactEffects(Hit);
+            }
+            if (!HasImpactFX && Assets->SurfaceImpact)
+                ImpactPulse(Hit.ImpactPoint + Hit.ImpactNormal * 2, Hit.ImpactNormal, 1.f, 0, .9f,
+                            Assets->SurfaceImpact);
+        }
+    }
+    if (auto *Rifle = Cast<AHoverCyberRifle>(SourceWeapon))
+        Rifle->EjectShellAt(FTransform(Gun->GetComponentQuat(), Breech));
+    auto *ShotSound = Definition ? Definition->FireSound.LoadSynchronous() : Assets->ShotSound.Get();
+    if (ShotSound)
+        UGameplayStatics::PlaySoundAtLocation(this, ShotSound, Muzzle, .60f, FMath::FRandRange(.96f, 1.04f));
+    if (auto *PC = Cast<APlayerController>(GetController()))
+        PC->PlayDynamicForceFeedback(.18f, .06f, false, true, false, true);
     if (bMounted && bAiming && Assets->Fire)
     {
         CurrentAnimation = nullptr;
@@ -1418,12 +1593,25 @@ float AHoverPilot::TakeDamage(float Damage, const FDamageEvent &Event, AControll
         GetWorld()->GetTimeSeconds() - LastHitReaction > .65f && !LocomotionBridge->IsActionPlaying())
     {
         LastHitReaction = GetWorld()->GetTimeSeconds();
-        LocomotionBridge->PlayAction(
-            LoadObject<UAnimSequence>(nullptr, TEXT("/Game/CLS/Example/SetupYourHeroExample/Anims/Rifle/HitReact/"
-                                                    "MM_HitReact_Front_Lgt_01.MM_HitReact_Front_Lgt_01")));
+        const FVector TowardImpact = Causer ? Causer->GetActorLocation() - GetActorLocation() : FVector::ZeroVector;
+        const bool FromBehind = FVector::DotProduct(FRotator(0, BodyYaw, 0).Vector(), TowardImpact) < 0;
+        const TCHAR *Clip = FromBehind ? TEXT("MM_HitReact_Back_Med_01") : TEXT("MM_HitReact_Front_Lgt_01");
+        const FString Path =
+            FString::Printf(TEXT("/Game/CLS/Example/SetupYourHeroExample/Anims/Rifle/HitReact/%s.%s"), Clip, Clip);
+        LocomotionBridge->PlayAction(LoadObject<UAnimSequence>(nullptr, *Path));
     }
     if (bInvincible)
         return 0.f;
+    // The vendor wave system calculates damage scaling but its attack trace
+    // still sends base damage. Apply it per hit, never to the shared zombie data.
+    if (Cast<AHoverCyberZombie>(Causer))
+        if (const auto *Mode = GetWorld()->GetAuthGameMode<AHoverCyberCityGameMode>(); Mode && Mode->GetWaveSettings())
+        {
+            float HealthScale = 1.f, DamageScale = 1.f, SpeedScale = 1.f;
+            Mode->GetWaveSettings()->GetDifficultyMultipliers(Mode->GetCurrentWave(), HealthScale, DamageScale,
+                                                              SpeedScale);
+            Damage *= FMath::Max(0.f, DamageScale);
+        }
     const float Applied =
         FMath::Min(GetHealth(), FMath::Max(0.f, Super::TakeDamage(Damage, Event, EventInstigator, Causer)));
     SandboxHealth = FMath::Max(0.f, GetHealth() - Applied);

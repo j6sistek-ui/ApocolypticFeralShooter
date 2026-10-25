@@ -3,9 +3,11 @@
 #include "HoverPilot.h"
 #include "Animation/AnimInstanceProxy.h"
 #include "Animation/AnimNode_SequencePlayer.h"
+#include "AnimNodes/AnimNode_Slot.h"
 #include "Animation/AnimNodeSpaceConversions.h"
 #include "Animation/AnimSequence.h"
 #include "AnimNodes/AnimNode_TwoWayBlend.h"
+#include "AnimNodes/AnimNode_ApplyAdditive.h"
 #include "AnimNodes/AnimNode_BlendSpacePlayer.h"
 #include "AnimNodes/AnimNode_LayeredBoneBlend.h"
 #include "AnimNodes/AnimNode_CopyPoseFromMesh.h"
@@ -66,6 +68,55 @@ struct FHoverPelvisNode final : FAnimNode_ModifyBone
     }
 };
 
+// Solve from this evaluation's right hand, avoiding a frame of weapon/hand lag.
+struct FHoverSupportHandNode final : FAnimNode_TwoBoneIK
+{
+    FBoneReference GripHand, GripPalm, Palm, Shoulder;
+    bool bGripAtPalm = false;
+    FVector GripOffset = FVector::ZeroVector;
+    FQuat GunRotation = FQuat::Identity;
+    FHoverSupportHandNode()
+    {
+        IKBone.BoneName = TEXT("hand_l");
+        GripHand.BoneName = TEXT("hand_r");
+        GripPalm.BoneName = TEXT("middle_01_r");
+        Palm.BoneName = TEXT("middle_01_l");
+        Shoulder.BoneName = TEXT("upperarm_l");
+        EffectorLocationSpace = JointTargetLocationSpace = BCS_ComponentSpace;
+        bAllowStretching = false;
+        bMaintainEffectorRelRot = false;
+        bTakeRotationFromEffectorSpace = false;
+    }
+    virtual void CacheBones_AnyThread(const FAnimationCacheBonesContext &Context) override
+    {
+        FAnimNode_TwoBoneIK::CacheBones_AnyThread(Context);
+        const auto &Bones = Context.AnimInstanceProxy->GetRequiredBones();
+        GripHand.Initialize(Bones);
+        GripPalm.Initialize(Bones);
+        Palm.Initialize(Bones);
+        Shoulder.Initialize(Bones);
+    }
+    virtual void EvaluateSkeletalControl_AnyThread(FComponentSpacePoseContext &Output,
+                                                   TArray<FBoneTransform> &Transforms) override
+    {
+        const auto &Bones = Output.Pose.GetPose().GetBoneContainer();
+        if (!GripHand.IsValidToEvaluate(Bones) || !Palm.IsValidToEvaluate(Bones) || !Shoulder.IsValidToEvaluate(Bones))
+            return;
+        const FVector Hand = Output.Pose.GetComponentSpaceTransform(IKBone.GetCompactPoseIndex(Bones)).GetLocation();
+        const FVector PalmOffset =
+            (Output.Pose.GetComponentSpaceTransform(Palm.GetCompactPoseIndex(Bones)).GetLocation() - Hand) * .5f;
+        FVector Grip = Output.Pose.GetComponentSpaceTransform(GripHand.GetCompactPoseIndex(Bones)).GetLocation();
+        if (bGripAtPalm && GripPalm.IsValidToEvaluate(Bones))
+            Grip = FMath::Lerp(
+                Grip, Output.Pose.GetComponentSpaceTransform(GripPalm.GetCompactPoseIndex(Bones)).GetLocation(), .5f);
+        EffectorLocation = Grip + GunRotation.RotateVector(GripOffset) - PalmOffset;
+        JointTargetLocation =
+            Output.Pose.GetComponentSpaceTransform(Shoulder.GetCompactPoseIndex(Bones)).GetLocation() +
+            FVector(30, 0, -35);
+        FAnimNode_TwoBoneIK::EvaluateSkeletalControl_AnyThread(Output, Transforms);
+    }
+};
+
 struct FHoverAnimProxy final : FAnimInstanceProxy
 {
     FAnimNode_SequencePlayer_Standalone Players[2];
@@ -75,12 +126,24 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
     FAnimNode_BlendSpacePlayer_Standalone Locomotion;
     FAnimNode_TwoWayBlend GroundBlend;
     FAnimNode_RetargetPoseFromMesh MotionPose;
+    FAnimNode_RetargetPoseFromMesh ReloadPose;
+    FAnimNode_TwoWayBlend ReloadBlend;
     FAnimNode_TwoWayBlend MotionBlend;
     FAnimNode_BlendSpacePlayer_Standalone Ride;
     FAnimNode_TwoWayBlend RideBlend;
+    FAnimNode_SequencePlayer_Standalone RideAction, Climb, Dive, AimAction, GunShot;
+    FAnimNode_TwoWayBlend RideActionBlend, ClimbBlend, DiveBlend, AimActionBlend, WeaponPose;
+    FAnimNode_BlendSpacePlayer_Standalone GliderAim;
+    FAnimNode_ApplyAdditive ShotAdditive;
+    UAnimSequence *DesiredAction = nullptr, *DesiredAimAction = nullptr;
+    float ActionTime = 0, ActionDuration = 0, AimTime = 0, AimDuration = 0;
+    int32 ActionSerial = 0, EvaluatedActionSerial = 0, AimSerial = 0, EvaluatedAimSerial = 0;
+    int32 RideTurn = 0;
+    bool bWasRiding = false, bWasThrust = false, bWasAiming = false;
     FAnimNode_ConvertLocalToComponentSpace ToComponent;
     FHoverPelvisNode Pelvis;
     FAnimNode_TwoBoneIK Left, Right;
+    FHoverSupportHandNode SupportHand;
     FAnimNode_ModifyBone Springs[4];
     FHoverSecondaryMotion Secondary;
     FAnimNode_ConvertComponentToLocalSpace Root;
@@ -107,13 +170,29 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
         MotionBlend.A.SetLinkNode(&GroundBlend);
         MotionBlend.B.SetLinkNode(&MotionPose);
         RideBlend.A.SetLinkNode(&MotionBlend);
-        RideBlend.B.SetLinkNode(&Ride);
+        RideActionBlend.A.SetLinkNode(&Ride);
+        RideActionBlend.B.SetLinkNode(&RideAction);
+        ClimbBlend.A.SetLinkNode(&RideActionBlend);
+        ClimbBlend.B.SetLinkNode(&Climb);
+        DiveBlend.A.SetLinkNode(&ClimbBlend);
+        DiveBlend.B.SetLinkNode(&Dive);
+        RideBlend.B.SetLinkNode(&DiveBlend);
+        AimActionBlend.A.SetLinkNode(&GliderAim);
+        AimActionBlend.B.SetLinkNode(&AimAction);
+        ShotAdditive.Base.SetLinkNode(&AimActionBlend);
+        ShotAdditive.Additive.SetLinkNode(&GunShot);
+        WeaponPose.A.SetLinkNode(&Rifle);
+        WeaponPose.B.SetLinkNode(&ShotAdditive);
+        ReloadPose.RetargetFrom = ERetargetSourceMode::CustomSkeletalMeshComponent;
+        ReloadPose.IKRetargeterAsset = MotionPose.IKRetargeterAsset;
+        ReloadBlend.A.SetLinkNode(&WeaponPose);
+        ReloadBlend.B.SetLinkNode(&ReloadPose);
         UpperBody.BasePose.SetLinkNode(&RideBlend);
         UpperBody.BlendPoses.Reset();
         UpperBody.BlendWeights.Reset();
         UpperBody.LayerSetup.Reset();
         UpperBody.AddPose();
-        UpperBody.BlendPoses[0].SetLinkNode(&Rifle);
+        UpperBody.BlendPoses[0].SetLinkNode(&ReloadBlend);
         FBranchFilter Filter;
         Filter.BoneName = TEXT("spine_01");
         Filter.BlendDepth = 3;
@@ -131,11 +210,12 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
         Pelvis.RotationSpace = BCS_ComponentSpace;
         Left.ComponentPose.SetLinkNode(&Pelvis);
         Right.ComponentPose.SetLinkNode(&Left);
+        SupportHand.ComponentPose.SetLinkNode(&Right);
         const FName SpringNames[] = {TEXT("chest_l"), TEXT("chest_r"), TEXT("glute_l"), TEXT("glute_r")};
         for (int32 I = 0; I < 4; ++I)
         {
             auto &Spring = Springs[I];
-            Spring.ComponentPose.SetLinkNode(I == 0 ? static_cast<FAnimNode_Base *>(&Right) : &Springs[I - 1]);
+            Spring.ComponentPose.SetLinkNode(I == 0 ? static_cast<FAnimNode_Base *>(&SupportHand) : &Springs[I - 1]);
             Spring.BoneToModify.BoneName = SpringNames[I];
             Spring.TranslationMode = BMM_Additive;
             Spring.TranslationSpace = BCS_ComponentSpace;
@@ -167,7 +247,12 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
         for (auto &Spring : Springs)
             Nodes.Add(&Spring);
         Nodes.Add(&MotionPose);
+        Nodes.Add(&ReloadPose);
+        Nodes.Add(&ReloadBlend);
         Nodes.Add(&MotionBlend);
+        Nodes.Add(&SupportHand);
+        Nodes.Append({&RideAction, &Climb, &Dive, &AimAction, &GunShot, &RideActionBlend, &ClimbBlend, &DiveBlend,
+                      &AimActionBlend, &WeaponPose, &GliderAim, &ShotAdditive});
     }
     virtual void PreUpdate(UAnimInstance *Instance, float DT) override
     {
@@ -175,6 +260,9 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
         auto *State = CastChecked<UHoverAnimInstance>(Instance);
         UpperBody.bMeshSpaceRotationBlend = !State->bProne;
         MotionPose.SourceMeshComponent = State->MotionSource;
+        ReloadPose.SourceMeshComponent = State->MotionSource;
+        ReloadBlend.Alpha =
+            FMath::FInterpTo(ReloadBlend.Alpha, State->bMountedReload && State->MotionSource ? 1.f : 0.f, DT, 12.f);
         MotionBlend.Alpha = FMath::FInterpConstantTo(
             MotionBlend.Alpha, State->bMotionMatching && State->MotionSource ? 1.f : 0.f, DT, 8.f);
         Desired = State->Sequence;
@@ -192,6 +280,78 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
         Ride.SetLoop(true);
         RideBlend.Alpha =
             FMath::FInterpConstantTo(RideBlend.Alpha, State->bRiding && State->RideBlend ? 1.f : 0.f, DT, 5.f);
+        ActionTime += DT;
+        AimTime += DT;
+        RecoilTime = FMath::Max(0.f, RecoilTime - DT);
+        ShotSerial = State->ShotSerial;
+        if (State->bRiding && State->RifleFire && ShotSerial != LastShotSerial)
+            RecoilTime = State->RifleFire->GetPlayLength();
+        if (const auto *Assets = State->RideAssets.Get())
+        {
+            Climb.SetSequence(Assets->RideClimbPose);
+            Dive.SetSequence(Assets->RideDivePose);
+            Climb.SetPlayRate(0);
+            Dive.SetPlayRate(0);
+            ClimbBlend.Alpha = FMath::FInterpTo(
+                ClimbBlend.Alpha,
+                State->bRiding && Assets->RideClimbPose ? FMath::Max(0.f, State->RidePitch) * .72f : 0.f, DT, 6.f);
+            DiveBlend.Alpha = FMath::FInterpTo(
+                DiveBlend.Alpha,
+                State->bRiding && Assets->RideDivePose ? FMath::Max(0.f, -State->RidePitch) * .72f : 0.f, DT, 6.f);
+            int32 Turn = RideTurn;
+            if (State->RideInput.X < -.35f)
+                Turn = -1;
+            else if (State->RideInput.X > .35f)
+                Turn = 1;
+            else if (FMath::Abs(State->RideInput.X) < .15f)
+                Turn = 0;
+            UAnimSequence *Next = nullptr;
+            if (State->bRiding && bWasRiding)
+            {
+                if (Turn != RideTurn)
+                    Next = Turn < 0       ? Assets->RideLeftStart.Get()
+                           : Turn > 0     ? Assets->RideRightStart.Get()
+                           : RideTurn < 0 ? Assets->RideLeftEnd.Get()
+                                          : Assets->RideRightEnd.Get();
+                else if (State->bRideThrust != bWasThrust && Turn == 0)
+                    Next = State->bRideThrust ? Assets->RideStart.Get() : Assets->RideStop.Get();
+            }
+            if (Next)
+            {
+                DesiredAction = Next;
+                ActionTime = 0;
+                ActionDuration = Next->GetPlayLength();
+                ++ActionSerial;
+            }
+            RideTurn = Turn;
+            bWasThrust = State->bRideThrust;
+            bWasRiding = State->bRiding;
+            const float ActionWeight = State->bRiding && DesiredAction
+                                           ? FMath::Min(FMath::Clamp(ActionTime / .12f, 0.f, 1.f),
+                                                        FMath::Clamp((ActionDuration - ActionTime) / .16f, 0.f, 1.f))
+                                           : 0.f;
+            RideActionBlend.Alpha = ActionWeight;
+            State->RideTransition = ActionWeight > 0 ? DesiredAction->GetFName() : NAME_None;
+            GliderAim.SetBlendSpace(Assets->RideAimBlend);
+            GliderAim.SetPosition(State->RideAimInput);
+            GliderAim.SetLoop(true);
+            WeaponPose.Alpha = State->bRiding && Assets->RideAimBlend ? 1.f : 0.f;
+            if (State->bRiding && State->bAiming != bWasAiming)
+            {
+                DesiredAimAction = State->bAiming ? Assets->AimStart.Get() : Assets->AimEnd.Get();
+                AimTime = 0;
+                AimDuration = DesiredAimAction ? DesiredAimAction->GetPlayLength() : 0;
+                ++AimSerial;
+            }
+            bWasAiming = State->bAiming;
+            AimActionBlend.Alpha =
+                State->bRiding && DesiredAimAction ? FMath::Clamp((AimDuration - AimTime) / .14f, 0.f, 1.f) : 0.f;
+            GunShot.SetSequence(Assets->RideRecoil);
+            GunShot.SetLoopAnimation(false);
+            ShotAdditive.Alpha = State->bRiding && Assets->RideRecoil && RecoilTime > 0
+                                     ? FMath::Clamp(RecoilTime / .08f, 0.f, 1.f)
+                                     : 0.f;
+        }
         Locomotion.SetBlendSpace(State->Locomotion);
         Locomotion.SetPosition(State->LocomotionInput);
         Locomotion.SetLoop(true);
@@ -200,16 +360,21 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
             GroundBlend.Alpha, State->bGroundLocomotion && State->Locomotion ? 1.f : 0.f, DT, 7.f);
         for (auto &Player : Players)
             Player.SetPlayRate(State->SequenceRate);
-        RecoilTime = FMath::Max(0.f, RecoilTime - DT);
-        ShotSerial = State->ShotSerial;
-        if (State->bRiding && State->RifleFire && ShotSerial != LastShotSerial)
-            RecoilTime = .16f;
-        DesiredRifle = RecoilTime > 0 ? State->RifleFire.Get() : State->RifleAim.Get();
-        bRifleRecoil = RecoilTime > 0;
+        DesiredRifle = State->RifleAim.Get();
+        bRifleRecoil = false;
         bRifleLoop = !State->bRiding;
-        UpperBody.BlendWeights[0] =
-            FMath::FInterpTo(UpperBody.BlendWeights[0], State->bAiming && State->RifleAim ? 1.f : 0.f, DT, 10.f);
+        // Rifle gait clips carry the weapon low. ADS remains a separate owned
+        // upper-body pose over their matching lower-body motion.
+        UpperBody.BlendWeights[0] = FMath::FInterpTo(
+            UpperBody.BlendWeights[0],
+            (State->bAiming || State->bMountedReload || (State->bRiding && AimTime < AimDuration)) && State->RifleAim
+                ? 1.f
+                : 0.f,
+            DT, 10.f);
         Left.Alpha = Right.Alpha = State->FootLock;
+        SupportHand.Alpha = UpperBody.BlendWeights[0] * (1.f - ReloadBlend.Alpha);
+        SupportHand.GripOffset = State->SupportGripOffset;
+        SupportHand.GunRotation = State->WeaponRotation;
         Pelvis.Alpha = State->FootLock;
         Pelvis.Translation = FVector(-State->RideInput.X * 6.f, 0, -39.f);
         Pelvis.Targets[0] = State->LeftFoot;
@@ -235,7 +400,28 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
     virtual void UpdateAnimationNode(const FAnimationUpdateContext &Context) override
     {
         const float DT = Context.GetDeltaTime();
-        if (DesiredRifle && (DesiredRifle != LastRifle || ShotSerial != LastShotSerial))
+        if (ActionSerial != EvaluatedActionSerial && DesiredAction)
+        {
+            RideAction.SetSequence(DesiredAction);
+            RideAction.SetLoopAnimation(false);
+            RideAction.Initialize_AnyThread(FAnimationInitializeContext(this, Context.SharedContext));
+            RideAction.SetAccumulatedTime(0);
+            EvaluatedActionSerial = ActionSerial;
+        }
+        if (AimSerial != EvaluatedAimSerial && DesiredAimAction)
+        {
+            AimAction.SetSequence(DesiredAimAction);
+            AimAction.SetLoopAnimation(false);
+            AimAction.Initialize_AnyThread(FAnimationInitializeContext(this, Context.SharedContext));
+            AimAction.SetAccumulatedTime(0);
+            EvaluatedAimSerial = AimSerial;
+        }
+        if (ShotSerial != LastShotSerial)
+        {
+            GunShot.Initialize_AnyThread(FAnimationInitializeContext(this, Context.SharedContext));
+            GunShot.SetAccumulatedTime(0);
+        }
+        if (DesiredRifle && DesiredRifle != LastRifle)
         {
             Rifle.SetSequence(DesiredRifle);
             Rifle.SetLoopAnimation(bRifleLoop);
@@ -264,6 +450,67 @@ FAnimInstanceProxy *UHoverAnimInstance::CreateAnimInstanceProxy()
     return new FHoverAnimProxy(this);
 }
 void UHoverAnimInstance::DestroyAnimInstanceProxy(FAnimInstanceProxy *Proxy)
+{
+    delete Proxy;
+}
+
+// Purchased FPS poses and reload montage; ammo/timing stay with the native weapon.
+struct FHoverViewProxy final : FAnimInstanceProxy
+{
+    FAnimNode_SequencePlayer_Standalone Idle, Aim;
+    FAnimNode_TwoWayBlend AimBlend;
+    FAnimNode_Slot Reload;
+    FAnimNode_ConvertLocalToComponentSpace Component;
+    FHoverSupportHandNode Support;
+    FAnimNode_ConvertComponentToLocalSpace Root;
+    explicit FHoverViewProxy(UAnimInstance *Instance) : FAnimInstanceProxy(Instance) {}
+    virtual void Initialize(UAnimInstance *Instance) override
+    {
+        auto *State = CastChecked<UHoverViewAnimInstance>(Instance);
+        State->Idle =
+            LoadObject<UAnimSequence>(nullptr, TEXT("/Game/ZESP/ZE/Animations/M16/AS_FPS_Idle_M16.AS_FPS_Idle_M16"));
+        State->AimIdle = LoadObject<UAnimSequence>(
+            nullptr, TEXT("/Game/ZESP/ZE/Animations/M16/AS_FPS_Idle_Aim_M16.AS_FPS_Idle_Aim_M16"));
+        Idle.SetSequence(State->Idle);
+        Aim.SetSequence(State->AimIdle);
+        Idle.SetLoopAnimation(true);
+        Aim.SetLoopAnimation(true);
+        AimBlend.A.SetLinkNode(&Idle);
+        AimBlend.B.SetLinkNode(&Aim);
+        Reload.Source.SetLinkNode(&AimBlend);
+        Reload.SlotName = TEXT("DefaultSlot");
+        Reload.bAlwaysUpdateSourcePose = true;
+        Component.LocalPose.SetLinkNode(&Reload);
+        Support.ComponentPose.SetLinkNode(&Component);
+        Support.bGripAtPalm = true;
+        Root.ComponentPose.SetLinkNode(&Support);
+        FAnimInstanceProxy::Initialize(Instance);
+    }
+    virtual FAnimNode_Base *GetCustomRootNode() override
+    {
+        return &Root;
+    }
+    virtual void GetCustomNodes(TArray<FAnimNode_Base *> &Nodes) override
+    {
+        Nodes = {&Idle, &Aim, &AimBlend, &Reload, &Component, &Support, &Root};
+    }
+    virtual void PreUpdate(UAnimInstance *Instance, float DT) override
+    {
+        FAnimInstanceProxy::PreUpdate(Instance, DT);
+        auto *State = CastChecked<UHoverViewAnimInstance>(Instance);
+        AimBlend.Alpha = State->AimAlpha;
+        Support.GripOffset = State->SupportGripOffset;
+        Support.GunRotation = State->WeaponRotation;
+        // Let the authored reload hand leave the foregrip.
+        Support.Alpha = FMath::FInterpTo(Support.Alpha, State->IsAnyMontagePlaying() ? 0.f : 1.f, DT, 16.f);
+    }
+};
+
+FAnimInstanceProxy *UHoverViewAnimInstance::CreateAnimInstanceProxy()
+{
+    return new FHoverViewProxy(this);
+}
+void UHoverViewAnimInstance::DestroyAnimInstanceProxy(FAnimInstanceProxy *Proxy)
 {
     delete Proxy;
 }
@@ -308,11 +555,12 @@ struct FHoverAccessoryProxy final : FAnimInstanceProxy
         auto *Mesh = Instance->GetSkelMeshComponent();
         if (auto *Owner = Mesh->GetOwner(); Owner && DT > 0)
         {
-            const FVector Velocity = Owner->GetVelocity();
+            const auto *Vehicle = Owner->GetAttachParentActor();
+            const FVector Velocity = Vehicle ? Vehicle->GetVelocity() : Owner->GetVelocity();
             FVector Acceleration = bInitialized ? (Velocity - LastVelocity) / DT : FVector::ZeroVector;
             const FVector Anchor = Mesh->GetSocketTransform(TEXT("spine_03"), RTS_Component).GetLocation();
             const FVector AnchorSpeed = bInitialized ? (Anchor - LastAnchor) / DT : FVector::ZeroVector;
-            if (bInitialized && Velocity.Size2D() > 60 &&
+            if (bInitialized && !Vehicle && Velocity.Size2D() > 60 &&
                 (!Cast<AHoverPilot>(Owner) || !Cast<AHoverPilot>(Owner)->IsMounted()))
             {
                 const FVector LocalAccel = ((AnchorSpeed - LastAnchorSpeed) / DT).GetClampedToMaxSize(800);

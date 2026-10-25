@@ -43,8 +43,9 @@ and enabled locally, with isolated UE5.8 compatibility fixes. Licensed plugin
 source, binaries and content remain outside Git; preserve the native installation.
 During Play, use Window > ZESP Control Panel for the purchased live tuning tool.
 `Docs/QUALITY_20261023.txt` lists supported fields and native integration patches.
-`Docs/NIGHT_QUALITY_20261024.txt` contains the current rendered quality checks,
-remaining animation gaps and the separate engine-only shutdown reproduction.
+`Docs/ASSET_AUDIT_REPAIRS_20261025.txt` contains the latest asset-integration
+repairs and remaining limits. `Docs/NIGHT_QUALITY_20261024.txt` retains earlier
+rendered checks and the separate engine-only shutdown reproduction.
 
 Build with `Scripts/Build.ps1`, open `AFS.uproject`, and press Play. The default
 map is `/Game/JustBStudios/PostApo/Levels/PostApo`. If the editor has another level
@@ -70,7 +71,7 @@ jump event. Tap B/Shift to crouch or stand; hold to go prone and crawl. Pressing
 while running starts a short decelerating slide before crouch. Standing checks
 headroom. The purchased template has movement logic but no skeletal animations:
 the slide uses a local leg/torso variant of the owned crouch pose, and prone/crawl
-uses a root-locked owned belly-crawl clip. Full-body actions run after CLS root/foot
+uses the owner's animation-only crawl, retargeted without the donor mesh. Full-body actions run after CLS root/foot
 corrections so they stay centred on the moving capsule. Dedicated human slide and
 prone-entry/exit clips remain missing. See `Docs/NIGHT_QUALITY_20261024.txt` for
 the latest rendered review and effect/loot fixes.
@@ -133,16 +134,20 @@ health she resets after3seconds. Home resets the player/glider; R also resets in
 while R reloads in Cyber City.
 
 The data asset also exposes booster, muzzle and landing effect references. Local effect
-copies preserve vendor originals. Niagara thrust follows direction and boost strength;
-the compact effect reduces heat distortion. The supplied Ballista replaces the first rifle and has a local removable reflex
+copies preserve vendor originals. Narrow white/blue Niagara jets follow thrust,
+lift, descent, steering and braking at existing board features, without new nozzle geometry.
+The supplied Ballista replaces the first rifle and has a local removable reflex
 sight. L2 uses centred sights in FPS and screen zoom while staying external in
 third person. Crouch height eases without changing camera-arm distance; jump
 animations do not request a zoom. Its muzzle pulse is attached to the measured
 barrel tip, and a straight tracer with a short purchased Niagara trail follows
 the barrel axis. Solid hits produce dust/debris, and
-CP Rifle1 audio004 provides the shot sound. The original gun assets remain intact. Hits remain hitscan; the tracer is
-visual feedback, not simulated ballistic damage. The glider uses dedicated continuous
-turn/movement blends, a held reverse pose and an upper-body gun/recoil layer.
+CP Rifle1 audio004 provides the shot sound. The original gun assets remain intact.
+The configured Ballista tiers use hitscan with a cosmetic tracer; the combat bridge
+also honors a weapon's explicit projectile configuration. FPS has Vexa-derived
+arms and a native reload action; the static gun has no detachable magazine.
+The glider uses turn/movement entry and exit clips, held pitch poses, nine aim
+offsets, an upper-body reload action and recoil, with independent camera look.
 The hips adjust to both legs' reach before foot IK, keeping the feet on the pads
 through taller poses without stretching the legs. Animation evaluates after the
 pilot updates the board and foot targets. Input, motion and boost timers retain

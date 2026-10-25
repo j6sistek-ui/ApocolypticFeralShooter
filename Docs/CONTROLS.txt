@@ -51,7 +51,8 @@ Unscoped third-person fire raises the visible gun. The Ballista has a centred re
 PostApo: three body hits or one headshot kills a zombie; population replenishes to20.
 Cyber City: Zombie Engine waves grow in health/count/speed. Four standard appearances,
 brute rounds12/14/16... and eight-kid swarm rounds5/15/25... are editable defaults.
-The brute resists ordinary headshot instant kills. Its landing stomp knocks nearby
+Cyber City and Lakeside headshots use each weapon's damage multiplier against
+the target's scaled health; they are not forced instant kills. The brute's landing stomp knocks nearby
 on-foot Vexa down within4m; walls block it. The top-right panel shows wave progress.
 Walk/drive over dropped pickups: Nuke clears live zombies; Speed lasts15seconds.
 PostApo ammo is unlimited. Cyber City and Lakeside use magazine/reserve ammo and reloads.
@@ -73,7 +74,11 @@ D-pad Down / Tab: inventory. B / Escape: close. Left stick moves its cursor;
 A clicks or holds to drag. Mouse drag/drop uses the supplied inventory UI.
 The native inventory provides item slots, quickbar, weight and equipment capacity.
 ZESP live settings: editor Window > ZESP Control Panel while Play is running.
-See Docs/QUALITY_20261023.txt for supported live fields and deliberate exceptions.
+See Docs/ASSET_AUDIT_REPAIRS_20261025.txt for current supported fields and limits.
+The controller Zombie Settings page changes four session fields; it is separate
+from the full editor-only RGCL panel. Wave damage scaling and the active map's
+starting-equipment settings are now used. Ballista tiers and katana are the
+configured loadouts; installing another weapon does not fit its model to Vexa.
 
 SUPPLIED HOVERBIKE CONTROLS
 Controller: RT accelerate; LT brake, then continue holding to reverse.
@@ -93,11 +98,17 @@ The vendor's controller X throttle and A brake bindings remain intact.
 
 Deferred: target locking, multiplayer, production tuning and main-game integration.
 Dedicated human slide and prone-entry/exit clips remain an asset gap. The local
-slide is now a grounded leg/torso variant of the owned crouch pose; crawl reuses
-the owned belly-crawl clip. Controller cursor feel
+slide is a grounded leg/torso variant of the owned crouch pose; crawl now uses
+the owner's supplied crawl animation, retargeted without its donor mesh. Controller cursor feel
 and final visual motion need owner review.
 The dive uses the existing prone pose in flight; dedicated dive transition animation remains an asset gap.
-The FPS view uses separate weapon presentation; the full Vexa body/aim pose is shown in F5 review view.
+FPS now uses Vexa-derived arms with the purchased idle/reload animation and a
+stable sight anchor. Mounted reload layers the CLS action above the glider pose.
+The static Ballista has no detachable magazine, so the hand animation is still
+an approximation of a physical reload. The full Vexa body is shown in F5 review.
+Directional glider jets attach to existing board features. Rear jets follow
+thrust; lift, descent, side and braking jets respond to flight demand/motion.
+No nozzle geometry was added. Hold-X assisted landing remains a planned feature.
 
 PRESERVED COMPARISONS
 D:/AFS_Comparisons/CLS_MM_2026-10-23/Before_Parkour/AFS is the preserved original.

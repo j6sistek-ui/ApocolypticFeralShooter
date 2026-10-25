@@ -350,6 +350,18 @@ void AHoverCyberZombieAI::Tick(float DT)
         }
     }
     auto *Zombie = Cast<AHoverCyberZombie>(GetPawn());
+    if (Zombie && Player)
+    {
+        // Preserve exact contact poses nearby. Distant enemies can use Unreal's
+        // visibility/update-rate budget without throttling AI or attack timers.
+        const bool NeedsFullPose =
+            Zombie->NeedsContactPose() ||
+            FVector::DistSquared(Zombie->GetActorLocation(), Player->GetActorLocation()) < FMath::Square(2000.f);
+        Zombie->GetMesh()->bEnableUpdateRateOptimizations = !NeedsFullPose;
+        Zombie->GetMesh()->VisibilityBasedAnimTickOption =
+            NeedsFullPose ? EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones
+                          : EVisibilityBasedAnimTickOption::AlwaysTickPose;
+    }
     auto *Board = GetBlackboardComponent();
     if (Zombie && Zombie->ZombieData && Board)
     {
@@ -549,10 +561,8 @@ float AHoverCyberZombie::TakeDamage(float Damage, const FDamageEvent &Event, ACo
         Event.GetBestHitInfo(this, Causer, Hit, Direction);
         UE_LOG(LogTemp, Verbose, TEXT("HOVER_ZOMBIE_HIT causer=%s bone=%s damage=%.1f point=%s"), *GetNameSafe(Causer),
                *Hit.BoneName.ToString(), Damage, *Hit.ImpactPoint.ToString());
-        if (EventController && Cast<AHoverPilot>(EventController->GetPawn()) && SurvivalComponent &&
-            ((GetRole() != EHoverZombieRole::Brute &&
-              Hit.BoneName.ToString().Contains(TEXT("head"), ESearchCase::IgnoreCase)) ||
-             (Mode && Mode->HasInstaKill())))
+        if (EventController && Cast<AHoverPilot>(EventController->GetPawn()) && SurvivalComponent && Mode &&
+            Mode->HasInstaKill())
             Damage = FMath::Max(Damage, SurvivalComponent->GetHealth());
         if (Blood && Event.IsOfType(FPointDamageEvent::ClassID) && Hit.bBlockingHit && Hit.GetActor() == this)
             HoverEffects::BloodBurst(GetWorld(), Blood, Hit.ImpactPoint, Direction);

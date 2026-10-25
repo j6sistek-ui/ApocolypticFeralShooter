@@ -22,6 +22,7 @@ class HOVERFLIGHT_API AHoverCyberRifle : public AZE_WeaponBase
     virtual void OnEquipped_Implementation(APawn *NewOwnerPawn) override;
     virtual void OnUnequipped_Implementation(APawn *OldOwnerPawn) override;
     void CancelReload();
+    void EjectShellAt(const FTransform &Transform);
 
   protected:
     virtual void PerformLineTrace() override;

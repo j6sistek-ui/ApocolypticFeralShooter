@@ -21,12 +21,15 @@
 #include "NiagaraEmitter.h"
 #include "NiagaraEmitterHandle.h"
 #include "NiagaraScript.h"
+#include "NiagaraScriptSource.h"
+#include "NiagaraGraph.h"
 #include "NiagaraSpriteRendererProperties.h"
 #include "NiagaraComponent.h"
 #include "NiagaraSystemInstanceController.h"
 #include "NiagaraSystemInstance.h"
 #include "NiagaraEmitterInstance.h"
 #include "NiagaraDataSet.h"
+#include "NiagaraDataInterfaceCurve.h"
 #include "UObject/UObjectIterator.h"
 #include "AssetCompilingManager.h"
 #include "Engine/StaticMeshActor.h"
@@ -311,7 +314,9 @@ bool UHoverAuthoring::BuildRideBlend(UBlendSpace *Blend, const TArray<UAnimSeque
     for (int32 I = 0; I < 2; ++I)
     {
         auto *Parameter = Property->ContainerPtrToValuePtr<FBlendParameter>(Blend, I);
-        Parameter->DisplayName = I == 0 ? TEXT("Turn") : TEXT("Forward / reverse");
+        Parameter->DisplayName = Blend->GetName().Contains(TEXT("Aim"))
+                                     ? (I == 0 ? TEXT("Aim yaw") : TEXT("Aim pitch"))
+                                     : (I == 0 ? TEXT("Turn") : TEXT("Forward / reverse"));
         Parameter->Min = -1;
         Parameter->Max = 1;
         Parameter->GridNum = 2;
@@ -639,8 +644,31 @@ FString UHoverAuthoring::DescribeNiagaraEffect(UNiagaraSystem *Effect)
             Report += TEXT("EMITTER ") + Handle.GetName().ToString() + TEXT("\n");
             TArray<UNiagaraScript *> Scripts;
             Data->GetScripts(Scripts);
+            TSet<UNiagaraGraph *> Seen;
             for (auto *Script : Scripts)
+            {
                 DescribeStore(Script->RapidIterationParameters);
+                if (Effect->GetName().StartsWith(TEXT("NS_GliderJet")))
+                    if (auto *Source = Cast<UNiagaraScriptSource>(Script->GetLatestSource());
+                        Source && Source->NodeGraph && !Seen.Contains(Source->NodeGraph))
+                    {
+                        Seen.Add(Source->NodeGraph);
+                        for (UEdGraphNode *Node : Source->NodeGraph->Nodes)
+                        {
+                            Report += TEXT("NODE ") + Node->GetName() + TEXT(" ") +
+                                      Node->GetNodeTitle(ENodeTitleType::ListView).ToString() +
+                                      FString::Printf(TEXT(" enabled=%d\n"), int32(Node->GetDesiredEnabledState()));
+                            for (const auto *Pin : Node->Pins)
+                            {
+                                Report += TEXT("  PIN ") + Pin->PinName.ToString() + TEXT(" = ") + Pin->DefaultValue;
+                                for (const auto *Link : Pin->LinkedTo)
+                                    Report += TEXT(" -> ") + Link->GetOwningNode()->GetName() + TEXT(".") +
+                                              Link->PinName.ToString();
+                                Report += TEXT("\n");
+                            }
+                        }
+                    }
+            }
         }
 #endif
     return Report;
@@ -709,6 +737,159 @@ FString UHoverAuthoring::ConfigurePrototypeEffect(UNiagaraSystem *Effect, float 
     Effect->MarkPackageDirty();
 #endif
     return Report;
+}
+
+int32 UHoverAuthoring::ConfigureGliderJet(UNiagaraSystem *Effect)
+{
+    int32 Changed = 0;
+#if WITH_EDITOR
+    if (!Effect || !Effect->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/Effects/NS_GliderJet")))
+        return 0;
+    Effect->Modify();
+    Effect->GetExposedParameters().SetParameterValue(
+        26.f, FNiagaraVariable(FNiagaraTypeDefinition::GetFloatDef(), TEXT("User.ThrustSize")));
+    Effect->GetExposedParameters().SetParameterValue(
+        260.f, FNiagaraVariable(FNiagaraTypeDefinition::GetFloatDef(), TEXT("User.ThurstSpawningRate")));
+    Effect->GetExposedParameters().SetParameterValue(
+        FLinearColor(.8f, .9f, 1.f, 1.f),
+        FNiagaraVariable(FNiagaraTypeDefinition::GetColorDef(), TEXT("User.ThrustColor")));
+    Effect->SetFixedBounds(FBox(FVector(-850, -100, -100), FVector(100, 100, 100)));
+    for (auto &Handle : Effect->GetEmitterHandles())
+    {
+        // Ten nozzles do not need ten overlapping heat-distortion volumes.
+        if (Handle.GetName() == TEXT("Heat") || Handle.GetName() == TEXT("Sparks") || Handle.GetName() == TEXT("Trail"))
+        {
+            Handle.SetIsEnabled(false, *Effect, false);
+            continue;
+        }
+        auto *Data = Handle.GetEmitterData();
+        if (!Data)
+            continue;
+        Data->bLocalSpace = true;
+        for (auto *Renderer : Data->GetRenderers())
+            if (auto *Sprite = Cast<UNiagaraSpriteRendererProperties>(Renderer))
+            {
+                if (auto *Material = LoadObject<UMaterialInterface>(
+                        nullptr, TEXT("/Game/HoverPrototype/Effects/M_GliderJet_Core.M_GliderJet_Core")))
+                    Sprite->Material = Material;
+                Sprite->Alignment = ENiagaraSpriteAlignment::VelocityAligned;
+                Sprite->FacingMode = ENiagaraSpriteFacingMode::FaceCamera;
+                ++Changed;
+            }
+        if (Effect->GetName().EndsWith(TEXT("DebugCPU")))
+            Data->SimTarget = ENiagaraSimTarget::CPUSim;
+        TArray<UNiagaraScript *> Scripts;
+        Data->GetScripts(Scripts);
+        for (auto *Script : Scripts)
+        {
+            Script->Modify();
+            if (auto *Source = Cast<UNiagaraScriptSource>(Script->GetLatestSource());
+                Source && Source->NodeGraph && Source->GetOutermost() == Effect->GetOutermost())
+            {
+                auto *Graph = Source->NodeGraph.Get();
+                for (UEdGraphNode *Node : Graph->Nodes)
+                {
+                    const FString Title = Node->GetNodeTitle(ENodeTitleType::ListView).ToString();
+                    if (auto *Property = FindFProperty<FObjectPropertyBase>(Node->GetClass(), TEXT("DataInterface")))
+                        if (auto *Curve =
+                                Cast<UNiagaraDataInterfaceCurve>(Property->GetObjectPropertyValue_InContainer(Node));
+                            Curve && Curve->GetOutermost() == Effect->GetOutermost())
+                        {
+                            const bool Size = Title.StartsWith(TEXT("ScaleSpriteSize."));
+                            const bool Alpha = Title.StartsWith(TEXT("FloatFromCurve002."));
+                            if (Size || Alpha)
+                            {
+                                Curve->Modify();
+                                Curve->Curve.Reset();
+                                Curve->Curve.AddKey(0.f, 1.f);
+                                Curve->Curve.AddKey(.2f, 1.f);
+                                Curve->Curve.AddKey(.65f, Size ? .4f : .6f);
+                                Curve->Curve.AddKey(1.f, Size ? .05f : 0.f);
+                                Curve->UpdateLUT();
+                                static_cast<UEdGraph *>(Graph)->NotifyGraphChanged();
+                                ++Changed;
+                            }
+                        }
+                    if (Node->GetNodeTitle(ENodeTitleType::ListView).ToString() == TEXT("Solve Forces and Velocity") &&
+                        Node->GetDesiredEnabledState() != ENodeEnabledState::Enabled)
+                    {
+                        Node->Modify();
+                        Node->SetEnabledState(ENodeEnabledState::Enabled);
+                        static_cast<UEdGraph *>(Graph)->NotifyGraphChanged();
+                        ++Changed;
+                    }
+                    for (UEdGraphPin *Pin : Node->Pins)
+                        if (Pin->PinName == TEXT("Write to Presolve Properties") && Pin->DefaultValue != TEXT("false"))
+                        {
+                            // The source defers integration into presolve fields. Our
+                            // self-contained nozzle must write its actual position.
+                            Graph->Modify();
+                            Node->Modify();
+                            Pin->DefaultValue = TEXT("false");
+                            Node->PinDefaultValueChanged(Pin);
+                            static_cast<UEdGraph *>(Graph)->NotifyGraphChanged();
+                            ++Changed;
+                        }
+                }
+            }
+            auto &Store = Script->RapidIterationParameters;
+            TArray<FNiagaraVariable> Variables;
+            Store.GetParameters(Variables);
+            for (const auto &Variable : Variables)
+            {
+                const FString Name = Variable.GetName().ToString();
+                if (Variable.GetType() == FNiagaraTypeDefinition::GetFloatDef())
+                {
+                    TOptional<float> Value;
+                    if (Name.EndsWith(TEXT("AddVelocity.Cone Angle")))
+                        Value = .8f;
+                    else if (Name.EndsWith(TEXT("RandomRangeFloat.Minimum")))
+                        Value = 900.f;
+                    else if (Name.EndsWith(TEXT("RandomRangeFloat.Maximum")))
+                        Value = 1000.f;
+                    else if (Name.EndsWith(TEXT("InitializeParticle.Lifetime Min")))
+                        Value = .25f;
+                    else if (Name.EndsWith(TEXT("InitializeParticle.Lifetime Max")))
+                        Value = .33f;
+                    else if (Name.EndsWith(TEXT("InitializeParticle.Lifetime")))
+                        Value = .29f;
+                    else if (Name.EndsWith(TEXT("InitializeParticle.Uniform Sprite Size Min")))
+                        Value = .9f;
+                    else if (Name.EndsWith(TEXT("InitializeParticle.Uniform Sprite Size Max")))
+                        Value = 1.1f;
+                    else if (Name.Contains(TEXT("InitializeParticle.Sprite Rotation Angle")))
+                        Value = 0.f;
+                    else if (Name.EndsWith(TEXT("CurlNoiseForce.Noise Strength")))
+                        Value = 0.f;
+                    else if (Name.EndsWith(TEXT("ShapeLocation.Sphere Radius")))
+                        Value = 1.5f;
+                    if (Value.IsSet())
+                    {
+                        Store.SetParameterValue(Value.GetValue(), Variable);
+                        ++Changed;
+                    }
+                }
+                else if (Variable.GetType() == FNiagaraTypeDefinition::GetVec3Def() &&
+                         Name.EndsWith(TEXT("AddVelocity.Velocity")))
+                {
+                    Store.SetParameterValue(FVector3f(-550, 0, 0), Variable);
+                    ++Changed;
+                }
+                else if (Variable.GetType() == FNiagaraTypeDefinition::GetVec3Def() &&
+                         Name.EndsWith(TEXT("ShapeLocation.Box Size")))
+                {
+                    Store.SetParameterValue(FVector3f(2, 1, 1), Variable);
+                    ++Changed;
+                }
+            }
+            Script->InvalidateCompileResults(TEXT("Local directional jet tuning"));
+        }
+    }
+    Effect->RequestCompile(true);
+    Effect->WaitForCompilationComplete();
+    Effect->MarkPackageDirty();
+#endif
+    return Changed;
 }
 
 int32 UHoverAuthoring::ConfigureSurfaceImpact(UNiagaraSystem *Effect, UMaterialInterface *DustMaterial)
@@ -832,12 +1013,54 @@ TMap<FString, FString> UHoverAuthoring::DescribeObjectProperties(UObject *Object
     return Result;
 }
 
+bool UHoverAuthoring::ConfigureCreatureLODs(USkeletalMesh *Mesh)
+{
+#if WITH_EDITOR
+    // Only isolated runtime candidates may be reduced; never touch source art.
+    if (!Mesh || !Mesh->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/ZombieEngine/Variants/")) ||
+        !Mesh->GetPathName().Contains(TEXT("/Optimized/")) || Mesh->GetLODNum() < 4)
+        return false;
+    Mesh->Modify();
+    const float Ratios[] = {1.f, .55f, .25f, .12f};
+    const float Screens[] = {1.f, .45f, .20f, .08f};
+    for (int32 I = 1; I < 4; ++I)
+    {
+        auto *Info = Mesh->GetLODInfo(I);
+        Info->ScreenSize.Default = Screens[I];
+        Info->LODHysteresis = .03f;
+        auto &Reduction = Info->ReductionSettings;
+        Reduction.TerminationCriterion = SMTC_NumOfTriangles;
+        Reduction.NumOfTrianglesPercentage = Ratios[I];
+        Reduction.NumOfVertPercentage = Ratios[I];
+        Reduction.BaseLOD = 0;
+        Reduction.MaxBonesPerVertex = 8;
+        Reduction.bEnforceBoneBoundaries = true;
+        Reduction.bMergeCoincidentVertBones = true;
+        Reduction.bRecalcNormals = false;
+        Reduction.bRemapMorphTargets = true;
+    }
+    Mesh->MarkPackageDirty();
+    return true;
+#else
+    return false;
+#endif
+}
+
 FString UHoverAuthoring::InspectCharacterMesh(USkeletalMesh *Mesh)
 {
     FString Result;
 #if WITH_EDITOR
     if (Mesh && Mesh->GetResourceForRendering() && Mesh->GetResourceForRendering()->LODRenderData.Num())
     {
+        int32 Index = 0;
+        for (const auto &Level : Mesh->GetResourceForRendering()->LODRenderData)
+        {
+            uint32 Triangles = 0;
+            for (const auto &Section : Level.RenderSections)
+                Triangles += Section.NumTriangles;
+            Result +=
+                FString::Printf(TEXT("LOD=%d triangles=%u vertices=%u\n"), Index++, Triangles, Level.GetNumVertices());
+        }
         const auto &LOD = Mesh->GetResourceForRendering()->LODRenderData[0];
         const auto &Vertices = LOD.StaticVertexBuffers.StaticMeshVertexBuffer;
         const auto &Weights = LOD.SkinWeightVertexBuffer;
@@ -969,7 +1192,10 @@ FString UHoverAuthoring::InspectReviewEffects()
                         Report += FString::Printf(TEXT("  %s particles=%d\n"),
                                                   *Emitter->GetEmitterHandle().GetName().ToString(),
                                                   Emitter->GetNumParticles());
-                        if (Emitter->GetEmitterHandle().GetName() == TEXT("Dust"))
+                        if (Emitter->GetSimTarget() == ENiagaraSimTarget::CPUSim &&
+                            (Emitter->GetEmitterHandle().GetName() == TEXT("Dust") ||
+                             Emitter->GetEmitterHandle().GetName() == TEXT("Thrust") ||
+                             Emitter->GetEmitterHandle().GetName() == TEXT("Trail")))
                             if (const auto *Buffer = Emitter->GetParticleData().GetCurrentData();
                                 Buffer && Buffer->GetNumInstances() > 0)
                             {

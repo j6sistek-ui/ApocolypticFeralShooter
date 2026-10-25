@@ -14,10 +14,16 @@ class HOVERFLIGHT_API UHoverAnimInstance : public UAnimInstance
     int32 ShotSerial = 0;
     UPROPERTY() TObjectPtr<class UBlendSpace> Locomotion;
     UPROPERTY() TObjectPtr<class UBlendSpace> RideBlend;
+    UPROPERTY() TObjectPtr<class UHoverPilotAssets> RideAssets;
+    UPROPERTY(BlueprintReadOnly) FVector RideAimInput = FVector::ZeroVector;
+    UPROPERTY(BlueprintReadOnly) float RidePitch = 0;
+    UPROPERTY(BlueprintReadOnly) FName RideTransition;
+    bool bRideThrust = false;
     UPROPERTY() TObjectPtr<USkeletalMeshComponent> MotionSource;
     bool bMotionMatching = false;
-    FVector RideInput = FVector::ZeroVector;
-    bool bRiding = false;
+    UPROPERTY(BlueprintReadOnly) FVector RideInput = FVector::ZeroVector;
+    UPROPERTY(BlueprintReadOnly) bool bRiding = false;
+    UPROPERTY(BlueprintReadOnly) bool bMountedReload = false;
     FVector LocomotionInput = FVector::ZeroVector;
     bool bGroundLocomotion = false;
     float SequenceRate = 1.f;
@@ -32,6 +38,24 @@ class HOVERFLIGHT_API UHoverAnimInstance : public UAnimInstance
     float RiderLean = 0;
     FVector LeftFoot = FVector::ZeroVector;
     FVector RightFoot = FVector::ZeroVector;
+    FVector SupportGripOffset = FVector::ZeroVector;
+    FQuat WeaponRotation = FQuat::Identity;
+
+  protected:
+    virtual FAnimInstanceProxy *CreateAnimInstanceProxy() override;
+    virtual void DestroyAnimInstanceProxy(FAnimInstanceProxy *Proxy) override;
+};
+
+UCLASS(Transient)
+class HOVERFLIGHT_API UHoverViewAnimInstance : public UAnimInstance
+{
+    GENERATED_BODY()
+  public:
+    UPROPERTY() TObjectPtr<UAnimSequence> Idle;
+    UPROPERTY() TObjectPtr<UAnimSequence> AimIdle;
+    float AimAlpha = 0;
+    FVector SupportGripOffset = FVector::ZeroVector;
+    FQuat WeaponRotation = FQuat::Identity;
 
   protected:
     virtual FAnimInstanceProxy *CreateAnimInstanceProxy() override;

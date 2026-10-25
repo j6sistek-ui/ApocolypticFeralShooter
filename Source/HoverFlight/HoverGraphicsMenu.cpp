@@ -146,8 +146,9 @@ void UHoverGraphicsMenu::Refresh()
         }
         DetailText->SetText(FText::FromString(TEXT("Health/speed apply to living enemies. Wave size changes next "
                                                    "round. Higher spawn interval means slower spawning.")));
-        ImageHelpText->SetText(FText::FromString(TEXT(
-            "Full purchased editor tools: Window > ZESP Control Panel during Play (Shift+F1 releases the mouse).")));
+        ImageHelpText->SetText(FText::FromString(
+            TEXT("Editor weapon/wave tools: Window > ZESP Control Panel during Play. Shift+F1 releases the mouse. "
+                 "Vexa movement and camera settings use this sandbox's controls.")));
         NoteText->SetText(FText::FromString(
             TEXT("Session-only adjustments. Apply resumes play; Cancel discards changes. New levels start at 1x.")));
         return;

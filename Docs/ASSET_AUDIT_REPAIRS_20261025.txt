@@ -1,0 +1,146 @@
+AFS ASSET AUDIT REPAIRS — 2026-10-25
+
+This supersedes the October 25 read-only audit's implementation status. It does
+not replace that audit's baseline evidence or claim full purchased-pack coverage.
+Local sandbox only. This pass did not edit supplied source projects or owner
+source art; AFS.uproject and ten latest kid-source files passed hash checks.
+No GitHub publication or SpaceSurvival integration.
+
+COMBAT AND MOVEMENT
+The active ZESP weapon owns ammo, spread, range, damage and firing cadence. The
+bridge now honors its hitscan/projectile choice, projectile speed/gravity/class,
+headshot multiplier, surface effects and shell fallback. The five authored
+Ballista tiers explicitly use hitscan. Their brief tracer is presentation, not
+a second damage projectile. Normal headshots no longer force an instant kill;
+wave attack damage scaling is applied. Invincibility remains on by default.
+Each map reads its own starting equipment. Current supported equipment is the
+Ballista tiers plus katana. Arbitrary installed guns require presentation setup.
+Advanced Shooter remains installed but unused; ZESP is the single combat owner.
+
+CLS now has local rifle profile/chooser/database copies using 22 existing clips,
+with native rifle lower-body movement and ADS upper-body contact. Available
+directional hit reactions and slow crouch entry/exit are used. Parkour continues
+to own movement and wall actions. No replacement pawn or second movement owner.
+The owner's supplied crawl animation was retargeted to Quinn/Vexa; its donor
+geometry was not imported. Moving crawl loops; idle freezes; stand checks room.
+Tap B while moving slides, hold B dives into prone. Dedicated human dive/prone
+entry/exit and wall-run animation remain asset gaps; the pack has no hidden
+skeletal animations to enable. Functional actions do not imply finished clips.
+
+FIRST-PERSON AND RIDING PRESENTATION
+Vexa-derived view arms use purchased idle/reload animation and the native reload
+timer. Their bounds now cover the view model so they render consistently. The
+gun follows the animated hand and retains a stable sight anchor. View arms hide
+in third person. Glider reload layers the existing CLS action above the riding
+pose with pad contact preserved. The Ballista is a static mesh without a separate
+magazine; the borrowed reload hand path remains approximate. A matched physical
+magazine exchange is not delivered by this pass.
+The new FPS arms cover the rifle; katana retains its prior presentation and
+still needs a dedicated first-person hand/weapon animation for equal polish.
+Per-shot controller feedback now comes only from confirmed shots. Motor feel
+and audio quality still need physical controller/listening checks.
+Bike rider body processing is re-enabled after the vendor disabled it. Body and
+chain motion use attached vehicle velocity; accepted on-foot spring tuning stays.
+
+GLIDER
+Controls are unchanged: R2 thrust; LS pitch/steer; RS look/aim; L1 stronger bank;
+R1 fire; A ollie; held L3 boost. Right-stick camera input no longer leaks into
+rider steering. Separate pitch poses, six movement/turn start/end clips, nine
+aim offsets and aim entry/exit use the purchased glider pack. Feet remain locked.
+The white/blue directional jet candidate is now the saved booster reference.
+Its source Niagara solver was disabled; the local copy now simulates positions,
+with corrected size/alpha curves, short lifetime and restrained emission. Rear,
+lift, descent, side and brake demand follow controls and motion, including light
+hover support. Effects attach to existing board features; no nozzle geometry.
+Assisted landing remains a separate planned feature, not current hold-X behavior.
+
+ZOMBIES
+Each Lakeside definition retains its correct native retargeter and now has four
+attack choices and four hit reactions. Purchased Attack_A/C are prone attacks
+and excluded from standing encounters. Attack_B has measured forward strikes at
+.95 and 2.35 seconds; Attack_D at .5 seconds. Original clips stay untouched.
+Cyber City's standard/brute/kid roles and Lakeside's five-creature exclusion rule
+remain separate. No suitable creature vocal sounds were established from the
+audited libraries; silence is not filled with unrelated effects.
+All 11 custom meshes now point to reversible four-LOD copies. LOD0 is preserved;
+lower levels target 55%, 25%, 12% triangles, with original UV/material references.
+Close and attacking enemies retain full pose updates; distant enemies may use
+engine update-rate/visibility budgeting. This is not a large-horde FPS benchmark.
+Texture edits to shared assets propagate. After a geometry reimport, regenerate
+the optimized copy from its original mesh; do not reimport into the reduced LODs.
+
+SETTINGS AND TRACKING
+D-pad Up/F6 opens settings; L1/R1/Tab selects the Zombie Settings page. Four
+session controls cover health, speed, wave count and spawn interval. The full
+purchased RGCL editor panel is Window > ZESP Control Panel during Play. It does
+not replace Vexa's Parkour, camera or custom animation configuration universally.
+
+VALIDATION
+Native editor builds through Build34 pass; latest 13.05 seconds. Standalone
+Development game build passes in 25.60 seconds after guarding an editor-only
+armor-pickup reconstruction call in the local ZESP copy. Existing engine/vendor
+deprecation warnings remain. Recorded tests cover data-driven damage,
+headshots, projectiles, shells, active-map gear, rifle/crawl contact, glider pitch
+and aim transitions, view arms/reload, LOD comparisons and actual-map horde paths.
+Fresh Lakeside run: 15 spawns, all 15 within 6m at 100 game seconds; HP100 retained.
+Near/far animation budget switches and saved optimized meshes verified. New
+attack montages appeared in live combat. Glider reload26->30 and foot contact
+passed. Bike rendered ride/exit and four body springs also passed. These are
+scripted native inputs, not physical controller acceptance.
+Rendered runs are serialized offscreen. Some end with the previously reproduced
+shared-engine 0xc0000005 shutdown crash after clean reports. That remains open;
+it is not hidden or misreported as a zero-exit pass. City VSM legacy warnings
+also remain. Cooked/package performance and production soak are not established.
+
+The native HoverMotion regression passed 1/1 with zero test warnings; 17 changed
+C++ files passed clang-format, and 103 Python files parsed. Docker's daemon was
+unavailable, so the installed Python runtime performed syntax checks without
+installing packages. Twelve selected runtime reports completed with errors[].
+Rejected diagnostic attempts and clean reports followed by an exit crash remain
+separately recorded; they are not silently counted as clean-process passes.
+
+PACKAGING AND MIGRATION
+PAL_AFS_Runtime in /Game/HoverPrototype/Cook explicitly references 76 native-load
+roots, including dynamic input/hit/walk families and all three map choices. This
+protects assets reached by C++ string paths that the map dependency graph alone
+cannot discover. Config/DefaultGame.ini scans that owned label with AlwaysCook.
+Keep the label synchronized with new native path loads. The local cook disables
+Zen payload storage so the selected D: cook directory actually holds payloads;
+the shared shader/derived-data cache remains unchanged. Output staging is under
+D:/AFS_Builds/Audit_20261025. A successful game compile alone is not a cook test.
+The initial three-map cook completed, then staging exposed an output-directory
+layout mismatch. The reproducible launcher now separates the cook platform path
+from staging's parent path. It does not redirect or remove the editor's Content.
+Cook also found two Cyber City glass instances compiling to fallback material:
+their master had a null T_Roughness default despite an existing T_DirtMap instance
+override. Owned M_CyberGlass supplies that same texture; MI_GlassCB01 and its child
+use the corrected parent. Original master unchanged; instance backed up before
+the reparent. Fresh cook passes with no material compilation failures or error
+lines. IoStore packaging/staging passes after removing the first cancelled
+Zen-cook's stale project-store marker. Versioned cooking avoids the unsafe
+legacy iterative/unversioned combination; no engine storage defaults changed.
+PostApo, Cyber City and Lakeside then launched the packaged Development game,
+loaded Vexa/glider/Ballista and exited0 in three NullRHI smoke runs. This verifies
+cooked startup, not rendered package performance or the full controller path.
+Lakeside emitted a spawn adjustment warning; Cyber emitted a serialized nav-tile
+capacity mismatch, and both ZE maps reported crowd-manager nav initialization
+warnings. Packaged navigation/placement still need a full player-path review.
+The main editor runtime/rendered vehicle and navigation checks are separate.
+
+Port only after owner acceptance. Preserve the local HoverFlight source, native
+HoverPrototype assets, referenced licensed content, plugin versions and fourteen
+private ZESP patched files as one compatible set. The backup contains full patched
+files and audited original/current hashes. Do not publish purchased sources or
+copy AFS input, world, graphics or character defaults over SpaceSurvival wholesale.
+Original source art and the preserved comparison remain the reimport/rollback
+authority; restore selected files after checking for newer owner changes.
+
+PRESERVATION / REUSE
+Rollback and new native candidates: D:/AFS_Comparisons/AuditRepairs_20261025.
+Repro scripts, logs and reports: Codex workspace work/audit_repairs_20261025 and
+work/camera_actions/audit_*_20261025. Before/After hashes and source/asset evidence
+must travel together. Fourteen local licensed ZombieEngine source patches are
+required; source-only HoverFlight is not a portable implementation by itself.
+Remaining planned work: assisted landing, other playable glider tuning, white
+jetpack pickup and wider environmental audio/haptics. The other glider Blender
+rigs are delivered separately. Owner visual/controller acceptance remains open.

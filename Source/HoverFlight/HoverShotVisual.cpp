@@ -31,7 +31,7 @@ void AHoverShotVisual::Launch(const FVector &Start, const FVector &End)
     Bullet->SetRelativeScale3D(FVector(.55f, .014f, .014f));
     // A short visual travel floor lets a nearby shot render before its tail fades.
     // Hit resolution stays instantaneous and never depends on this presentation.
-    Duration = FMath::Clamp(Distance / 18000.f, .045f, 3.f);
+    Duration = FMath::Clamp(Distance / 90000.f, .06f, .09f);
     Trail->SetVariableLinearColor(TEXT("User.Color"), FLinearColor(1.f, .65f, .25f));
     Trail->SetVariableFloat(TEXT("User.Emissive"), 2.f);
     Trail->SetVariableFloat(TEXT("User.Lifetime"), .06f);

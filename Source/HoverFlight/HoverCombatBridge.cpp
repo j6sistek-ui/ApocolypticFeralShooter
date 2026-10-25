@@ -1,6 +1,7 @@
 #include "HoverCombatBridge.h"
 #include "HoverPilot.h"
 #include "HoverLocomotionBridge.h"
+#include "HoverCyberCity.h"
 #include "Inventory/ZE_InventoryComponent.h"
 #include "Inventory/ZE_WeaponDefinition.h"
 #include "Inventory/ZE_AmmoDefinition.h"
@@ -49,7 +50,7 @@ class FHoverInventoryCursor : public FAnalogCursor
 void AHoverCyberRifle::PerformLineTrace()
 {
     if (auto *Pilot = Cast<AHoverPilot>(OwnerPawn); Pilot && WeaponDefinition)
-        Pilot->FireShot(WeaponDefinition->CombatStats.Damage, CurrentSpread, WeaponDefinition->CombatStats.Range);
+        Pilot->FireShot(WeaponDefinition->CombatStats.Damage, CurrentSpread, WeaponDefinition->CombatStats.Range, this);
 }
 void AHoverCyberRifle::OnEquipped_Implementation(APawn *NewOwnerPawn)
 {
@@ -78,17 +79,32 @@ void AHoverCyberRifle::PlayFireAnimation()
     // Existing Ballista presentation emits one flash/sound/tracer per vendor-approved shot.
     LastFireAnimTime = GetWorld()->GetTimeSeconds();
 }
+void AHoverCyberRifle::EjectShellAt(const FTransform &Transform)
+{
+    // The imported Ballista is static and has no native ejection socket. Supply
+    // its visible breech as the vendor shell system's fallback transform.
+    const FTransform Previous = GetActorTransform();
+    SetActorTransform(Transform);
+    SpawnShellEffect();
+    SetActorTransform(Previous);
+}
 void AHoverCyberRifle::Reload()
 {
     const bool WasReloading = IsReloading();
     Super::Reload();
     if (!WasReloading && IsReloading())
-        if (auto *Pilot = Cast<AHoverPilot>(OwnerPawn); Pilot && Pilot->LocomotionBridge && Pilot->IsOnFoot())
+    {
+        if (auto *Pilot = Cast<AHoverPilot>(OwnerPawn); Pilot && Pilot->ViewArms && WeaponDefinition)
+            if (auto *Instance = Pilot->ViewArms->GetAnimInstance())
+                if (auto *Montage = WeaponDefinition->ReloadMontage_FP.LoadSynchronous())
+                    Instance->Montage_Play(Montage, Montage->GetPlayLength() / FMath::Max(ReloadDuration, .01f));
+        if (auto *Pilot = Cast<AHoverPilot>(OwnerPawn); Pilot && Pilot->LocomotionBridge)
             Pilot->LocomotionBridge->PlayAction(
                 LoadObject<UAnimSequence>(
                     nullptr,
                     TEXT("/Game/CLS/Example/SetupYourHeroExample/Anims/Rifle/MM_Rifle_Reload.MM_Rifle_Reload")),
                 ReloadDuration);
+    }
 }
 void AHoverCyberRifle::CancelReload()
 {
@@ -97,6 +113,8 @@ void AHoverCyberRifle::CancelReload()
     StopFire();
     if (auto *Pilot = Cast<AHoverPilot>(OwnerPawn); Pilot && Pilot->LocomotionBridge)
         Pilot->LocomotionBridge->CancelAction();
+    if (auto *Pilot = Cast<AHoverPilot>(OwnerPawn); Pilot && Pilot->ViewArms && Pilot->ViewArms->GetAnimInstance())
+        Pilot->ViewArms->GetAnimInstance()->Montage_Stop(.12f);
 }
 AHoverMeleeWeapon::AHoverMeleeWeapon()
 {
@@ -213,8 +231,8 @@ void UHoverCombatBridge::BeginPlay()
     Inventory->RegisterComponent();
     Survival = NewObject<UZE_SurvivalComponent>(Pilot, TEXT("ZE_Survival"));
     Survival->RegisterComponent();
-    const auto *Waves = LoadObject<UZE_WaveGameModeSettings>(
-        nullptr, TEXT("/Game/HoverPrototype/ZombieEngine/DA_CyberWaves.DA_CyberWaves"));
+    const auto *Mode = GetWorld()->GetAuthGameMode<AHoverCyberCityGameMode>();
+    const auto *Waves = Mode ? Mode->GetWaveSettings() : nullptr;
     Survival->SetGold(Waves ? Waves->StartingEquipment.StartingGold : 500);
     // Invulnerability is owned by Vexa's damage override, not by an unrelated health widget.
     Weapons = NewObject<UZE_WeaponComponent>(Pilot, TEXT("ZE_Weapons"));

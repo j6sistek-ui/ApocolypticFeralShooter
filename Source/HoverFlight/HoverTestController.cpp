@@ -518,10 +518,16 @@ void AHoverTestController::DressDriver()
             C->SetMorphTarget(Morph.Key, Morph.Value);
     }
     Leader->SetAnimInstanceClass(AnimClass);
+    if (auto *BodyPhysics = LoadClass<UAnimInstance>(
+            nullptr, TEXT("/Game/HoverPrototype/Appearance/ABP_Vexa_BodyPhysics.ABP_Vexa_BodyPhysics_C")))
+        Leader->SetOverridePostProcessAnimBP(BodyPhysics);
     if (auto *AnimProperty = FindFProperty<FObjectProperty>(Driver->GetClass(), TEXT("As ABP Quinn")))
         AnimProperty->SetObjectPropertyValue_InContainer(Driver, Leader->GetAnimInstance());
     if (UFunction *Driving = Driver->FindFunction(TEXT("PlayerInVehicle")))
         Driver->ProcessEvent(Driving, nullptr);
+    // The supplied rider disables post-processing. Re-enable our component
+    // override after its vehicle setup so the body springs actually evaluate.
+    Leader->SetDisablePostProcessBlueprint(false);
     Leader->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
     DressedDriver = Driver;
     UE_LOG(LogTemp, Display, TEXT("HOVER_BIKE Vexa appearance applied to supplied rider"));

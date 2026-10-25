@@ -16,6 +16,7 @@ class UBoxComponent;
 class UNiagaraComponent;
 class UNiagaraSystem;
 class UFXSystemAsset;
+class AZE_WeaponBase;
 
 USTRUCT(BlueprintType)
 struct FHoverBodyPart
@@ -44,6 +45,16 @@ class HOVERFLIGHT_API UHoverPilotAssets : public UDataAsset
     UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> RideDown;
     UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> RideReverse;
     UPROPERTY(EditAnywhere) TObjectPtr<class UBlendSpace> RideBlend;
+    UPROPERTY(EditAnywhere, Category = "Glider animation") TObjectPtr<class UBlendSpace> RideAimBlend;
+    UPROPERTY(EditAnywhere, Category = "Glider animation") TObjectPtr<UAnimSequence> RideClimbPose;
+    UPROPERTY(EditAnywhere, Category = "Glider animation") TObjectPtr<UAnimSequence> RideDivePose;
+    UPROPERTY(EditAnywhere, Category = "Glider animation") TObjectPtr<UAnimSequence> RideStart;
+    UPROPERTY(EditAnywhere, Category = "Glider animation") TObjectPtr<UAnimSequence> RideStop;
+    UPROPERTY(EditAnywhere, Category = "Glider animation") TObjectPtr<UAnimSequence> RideLeftStart;
+    UPROPERTY(EditAnywhere, Category = "Glider animation") TObjectPtr<UAnimSequence> RideLeftEnd;
+    UPROPERTY(EditAnywhere, Category = "Glider animation") TObjectPtr<UAnimSequence> RideRightStart;
+    UPROPERTY(EditAnywhere, Category = "Glider animation") TObjectPtr<UAnimSequence> RideRightEnd;
+    UPROPERTY(EditAnywhere, Category = "Glider animation") TObjectPtr<UAnimSequence> RideRecoil;
     UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> AimStart;
     UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> AimEnd;
     UPROPERTY(EditAnywhere) TObjectPtr<UAnimSequence> Fire;
@@ -65,6 +76,7 @@ class HOVERFLIGHT_API UHoverPilotAssets : public UDataAsset
     UPROPERTY(EditAnywhere, Category = "Weapon") FVector GunMuzzle = FVector(0, 46, 2);
     UPROPERTY(EditAnywhere, Category = "Weapon") FVector GunForward = FVector::RightVector;
     UPROPERTY(EditAnywhere, Category = "Weapon") FVector GunGrip = FVector(0, -20, -3);
+    UPROPERTY(EditAnywhere, Category = "Weapon") FVector GunSupportGrip = FVector(-22, 0, -8);
     UPROPERTY(EditAnywhere, Category = "Weapon") FVector GunSight = FVector(0, 0, 12);
     UPROPERTY(EditAnywhere, Category = "Weapon", meta = (ClampMin = "0", ClampMax = "10"))
     float GunRecoilPitch = 2.6f;
@@ -204,6 +216,7 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     UPROPERTY(VisibleAnywhere) TObjectPtr<UCameraComponent> ReviewCamera;
     UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> ViewGun;
     UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> WorldGun;
+    UPROPERTY(VisibleAnywhere) TObjectPtr<USkeletalMeshComponent> ViewArms;
 
   private:
     friend class AHoverCyberRifle;
@@ -219,6 +232,10 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     FVector StartLocation, ParkedLocation;
     float WeaponAimAlpha = 0;
     float GunRecoil = 0, GunRecoilVelocity = 0;
+    FDelegateHandle WeaponPoseHandle;
+    FDelegateHandle ViewPoseHandle;
+    FTransform ViewReferenceHand;
+    bool bViewReferenceReady = false;
     float CameraPostureHeight = 0;
     FVector MountFrom, MountTo, MountFeet[2];
     FRotator StartRotation;
@@ -233,6 +250,8 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     bool bGroundCrouchHeld = false, bCrouchedAtPress = false, bProne = false;
     float GroundCrouchHold = 0;
     float TargetAltitude = 0, FireCooldown = 0, AimExitTime = 0, StatusTime = 0;
+    FVector FlightEffectAcceleration = FVector::ZeroVector;
+    float JetDemands[8] = {};
     float LockAlpha = 0, LockVelocity = 0, BoardPitch = 0, BoardBank = 0;
     float PitchVelocity = 0, BankVelocity = 0, WingSweep = 0, WingVelocity = 0, RiderLean = 0, LeanVelocity = 0;
     float BoostCharge = 1, BoostRechargeDelay = 0, GunRaisedTime = 0;
@@ -258,12 +277,14 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     void UpdateFlight(float DeltaSeconds);
     void UpdateAppearance(float DeltaSeconds);
     void PlayPose(UAnimSequence *Animation, bool bLoop);
-    void FireShot(float Damage = 35.f, float Spread = 0.f, float Range = 50000.f);
+    void FireShot(float Damage = 35.f, float Spread = 0.f, float Range = 50000.f,
+                  AZE_WeaponBase *SourceWeapon = nullptr);
     void SetView();
     void UpdateCameraPosture(float DeltaSeconds);
     bool HasBoardNearby() const;
     bool FindDismountLocation(FVector &Location) const;
     void UpdateGunTransform();
+    void FinalizeViewPose();
     void ImpactPulse(const FVector &Location, const FVector &Normal, float Scale, float Rumble, float Duration,
                      UFXSystemAsset *Template = nullptr);
     UFUNCTION()

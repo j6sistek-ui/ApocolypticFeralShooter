@@ -70,8 +70,12 @@ void UHoverLocomotionBridge::BeginPlay()
     SetObject(Locomotion, TEXT("OwningCharacter"), Pilot);
     SetObject(Locomotion, TEXT("MovementComponent"), Pilot->GetCharacterMovement());
     SetObject(Locomotion, TEXT("CapsuleComponent"), Pilot->GetCapsuleComponent());
-    SetObject(Locomotion, TEXT("ActiveProfile"),
-              LoadObject<UObject>(nullptr, TEXT("/Game/HoverPrototype/CLSComparison/Profile_Vexa.Profile_Vexa")));
+    auto *Profile =
+        LoadObject<UObject>(nullptr, TEXT("/Game/HoverPrototype/Hybrid/Rifle/Profile_VexaRifle.Profile_VexaRifle"));
+    bHasRifleProfile = Profile != nullptr;
+    if (!Profile)
+        Profile = LoadObject<UObject>(nullptr, TEXT("/Game/HoverPrototype/CLSComparison/Profile_Vexa.Profile_Vexa"));
+    SetObject(Locomotion, TEXT("ActiveProfile"), Profile);
     // Local data-only copy has its automatic BeginPlay/Tick disconnected, so it
     // cannot overwrite Parkour gravity, jump, wall-run, crouch or slide settings.
     Locomotion->RegisterComponent();
@@ -104,7 +108,7 @@ void UHoverLocomotionBridge::TickComponent(float DT, ELevelTick Type, FActorComp
     if (!bReady || !Pilot)
         return;
     auto *DriverAnim = Driver->GetAnimInstance();
-    const int32 NewPosture = bEnabled && Pilot->IsOnFoot() ? (Pilot->IsProne()           ? 2
+    const int32 NewPosture = bEnabled && Pilot->IsOnFoot() ? (Pilot->IsProne()           ? (Pilot->IsDiving() ? 3 : 2)
                                                               : Pilot->IsGroundSliding() ? 1
                                                                                          : 0)
                                                            : 0;
@@ -117,18 +121,27 @@ void UHoverLocomotionBridge::TickComponent(float DT, ELevelTick Type, FActorComp
         if (NewPosture)
         {
             auto *Clip = LoadObject<UAnimSequence>(
-                nullptr, NewPosture == 2 ? TEXT("/Game/HoverPrototype/Animations/QA_ProneCrawl.QA_ProneCrawl")
-                                         : TEXT("/Game/HoverPrototype/Animations/QA_GroundSlide.QA_GroundSlide"));
+                nullptr, NewPosture == 2   ? TEXT("/Game/HoverPrototype/Animations/QA_OwnerCrawlLoop.QA_OwnerCrawlLoop")
+                         : NewPosture == 3 ? TEXT("/Game/HoverPrototype/Animations/QA_ProneCrawl.QA_ProneCrawl")
+                                           : TEXT("/Game/HoverPrototype/Animations/QA_GroundSlide.QA_GroundSlide"));
             if (Clip)
                 Posture = DriverAnim->PlaySlotAnimationAsDynamicMontage(
                     Clip, TEXT("DefaultSlot"), NewPosture == 2 ? .55f : .22f, .3f, 1.f, 100000);
         }
     }
-    if (DriverAnim && Posture && NewPosture == 2)
+    if (DriverAnim && Posture && NewPosture >= 2)
         DriverAnim->Montage_SetPlayRate(Posture,
                                         !Pilot->IsDiving() && Pilot->GetVelocity().Size2D() > 5.f
                                             ? FMath::Clamp(float(Pilot->GetVelocity().Size2D()) / 80.f, .3f, 1.5f)
                                             : 0.f);
+    const bool Crouched = Pilot->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight() < 70;
+    if (bEnabled && Pilot->IsOnFoot() && NewPosture == 0 && Crouched != bWasCrouched &&
+        Pilot->GetCharacterMovement()->IsMovingOnGround() && Pilot->GetVelocity().Size2D() < 180.f)
+        PlayAction(LoadObject<UAnimSequence>(
+                       nullptr, Crouched ? TEXT("/Game/HoverPrototype/Animations/QA_CrouchEnter.QA_CrouchEnter")
+                                         : TEXT("/Game/HoverPrototype/Animations/QA_CrouchExit.QA_CrouchExit")),
+                   Crouched ? .55f : .65f, false);
+    bWasCrouched = Crouched;
     if (auto *Lock = FindFProperty<FBoolProperty>(Pilot->GetClass(), TEXT("WallJumpLock")))
     {
         const bool Locked = Lock->GetPropertyValue_InContainer(Pilot);
@@ -142,7 +155,16 @@ void UHoverLocomotionBridge::TickComponent(float DT, ELevelTick Type, FActorComp
     SetByte(Locomotion, TEXT("CurrentGait"), Pilot->GetCharacterMovement()->MaxWalkSpeed > 600 ? 1 : 0);
     // CLS Stance means Unarmed/Pistol/Rifle, not standing/crouching.
     // Crouching is selected through State.Movement.Crouch below.
-    SetByte(Locomotion, TEXT("CurrentStance"), 0);
+    // The local chooser adds real rifle databases. Crouch still uses its owned
+    // unarmed search plus the upper-body weapon layer until rifle crouch is fitted.
+    bRifleStance = bHasRifleProfile && bEnabled && Pilot->IsOnFoot() && Pilot->UsesAimFacing() &&
+                   !Pilot->IsMeleeEquipped() && NewPosture == 0 &&
+                   Pilot->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight() >= 70;
+    static const auto *StanceEnum =
+        LoadObject<UEnum>(nullptr, TEXT("/Game/CLS/Core/Data/Enums/E_CLS_Stance.E_CLS_Stance"));
+    const int64 RifleValue = StanceEnum ? StanceEnum->GetValueByNameString(TEXT("NewEnumerator3")) : INDEX_NONE;
+    bRifleStance &= RifleValue != INDEX_NONE;
+    SetByte(Locomotion, TEXT("CurrentStance"), bRifleStance ? uint8(RifleValue) : 0);
     SetByte(Locomotion, TEXT("CurrentRotationMode"), Pilot->UsesAimFacing() ? 1 : 0);
     if (auto *Package = Locomotion->FindFunction(TEXT("Package_AnimData")))
         Locomotion->ProcessEvent(Package, nullptr);
@@ -218,9 +240,14 @@ FGameplayTagContainer UHoverIntegrationAuthoring::GetCLSTags(AActor *Owner)
 void UHoverBodyPhysics::NativeUpdateAnimation(float DT)
 {
     Super::NativeUpdateAnimation(DT);
-    auto *Pilot = Cast<AHoverPilot>(TryGetPawnOwner());
-    const FVector Velocity = Pilot ? Pilot->GetVelocity() : FVector::ZeroVector;
-    const bool Airborne = Pilot && (Pilot->IsMounted() || Pilot->GetCharacterMovement()->IsFalling());
+    auto *OwnerPawn = TryGetPawnOwner();
+    auto *Pilot = Cast<AHoverPilot>(OwnerPawn);
+    const auto *Vehicle = OwnerPawn ? OwnerPawn->GetAttachParentActor() : nullptr;
+    const FVector Velocity = Vehicle     ? Vehicle->GetVelocity()
+                             : OwnerPawn ? OwnerPawn->GetVelocity()
+                                         : FVector::ZeroVector;
+    const bool Airborne = Pilot ? Pilot->IsMounted() || Pilot->GetCharacterMovement()->IsFalling()
+                                : Vehicle || (OwnerPawn && !Cast<ACharacter>(OwnerPawn));
     AirborneBlend = FMath::FInterpTo(AirborneBlend, Airborne ? 1.f : 0.f, DT, 8.f);
     // Avoid continually switching flight springs off/on at the acceleration
     // threshold. Preserve the accepted grounded settings, damp flight impulses.
@@ -238,6 +265,8 @@ void UHoverBodyPhysics::NativeUpdateAnimation(float DT)
             // A long render frame during fast flight is ordinary travel, not a
             // teleport. Avoid resetting and restarting the spring every frame.
             Spring->ErrorResetThresh = FMath::Max(250., Velocity.Size() * DT * 2. + 50.);
+            Spring->bOverrideOwnerVelocity = Vehicle != nullptr;
+            Spring->OwnerVelocityOverride = Velocity;
         }
 }
 void UHoverBodyPhysics::NativePostEvaluateAnimation()

@@ -25,6 +25,7 @@
 #include "UObject/UnrealType.h"
 #include "PoseSearch/AnimNode_MotionMatching.h"
 #include "PoseSearch/PoseSearchDatabase.h"
+#include "Animation/AnimSequence.h"
 #if WITH_EDITOR
 #include "Engine/SimpleConstructionScript.h"
 #include "Engine/SCS_Node.h"
@@ -345,4 +346,49 @@ bool UClsComparisonAuthoring::BuildMappings(UInputMappingContext *Mappings)
     for (const FKey Key : {EKeys::LeftControl, EKeys::Gamepad_FaceButton_Right})
         Mappings->MapKey(Action(TEXT("AI_Crouch")), Key);
     return true;
+}
+
+bool UClsComparisonAuthoring::SetLocalAnimationProperty(UObject *Asset, FName PropertyName, const FString &Value)
+{
+#if WITH_EDITOR
+    if (!Asset || !Asset->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/Hybrid/")))
+        return false;
+    auto *Property = FindFProperty<FProperty>(Asset->GetClass(), PropertyName);
+    if (!Property)
+        return false;
+    Asset->Modify();
+    if (!Property->ImportText_Direct(*Value, Property->ContainerPtrToValuePtr<void>(Asset), Asset, PPF_None))
+        return false;
+    Asset->PostEditChange();
+    Asset->MarkPackageDirty();
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool UClsComparisonAuthoring::BuildLocalPoseDatabase(UPoseSearchDatabase *Database,
+                                                     const TArray<UAnimSequence *> &Clips)
+{
+#if WITH_EDITOR
+    if (!Database || !Database->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/Hybrid/")) || Clips.IsEmpty())
+        return false;
+    for (auto *Clip : Clips)
+        if (!Clip)
+            return false;
+    Database->Modify();
+    while (Database->GetNumAnimationAssets())
+        Database->RemoveAnimationAssetAt(Database->GetNumAnimationAssets() - 1);
+    for (auto *Clip : Clips)
+    {
+        FPoseSearchDatabaseAnimationAsset Entry;
+        Entry.AnimAsset = Clip;
+        Database->AddAnimationAsset(Entry);
+    }
+    Database->PostEditChange();
+    Database->MarkPackageDirty();
+    return true;
+#else
+    return false;
+#endif
 }

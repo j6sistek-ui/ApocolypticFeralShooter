@@ -100,6 +100,10 @@ class HOVERFLIGHT_API AHoverCyberZombie : public AZE_ZombieCharacter
   public:
     AHoverCyberZombie();
     UFUNCTION(BlueprintPure) EHoverZombieRole GetRole() const;
+    bool NeedsContactPose() const
+    {
+        return bIsAttacking || bIsDead;
+    }
     UFUNCTION(BlueprintCallable) bool StompImpact();
     UPROPERTY(BlueprintReadOnly) int32 StompCount = 0;
     UPROPERTY(BlueprintReadOnly) int32 StompKnockdowns = 0;
