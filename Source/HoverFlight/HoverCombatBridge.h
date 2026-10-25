@@ -50,7 +50,6 @@ class HOVERFLIGHT_API AHoverMeleeWeapon : public AZE_MeleeWeapon
   private:
     FTimerHandle ContactTimer;
     float SwingEnd = 0;
-    FVector HandStart;
     bool bGripConfigured = false;
     void ConfigureGrip(AHoverPilot *Pilot);
 };

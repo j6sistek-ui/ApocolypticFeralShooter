@@ -164,6 +164,10 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     {
         return bMeleeEquipped || bAiming || GunRaisedTime > 0 || !bReview;
     }
+    UFUNCTION(BlueprintPure) bool UsesSupportedProne() const
+    {
+        return bProne && !bDiving && (ProneLandingTime > 0 || UsesAimFacing() || GetVelocity().Size2D() < 15.f);
+    }
     bool bInvincible = true;
     bool bDefeated = false;
     float SandboxHealth = 100.f, DefeatedUntil = 0.f, RespawnGraceUntil = 0.f;
@@ -249,6 +253,8 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     bool bMovingAtPosturePress = false, bDiving = false;
     bool bGroundCrouchHeld = false, bCrouchedAtPress = false, bProne = false;
     float GroundCrouchHold = 0;
+    float GroundContactTime = 0;
+    float ProneLandingTime = 0;
     float TargetAltitude = 0, FireCooldown = 0, AimExitTime = 0, StatusTime = 0;
     FVector FlightEffectAcceleration = FVector::ZeroVector;
     float JetDemands[8] = {};

@@ -1,0 +1,93 @@
+AFS ANIMATION POLISH — 2026-10-25
+
+This is a local follow-up to ASSET_AUDIT_REPAIRS_20261025.txt. It supersedes
+that report's frozen crawl idle and missing FPS katana-hand presentation.
+Original licensed clips, source art, SpaceSurvival and controller mappings
+remain intact. This does not close the full sandbox backlog or owner review.
+
+DIVE / PRONE SUPPORT
+The landed dive now stays in its existing belly sequence for a 0.45-second
+settle. Restarting the same sequence on landing previously blended through
+the upright CLS pose and lifted the torso; that restart is removed. Different
+posture clips use matching blend-in/out times. Resting and armed prone use
+the purchased belly pose; moving unarmed crawl uses the owner's supplied loop.
+Hands can remain on the rifle while the forearms support the upper body.
+
+Two-bone contact correction preserves limb lengths and the authored bend side.
+It corrects foot penetration during posture blends and brings forearms and
+feet/toes to a supported resting pose. Unreachable contacts use the closest
+possible bend rather than stretching a limb. The gaze is raised from the
+source zombie crawl's floor-facing head pose, and the rifle sits beside it.
+The standing rifle torso overlay no longer lifts a prone character's elbows.
+Rifle finger posing and support-hand contact remain active while prone aiming.
+
+Rendered flat-floor checks: elbow joint centres 5-7.83cm above the floor in
+four resting/aiming samples, toe centres 2.28-3.49cm. These heights account for
+limb thickness; joint centres are not the visible skin surface. Both forearms
+and feet provide the intended support, with a slightly higher support elbow
+when the rifle reaches forward. The landed-dive interval peaks at 4.97cm
+elbow-centre height. No interim upright torso spike remains in that capture.
+Minimum foot/toe clearance during the full transition is 1.34cm; camera-arm
+distance changes by 0cm. These are scripted inputs and sampled rendered poses.
+Uneven ground, stairs and extreme prone aim angles remain unvalidated. Contact
+correction currently uses the floor height beneath the capsule, not separate
+terrain traces under every limb. Dedicated human dive/prone entry/exit clips
+remain an asset gap; this is an adaptation of available motion, not new mocap.
+
+CROUCH
+13 owned derivatives of ZESP's directional crouch animations populate
+/Game/HoverPrototype/Hybrid/Polish/PSD_DirectionalCrouch. The local rifle chooser
+uses this database for both crouch stances. Purchased native M16/player crouch
+databases were empty; the native crouch blend space uses the unarmed motions.
+Actual-input checks selected the correct Idle/Fwd/Bwd/Left/Right clips.
+Walking/running speeds, CLS ownership and Parkour wall actions are unchanged.
+
+KATANA
+FPS now shows Vexa's view arms with owned derivatives QA_KatanaIdle and
+QA_KatanaView from the purchased knife idle/attack. The fitting derives from
+source hand paths and finger articulation while adapting shoulder/elbow
+placement for the FPS camera.
+The blade attaches to the animated right hand in both views. The owner's grip
+correction moves its centre 75% from the outer finger-knuckle midpoint toward
+the palm base. No new weapon geometry was created. The existing TP slash,
+native damage/cooldown, tap-R3 quick slash, hold-R3 equip and R2 swing remain.
+
+The orange/yellow color was an import error, not an intentional debug material.
+The old exporter inferred texture roles from filenames and swapped BaseColor
+with metallic/roughness. The original GLB material bindings now select the exact
+color, ORM and normal image bytes; local textures are capped at 2048. Source
+GLB SHA256: 3e77f001234d80c1fdfa3deff6e4b75ff0bf3c95d963754bea17593ee17a5852.
+Its dark wrap, wood tag and bloodied steel were verified in rendered frames.
+The source GLB and original geometry remain the reimport authority; do not use
+the historical filename-guessing exporter to recreate these texture bindings.
+
+VALIDATION AND LIMITS
+Editor Build9 and the native Development game build succeeded. Static-check results are
+recorded in the accompanying RESULTS.json. Six final runtime reports cover
+supported prone, dive/slide transitions, directional crouch, FPS katana dispatch,
+19 glider cases and FPS rifle firing/reload. Reports completed with errors[].
+Glider pad contact remained within the 6cm acceptance limit in all 19 cases.
+Rifle ammo returned from 25 to 30 after reload; view arms hide in third person.
+The static Ballista still lacks a separate magazine and a matched exchange.
+
+Final captures use D3D12. Two intermediate pose reviews used D3D11 to stay
+within available VRAM; they are not lighting/performance evidence. The final
+support and rifle runs completed their reports, then hit the previously known
+0xc0000005 editor-shutdown issue. Other final runs exited0. Existing engine and
+licensed-plugin deprecation warnings remain. No shutdown or VSM fix is claimed.
+Owner controller feel, visual approval, terrain coverage, packaged performance
+and production soak remain open. The prior packaged build is not refreshed by
+this animation pass. PAL_AFS_Runtime now includes 78 explicit roots, including
+the two new FPS clips; the crouch database is referenced through its chooser.
+
+PRESERVATION AND EVIDENCE
+Before/After manifests and private native asset copies:
+D:/AFS_Comparisons/AnimationPolish_20261025
+Workspace: C:/Users/j6sis/Documents/Codex/2026-10-22/ev
+Authoring and validation: work/animation_polish_20261025 and
+work/camera_actions/animation_*_20261025. Repro scripts are included in backup.
+Review output: outputs/AFS_Test/AnimationPolish20261025. Its MP4 previews encode
+unaltered 1280x720 captures at their recorded 10fps sampling cadence; they are
+not an interactive frame-rate benchmark. Full runtime telemetry is retained.
+Native assets remain outside Git. Keep the compatible local assets with the
+source checkpoint. No GitHub publication or SpaceSurvival import occurred.

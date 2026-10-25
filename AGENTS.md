@@ -24,7 +24,8 @@ PostApo remains outside Zombie Engine. Chinese Lakeside Town has separate wave d
 using its own five newly supplied creatures; never reuse the Cyber City or
 PostApo zombie roster there. Keep later texture replacements reimportable.
 No main-game integration, network play,
-or production release is implied. See Docs/ASSET_AUDIT_REPAIRS_20261025.txt for current
+or production release is implied. See Docs/ANIMATION_POLISH_20261025.txt for latest
+posture/crouch/FPS katana checks and Docs/ASSET_AUDIT_REPAIRS_20261025.txt for current
 audit repairs, Docs/NIGHT_QUALITY_20261024.txt for earlier rendered evidence,
 and Docs/QUALITY_20261023.txt for the historical integration
 matrix, native plugin patches and remaining animation gaps.

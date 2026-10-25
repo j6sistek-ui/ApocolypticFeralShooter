@@ -32,6 +32,9 @@ class HOVERFLIGHT_API UHoverAnimInstance : public UAnimInstance
     UPROPERTY(BlueprintReadOnly) TArray<bool> SecondaryBonesEvaluated;
     bool bAiming = false;
     bool bProne = false;
+    bool bSupportedProne = false;
+    bool bGroundContacts = false;
+    float GroundContactHeight = 0;
     bool bLoop = true;
     int32 RestartSerial = 0;
     float FootLock = 0;
@@ -53,6 +56,8 @@ class HOVERFLIGHT_API UHoverViewAnimInstance : public UAnimInstance
   public:
     UPROPERTY() TObjectPtr<UAnimSequence> Idle;
     UPROPERTY() TObjectPtr<UAnimSequence> AimIdle;
+    UPROPERTY() TObjectPtr<UAnimSequence> MeleeIdle;
+    bool bMelee = false;
     float AimAlpha = 0;
     FVector SupportGripOffset = FVector::ZeroVector;
     FQuat WeaponRotation = FQuat::Identity;

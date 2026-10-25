@@ -30,7 +30,10 @@ None of Cyber City's or PostApo's zombies are used there. See
 
 R3/V uses the supplied bloodied katana on foot in all three levels. It uses the
 purchased knife slash, native melee contact/cooldown and a local hand attachment.
-The rifle hides during the swing. See `Docs/KATANA_20261023.txt` for provenance,
+The rifle hides during the swing. FPS now has fitted view-arm idle/slash clips;
+the blade follows the hand, with its original texture bindings and corrected grip.
+See `Docs/ANIMATION_POLISH_20261025.txt` for the latest animation evidence and
+`Docs/KATANA_20261023.txt` for historical provenance,
 timing, rollback files and the distinction between CPU checks and rendered review.
 
 Eight curated entrances use the construction area, shop alcoves, service streets
@@ -67,14 +70,18 @@ On foot, a local copy of ParkourMovementPack's original Blueprint movement graph
 controls movement, wall running, jump buffering and coyote time. Walking is capped at
 500 cm/s and held-L3 running at900 cm/s. The template's1000 cm/s² acceleration,
 2.5 gravity scale and1102.5 cm/s jump velocity remain. A feeds its buffered Space
-jump event. Tap B/Shift to crouch or stand; hold to go prone and crawl. Pressing it
-while running starts a short decelerating slide before crouch. Standing checks
+jump event. Stationary tap B/Shift crouches or stands; holding enters prone.
+Moving tap slides; moving hold dives and lands with a brief supported settle.
+Standing checks
 headroom. The purchased template has movement logic but no skeletal animations:
-the slide uses a local leg/torso variant of the owned crouch pose, and prone/crawl
-uses the owner's animation-only crawl, retargeted without the donor mesh. Full-body actions run after CLS root/foot
+the slide uses a local leg/torso variant of the owned crouch pose. Supported
+prone uses the purchased belly pose with forearm/foot contact; moving unarmed
+crawl uses the owner's animation-only loop, retargeted without the donor mesh.
+Directional crouch uses 13 owned ZESP clips. Full-body actions run after CLS root/foot
 corrections so they stay centred on the moving capsule. Dedicated human slide and
-prone-entry/exit clips remain missing. See `Docs/NIGHT_QUALITY_20261024.txt` for
-the latest rendered review and effect/loot fixes.
+prone-entry/exit clips remain missing. See `Docs/ANIMATION_POLISH_20261025.txt`
+for current motion checks and `Docs/NIGHT_QUALITY_20261024.txt` for earlier
+effect/loot fixes.
 CLS selects and retargets locomotion
 poses through a hidden mannequin while Parkour retains movement and special actions.
 Third-person Vexa faces travel unless aiming. F7 / D-pad Right toggles the original

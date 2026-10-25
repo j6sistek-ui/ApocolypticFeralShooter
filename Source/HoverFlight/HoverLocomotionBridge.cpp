@@ -108,25 +108,36 @@ void UHoverLocomotionBridge::TickComponent(float DT, ELevelTick Type, FActorComp
     if (!bReady || !Pilot)
         return;
     auto *DriverAnim = Driver->GetAnimInstance();
-    const int32 NewPosture = bEnabled && Pilot->IsOnFoot() ? (Pilot->IsProne()           ? (Pilot->IsDiving() ? 3 : 2)
+    // Keep the torso supported while resting or aiming. The owner's hands-and-
+    // knees loop is for free crawling; a standing rifle overlay cannot support
+    // a prone body after both hands leave the floor.
+    const bool FreeCrawl = !Pilot->UsesSupportedProne();
+    const int32 NewPosture = bEnabled && Pilot->IsOnFoot() ? (Pilot->IsProne()           ? (Pilot->IsDiving() ? 3
+                                                                                            : FreeCrawl       ? 4
+                                                                                                              : 2)
                                                               : Pilot->IsGroundSliding() ? 1
                                                                                          : 0)
                                                            : 0;
+    // Landing keeps the same belly sequence. Restarting it blends through CLS's
+    // upright base pose and briefly lifts the torso off its support points.
+    if (Posture && PostureMode == 3 && NewPosture == 2)
+        PostureMode = 2;
     if (DriverAnim && NewPosture != PostureMode)
     {
+        const float BlendIn = NewPosture == 2 || NewPosture == 4 ? .45f : .22f;
         if (Posture)
-            DriverAnim->Montage_Stop(.3f, Posture);
+            DriverAnim->Montage_Stop(NewPosture ? BlendIn : .3f, Posture);
         Posture = nullptr;
         PostureMode = NewPosture;
         if (NewPosture)
         {
             auto *Clip = LoadObject<UAnimSequence>(
-                nullptr, NewPosture == 2   ? TEXT("/Game/HoverPrototype/Animations/QA_OwnerCrawlLoop.QA_OwnerCrawlLoop")
-                         : NewPosture == 3 ? TEXT("/Game/HoverPrototype/Animations/QA_ProneCrawl.QA_ProneCrawl")
+                nullptr, NewPosture == 4   ? TEXT("/Game/HoverPrototype/Animations/QA_OwnerCrawlLoop.QA_OwnerCrawlLoop")
+                         : NewPosture >= 2 ? TEXT("/Game/HoverPrototype/Animations/QA_ProneCrawl.QA_ProneCrawl")
                                            : TEXT("/Game/HoverPrototype/Animations/QA_GroundSlide.QA_GroundSlide"));
             if (Clip)
-                Posture = DriverAnim->PlaySlotAnimationAsDynamicMontage(
-                    Clip, TEXT("DefaultSlot"), NewPosture == 2 ? .55f : .22f, .3f, 1.f, 100000);
+                Posture =
+                    DriverAnim->PlaySlotAnimationAsDynamicMontage(Clip, TEXT("DefaultSlot"), BlendIn, .3f, 1.f, 100000);
         }
     }
     if (DriverAnim && Posture && NewPosture >= 2)
@@ -155,11 +166,10 @@ void UHoverLocomotionBridge::TickComponent(float DT, ELevelTick Type, FActorComp
     SetByte(Locomotion, TEXT("CurrentGait"), Pilot->GetCharacterMovement()->MaxWalkSpeed > 600 ? 1 : 0);
     // CLS Stance means Unarmed/Pistol/Rifle, not standing/crouching.
     // Crouching is selected through State.Movement.Crouch below.
-    // The local chooser adds real rifle databases. Crouch still uses its owned
-    // unarmed search plus the upper-body weapon layer until rifle crouch is fitted.
+    // The owned crouch branch includes directional native crouch locomotion;
+    // rifle stance retains that lower body plus its upper-body weapon layer.
     bRifleStance = bHasRifleProfile && bEnabled && Pilot->IsOnFoot() && Pilot->UsesAimFacing() &&
-                   !Pilot->IsMeleeEquipped() && NewPosture == 0 &&
-                   Pilot->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight() >= 70;
+                   !Pilot->IsMeleeEquipped() && NewPosture == 0;
     static const auto *StanceEnum =
         LoadObject<UEnum>(nullptr, TEXT("/Game/CLS/Core/Data/Enums/E_CLS_Stance.E_CLS_Stance"));
     const int64 RifleValue = StanceEnum ? StanceEnum->GetValueByNameString(TEXT("NewEnumerator3")) : INDEX_NONE;

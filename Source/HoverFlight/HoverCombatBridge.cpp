@@ -1,6 +1,7 @@
 #include "HoverCombatBridge.h"
 #include "HoverPilot.h"
 #include "HoverLocomotionBridge.h"
+#include "HoverAnimInstance.h"
 #include "HoverCyberCity.h"
 #include "Inventory/ZE_InventoryComponent.h"
 #include "Inventory/ZE_WeaponDefinition.h"
@@ -128,7 +129,11 @@ void AHoverMeleeWeapon::CancelSwing()
 {
     if (IsSwinging())
         if (auto *Pilot = Cast<AHoverPilot>(OwnerPawn); Pilot && Pilot->LocomotionBridge)
+        {
             Pilot->LocomotionBridge->CancelAction();
+            if (Pilot->ViewArms && Pilot->ViewArms->GetAnimInstance())
+                Pilot->ViewArms->GetAnimInstance()->Montage_Stop(.12f);
+        }
     GetWorldTimerManager().ClearTimer(ContactTimer);
     SwingEnd = 0;
     SetActorHiddenInGame(true);
@@ -160,18 +165,6 @@ void AHoverMeleeWeapon::Tick(float DT)
     StaticMeshFP->SetHiddenInGame(ThirdPerson);
     StaticMeshTP->SetVisibility(ThirdPerson);
     StaticMeshFP->SetVisibility(!ThirdPerson);
-    if (!ThirdPerson)
-    {
-        // Use the owned attack's hand motion for the FPS presentation too. This
-        // changes the weapon transform, never camera position or arm length.
-        const auto Hand = Pilot->GetMesh()->GetSocketTransform(TEXT("hand_r"), RTS_Component);
-        const FVector Delta = IsSwinging() ? Hand.GetLocation() - HandStart : FVector::ZeroVector;
-        const FQuat BodyToCamera = FRotator(0, -90, 0).Quaternion();
-        StaticMeshFP->SetRelativeLocation(FVector(75, 30, -15) + BodyToCamera.RotateVector(Delta) * .35f);
-        StaticMeshFP->SetRelativeRotation(IsSwinging() ? BodyToCamera * Pilot->GetMesh()->GetComponentQuat().Inverse() *
-                                                             StaticMeshTP->GetComponentQuat()
-                                                       : FRotator(-15, 0, -20).Quaternion());
-    }
 }
 void AHoverMeleeWeapon::PerformMeleeTrace()
 {
@@ -192,12 +185,19 @@ void AHoverMeleeWeapon::PlayFireAnimation()
     SwingEnd = LastFireAnimTime + .8f;
     if (auto *Pilot = Cast<AHoverPilot>(OwnerPawn); Pilot && Pilot->LocomotionBridge)
     {
-        auto *Body = Pilot->GetMesh();
-        const auto Hand = Body->GetSocketTransform(TEXT("hand_r"), RTS_Component);
-        HandStart = Hand.GetLocation();
         ConfigureGrip(Pilot);
-        Pilot->LocomotionBridge->PlayAction(
-            LoadObject<UAnimSequence>(nullptr, TEXT("/Game/HoverPrototype/Animations/QA_Katana.QA_Katana")), .8f);
+        auto *Clip = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/HoverPrototype/Animations/QA_Katana.QA_Katana"));
+        Pilot->LocomotionBridge->PlayAction(Clip, .8f);
+        if (Clip && Pilot->ViewArms)
+            if (auto *View = Cast<UHoverViewAnimInstance>(Pilot->ViewArms->GetAnimInstance()))
+            {
+                View->bMelee = true;
+                auto *ViewClip = LoadObject<UAnimSequence>(
+                    nullptr, TEXT("/Game/HoverPrototype/Animations/QA_KatanaView.QA_KatanaView"));
+                if (ViewClip)
+                    View->PlaySlotAnimationAsDynamicMontage(ViewClip, TEXT("DefaultSlot"), .08f, .15f,
+                                                            ViewClip->GetPlayLength() / .8f);
+            }
     }
 }
 void AHoverMeleeWeapon::ConfigureGrip(AHoverPilot *Pilot)
@@ -208,13 +208,19 @@ void AHoverMeleeWeapon::ConfigureGrip(AHoverPilot *Pilot)
     const FTransform HandWorld = Body->GetSocketTransform(TEXT("hand_r"));
     const FVector Index = HandWorld.InverseTransformPosition(Body->GetSocketLocation(TEXT("index_02_r")));
     const FVector Pinky = HandWorld.InverseTransformPosition(Body->GetSocketLocation(TEXT("pinky_02_r")));
+    const FVector Palm = HandWorld.InverseTransformPosition(Body->GetSocketLocation(TEXT("middle_01_r")));
     const FVector BladeAxis = (Index - Pinky).GetSafeNormal(SMALL_NUMBER, FVector::UpVector);
     StaticMeshTP->AttachToComponent(Body, FAttachmentTransformRules::SnapToTargetNotIncludingScale, TEXT("hand_r"));
-    StaticMeshTP->SetRelativeLocation((Index + Pinky) * .5f);
+    // Centre the handle inside the curled fingers, towards the palm instead of
+    // balancing its centre on the outer finger knuckles.
+    StaticMeshTP->SetRelativeLocation(FMath::Lerp((Index + Pinky) * .5f, Palm, .75f));
     StaticMeshTP->SetRelativeRotation(FRotationMatrix::MakeFromZX(BladeAxis, FVector::ForwardVector).Rotator());
-    StaticMeshFP->AttachToComponent(Pilot->FirstPersonCamera, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+    StaticMeshFP->AttachToComponent(Pilot->ViewArms, FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+                                    TEXT("hand_r"));
+    StaticMeshFP->SetRelativeTransform(StaticMeshTP->GetRelativeTransform());
     StaticMeshFP->CastShadow = false;
     AddTickPrerequisiteComponent(Body);
+    AddTickPrerequisiteComponent(Pilot->ViewArms);
     bGripConfigured = true;
 }
 UHoverCombatBridge::UHoverCombatBridge()

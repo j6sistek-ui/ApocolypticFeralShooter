@@ -529,7 +529,7 @@ void AHoverPilot::SetView()
     ReviewCamera->SetActive(!FirstPerson);
     const bool Swinging = bMeleeEquipped || (MeleeWeapon && MeleeWeapon->IsSwinging());
     ViewGun->SetVisibility(!Swinging && FirstPerson, true);
-    ViewArms->SetVisibility(!Swinging && FirstPerson);
+    ViewArms->SetVisibility(FirstPerson);
     WorldGun->SetVisibility(!Swinging && !FirstPerson && (bAiming || GunRaisedTime > 0), true);
     // The full-body riding pose crosses the eye camera during pitch and recoil.
     // Keep it for the external view; the FPS camera renders its own rifle.
@@ -825,6 +825,7 @@ void AHoverPilot::SetParkourCrouch(bool Held)
 
 void AHoverPilot::UpdateGroundPosture(float DT)
 {
+    ProneLandingTime = FMath::Max(0.f, ProneLandingTime - DT);
     if (bMounted)
         return;
     auto *Move = GetCharacterMovement();
@@ -1124,6 +1125,24 @@ void AHoverPilot::UpdateAppearance(float DT)
     {
         Instance->FootLock = bMounted ? 1.f : 0.f;
         Instance->bProne = bProne;
+        Instance->bSupportedProne = UsesSupportedProne() && GetCharacterMovement()->IsMovingOnGround();
+        GroundContactTime =
+            IsOnFoot() && (bProne || GroundSlideTime > 0) ? .4f : FMath::Max(0.f, GroundContactTime - DT);
+        Instance->bGroundContacts = false;
+        if (IsOnFoot() && GroundContactTime > 0)
+        {
+            FHitResult Ground;
+            FCollisionQueryParams Query(SCENE_QUERY_STAT(HoverPostureContact), false, this);
+            Query.AddIgnoredActor(BoardActor);
+            if (GetWorld()->LineTraceSingleByChannel(Ground, GetActorLocation(),
+                                                     GetActorLocation() - FVector(0, 0, 240), ECC_Visibility, Query) &&
+                Ground.ImpactNormal.Z > .65f)
+            {
+                Instance->bGroundContacts = true;
+                Instance->GroundContactHeight =
+                    GetMesh()->GetComponentTransform().InverseTransformPosition(Ground.ImpactPoint).Z;
+            }
+        }
         const FVector LocalVelocity =
             FRotator(0, bMounted ? GetActorRotation().Yaw : BodyYaw, 0).UnrotateVector(GetVelocity());
         const float Speed = LocalVelocity.Size2D();
@@ -1179,7 +1198,7 @@ void AHoverPilot::UpdateAppearance(float DT)
     const bool Swinging = bMeleeEquipped || (MeleeWeapon && MeleeWeapon->IsSwinging());
     WorldGun->SetVisibility(!Swinging && bReview && (bAiming || GunRaisedTime > 0 || AimExitTime > 0), true);
     ViewGun->SetVisibility(!Swinging && !bReview, true);
-    ViewArms->SetVisibility(!Swinging && !bReview);
+    ViewArms->SetVisibility(!bReview);
     UpdateGunTransform();
     const bool Powered = bMounted && TransitionTime <= 0 && !bSteppingOn;
     const float Thrust = FMath::Max(0.f, ForwardInput);
@@ -1264,6 +1283,16 @@ void AHoverPilot::UpdateGunTransform()
 {
     if (!Assets)
         return;
+    const bool MeleeActive = bMeleeEquipped || (MeleeWeapon && MeleeWeapon->IsSwinging());
+    if (auto *View = Cast<UHoverViewAnimInstance>(ViewArms->GetAnimInstance()))
+        View->bMelee = MeleeActive;
+    if (MeleeActive)
+    {
+        const FQuat ArmsRotation = FirstPersonCamera->GetComponentQuat() * FRotator(0, -90, 0).Quaternion();
+        ViewArms->SetWorldLocationAndRotation(
+            FirstPersonCamera->GetComponentTransform().TransformPosition(FVector(4, 2, -130)), ArmsRotation);
+        return;
+    }
     const UCameraComponent *Camera = bReview ? ReviewCamera : FirstPersonCamera;
     const FVector Eye = Camera->GetComponentLocation();
     const FVector RayEnd = Eye + Camera->GetForwardVector() * 50000.f;
@@ -1572,8 +1601,9 @@ void AHoverPilot::Landed(const FHitResult &Hit)
     if (bDiving)
     {
         bDiving = false;
+        ProneLandingTime = .45f;
         bProne = true;
-        GetCharacterMovement()->SetCrouchedHalfHeight(34.f);
+        GetCharacterMovement()->SetCrouchedHalfHeight(42.f);
         Crouch();
     }
     if (!bMounted && FallSpeed > 150.f)

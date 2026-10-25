@@ -117,11 +117,124 @@ struct FHoverSupportHandNode final : FAnimNode_TwoBoneIK
     }
 };
 
+// Intersect the two-bone bend circle with a support plane. Preserve limb lengths
+// and choose the side nearest the authored bend; unreachable contacts stay at
+// the closest possible height instead of stretching a limb to the floor.
+static FVector GroundBendTarget(const FVector &Start, const FVector &Joint, const FVector &End, const FVector &Target,
+                                float Height)
+{
+    const float A = FVector::Distance(Start, Joint), B = FVector::Distance(Joint, End);
+    const FVector Axis = (Target - Start).GetSafeNormal();
+    const float D = FMath::Clamp(float(FVector::Distance(Start, Target)), .1f, (A + B) * .999f);
+    const float Along = (A * A - B * B + D * D) / (2 * D);
+    const float Radius = FMath::Sqrt(FMath::Max(0.f, A * A - Along * Along));
+    const FVector Center = Start + Axis * Along;
+    const FVector Up = (FVector::UpVector - Axis * Axis.Z).GetSafeNormal();
+    if (Radius < .01f || Up.Z < .01f)
+        return Joint;
+    const float Z = FMath::Clamp(float((Height - Center.Z) / (Radius * Up.Z)), -1.f, 1.f);
+    FVector Side = FVector::CrossProduct(Axis, Up);
+    if (FVector::DotProduct(Joint - Center, Side) < 0)
+        Side *= -1;
+    return Center + Radius * (Up * Z + Side * FMath::Sqrt(1.f - Z * Z));
+}
+
+struct FHoverProneArmNode final : FAnimNode_TwoBoneIK
+{
+    FBoneReference Shoulder, Elbow, RightHand, Palm;
+    bool bLeft = false;
+    float WeaponAlpha = 0;
+    float FloorHeight = 0;
+    FVector GripOffset = FVector::ZeroVector;
+    FQuat GunRotation = FQuat::Identity;
+    FHoverProneArmNode()
+    {
+        EffectorLocationSpace = JointTargetLocationSpace = BCS_ComponentSpace;
+        bAllowStretching = bMaintainEffectorRelRot = bTakeRotationFromEffectorSpace = false;
+        RightHand.BoneName = TEXT("hand_r");
+        Palm.BoneName = TEXT("middle_01_l");
+    }
+    virtual void CacheBones_AnyThread(const FAnimationCacheBonesContext &Context) override
+    {
+        FAnimNode_TwoBoneIK::CacheBones_AnyThread(Context);
+        const auto &Bones = Context.AnimInstanceProxy->GetRequiredBones();
+        Shoulder.Initialize(Bones);
+        Elbow.Initialize(Bones);
+        RightHand.Initialize(Bones);
+        Palm.Initialize(Bones);
+    }
+    virtual void EvaluateSkeletalControl_AnyThread(FComponentSpacePoseContext &Output,
+                                                   TArray<FBoneTransform> &Transforms) override
+    {
+        const auto &Bones = Output.Pose.GetPose().GetBoneContainer();
+        if (!Shoulder.IsValidToEvaluate(Bones) || !Elbow.IsValidToEvaluate(Bones) ||
+            !RightHand.IsValidToEvaluate(Bones) || !Palm.IsValidToEvaluate(Bones))
+            return;
+        auto Position = [&](const FBoneReference &Bone) {
+            return Output.Pose.GetComponentSpaceTransform(Bone.GetCompactPoseIndex(Bones)).GetLocation();
+        };
+        const FVector Start = Position(Shoulder), Joint = Position(Elbow), Hand = Position(IKBone);
+        FVector WeaponTarget;
+        if (bLeft)
+            WeaponTarget = Position(RightHand) + GunRotation.RotateVector(GripOffset) - (Position(Palm) - Hand) * .5f;
+        else
+            WeaponTarget = FVector(-16, Start.Y + 8.f, FloorHeight + 18.f);
+        EffectorLocation = FMath::Lerp(FVector(Hand.X, Hand.Y, FloorHeight + 7.f), WeaponTarget, WeaponAlpha);
+        JointTargetLocation = GroundBendTarget(Start, Joint, Hand, EffectorLocation, FloorHeight + 5.f);
+        FAnimNode_TwoBoneIK::EvaluateSkeletalControl_AnyThread(Output, Transforms);
+    }
+};
+
+// Posture blends can sweep a foot below the floor even when both source poses
+// have valid contact. Correct only penetration, using the evaluated knee plane.
+struct FHoverPostureContactNode final : FAnimNode_TwoBoneIK
+{
+    FBoneReference Thigh, Calf, Ball;
+    float FloorHeight = 0;
+    float SupportAlpha = 0;
+    FHoverPostureContactNode()
+    {
+        EffectorLocationSpace = JointTargetLocationSpace = BCS_ComponentSpace;
+        bAllowStretching = false;
+        bMaintainEffectorRelRot = true;
+    }
+    virtual void CacheBones_AnyThread(const FAnimationCacheBonesContext &Context) override
+    {
+        FAnimNode_TwoBoneIK::CacheBones_AnyThread(Context);
+        const auto &Bones = Context.AnimInstanceProxy->GetRequiredBones();
+        Thigh.Initialize(Bones);
+        Calf.Initialize(Bones);
+        Ball.Initialize(Bones);
+    }
+    virtual void EvaluateSkeletalControl_AnyThread(FComponentSpacePoseContext &Output,
+                                                   TArray<FBoneTransform> &Transforms) override
+    {
+        const auto &Bones = Output.Pose.GetPose().GetBoneContainer();
+        if (!Thigh.IsValidToEvaluate(Bones) || !Calf.IsValidToEvaluate(Bones) || !Ball.IsValidToEvaluate(Bones))
+            return;
+        const FVector Foot = Output.Pose.GetComponentSpaceTransform(IKBone.GetCompactPoseIndex(Bones)).GetLocation();
+        const FVector Toe = Output.Pose.GetComponentSpaceTransform(Ball.GetCompactPoseIndex(Bones)).GetLocation();
+        const float Lowest = float(FMath::Min(Foot.Z, Toe.Z));
+        const float Lift =
+            FMath::Lerp(FMath::Max(0.f, FloorHeight + 2.f - Lowest), FloorHeight + 4.f - Lowest, SupportAlpha);
+        if (FMath::Abs(Lift) < .01f && SupportAlpha < .01f)
+            return;
+        const FVector Hip = Output.Pose.GetComponentSpaceTransform(Thigh.GetCompactPoseIndex(Bones)).GetLocation();
+        const FVector Knee = Output.Pose.GetComponentSpaceTransform(Calf.GetCompactPoseIndex(Bones)).GetLocation();
+        EffectorLocation = Foot + FVector(0, 0, Lift);
+        JointTargetLocation = Knee + (Knee - (Hip + Foot) * .5f).GetSafeNormal() * 30.f;
+        JointTargetLocation = FMath::Lerp(
+            JointTargetLocation, GroundBendTarget(Hip, Knee, Foot, EffectorLocation, FloorHeight + 6.f), SupportAlpha);
+        FAnimNode_TwoBoneIK::EvaluateSkeletalControl_AnyThread(Output, Transforms);
+    }
+};
+
 struct FHoverAnimProxy final : FAnimInstanceProxy
 {
     FAnimNode_SequencePlayer_Standalone Players[2];
     FAnimNode_SequencePlayer_Standalone Rifle;
     FAnimNode_LayeredBoneBlend UpperBody;
+    FAnimNode_LayeredBoneBlend ProneHands;
     FAnimNode_TwoWayBlend Blend;
     FAnimNode_BlendSpacePlayer_Standalone Locomotion;
     FAnimNode_TwoWayBlend GroundBlend;
@@ -141,8 +254,11 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
     int32 RideTurn = 0;
     bool bWasRiding = false, bWasThrust = false, bWasAiming = false;
     FAnimNode_ConvertLocalToComponentSpace ToComponent;
+    FAnimNode_ModifyBone ProneNeck, ProneHead;
     FHoverPelvisNode Pelvis;
     FAnimNode_TwoBoneIK Left, Right;
+    FHoverPostureContactNode GroundContacts[2];
+    FHoverProneArmNode ProneArms[2];
     FHoverSupportHandNode SupportHand;
     FAnimNode_ModifyBone Springs[4];
     FHoverSecondaryMotion Secondary;
@@ -200,8 +316,35 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
         UpperBody.bMeshSpaceRotationBlend = true;
         UpperBody.InvalidatePerBoneBlendWeights();
         UpperBody.BlendWeights[0] = 0;
-        ToComponent.LocalPose.SetLinkNode(&UpperBody);
-        Pelvis.ComponentPose.SetLinkNode(&ToComponent);
+        ProneHands.BasePose.SetLinkNode(&UpperBody);
+        ProneHands.AddPose();
+        ProneHands.BlendPoses[0].SetLinkNode(&Rifle);
+        for (const FName Hand : {FName(TEXT("hand_l")), FName(TEXT("hand_r"))})
+        {
+            FBranchFilter HandFilter;
+            HandFilter.BoneName = Hand;
+            HandFilter.BlendDepth = 1;
+            ProneHands.LayerSetup[0].BranchFilters.Add(HandFilter);
+        }
+        ProneHands.bMeshSpaceRotationBlend = true;
+        ProneHands.InvalidatePerBoneBlendWeights();
+        ProneHands.BlendWeights[0] = 0;
+        ToComponent.LocalPose.SetLinkNode(&ProneHands);
+        ProneNeck.ComponentPose.SetLinkNode(&ToComponent);
+        ProneHead.ComponentPose.SetLinkNode(&ProneNeck);
+        ProneNeck.BoneToModify.BoneName = TEXT("neck_01");
+        ProneHead.BoneToModify.BoneName = TEXT("head");
+        for (auto *Look : {&ProneNeck, &ProneHead})
+        {
+            Look->RotationMode = BMM_Additive;
+            Look->RotationSpace = BCS_ComponentSpace;
+            Look->Alpha = 0;
+        }
+        // The purchased belly crawl looks at the floor. Lift her gaze along the
+        // ground while the arms support the torso and keep the rifle beside it.
+        ProneNeck.Rotation = FQuat(FVector::ForwardVector, FMath::DegreesToRadians(50.f)).Rotator();
+        ProneHead.Rotation = FQuat(FVector::ForwardVector, FMath::DegreesToRadians(25.f)).Rotator();
+        Pelvis.ComponentPose.SetLinkNode(&ProneHead);
         Pelvis.BoneToModify.BoneName = TEXT("pelvis");
         Pelvis.TranslationMode = BMM_Additive;
         Pelvis.TranslationSpace = BCS_ComponentSpace;
@@ -210,7 +353,27 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
         Pelvis.RotationSpace = BCS_ComponentSpace;
         Left.ComponentPose.SetLinkNode(&Pelvis);
         Right.ComponentPose.SetLinkNode(&Left);
-        SupportHand.ComponentPose.SetLinkNode(&Right);
+        GroundContacts[0].ComponentPose.SetLinkNode(&Right);
+        GroundContacts[1].ComponentPose.SetLinkNode(&GroundContacts[0]);
+        for (int32 I = 0; I < 2; ++I)
+        {
+            const TCHAR *Side = I == 0 ? TEXT("l") : TEXT("r");
+            GroundContacts[I].IKBone.BoneName = FName(*FString::Printf(TEXT("foot_%s"), Side));
+            GroundContacts[I].Thigh.BoneName = FName(*FString::Printf(TEXT("thigh_%s"), Side));
+            GroundContacts[I].Calf.BoneName = FName(*FString::Printf(TEXT("calf_%s"), Side));
+            GroundContacts[I].Ball.BoneName = FName(*FString::Printf(TEXT("ball_%s"), Side));
+        }
+        ProneArms[0].ComponentPose.SetLinkNode(&GroundContacts[1]);
+        ProneArms[1].ComponentPose.SetLinkNode(&ProneArms[0]);
+        for (int32 I = 0; I < 2; ++I)
+        {
+            const TCHAR *Side = I == 0 ? TEXT("r") : TEXT("l");
+            ProneArms[I].bLeft = I == 1;
+            ProneArms[I].IKBone.BoneName = FName(*FString::Printf(TEXT("hand_%s"), Side));
+            ProneArms[I].Shoulder.BoneName = FName(*FString::Printf(TEXT("upperarm_%s"), Side));
+            ProneArms[I].Elbow.BoneName = FName(*FString::Printf(TEXT("lowerarm_%s"), Side));
+        }
+        SupportHand.ComponentPose.SetLinkNode(&ProneArms[1]);
         const FName SpringNames[] = {TEXT("chest_l"), TEXT("chest_r"), TEXT("glute_l"), TEXT("glute_r")};
         for (int32 I = 0; I < 4; ++I)
         {
@@ -251,6 +414,13 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
         Nodes.Add(&ReloadBlend);
         Nodes.Add(&MotionBlend);
         Nodes.Add(&SupportHand);
+        Nodes.Add(&GroundContacts[0]);
+        Nodes.Add(&GroundContacts[1]);
+        Nodes.Add(&ProneHands);
+        Nodes.Add(&ProneNeck);
+        Nodes.Add(&ProneHead);
+        Nodes.Add(&ProneArms[0]);
+        Nodes.Add(&ProneArms[1]);
         Nodes.Append({&RideAction, &Climb, &Dive, &AimAction, &GunShot, &RideActionBlend, &ClimbBlend, &DiveBlend,
                       &AimActionBlend, &WeaponPose, &GliderAim, &ShotAdditive});
     }
@@ -259,6 +429,25 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
         FAnimInstanceProxy::PreUpdate(Instance, DT);
         auto *State = CastChecked<UHoverAnimInstance>(Instance);
         UpperBody.bMeshSpaceRotationBlend = !State->bProne;
+        for (auto &Contact : GroundContacts)
+        {
+            Contact.Alpha = State->bGroundContacts && !State->bRiding ? 1.f : 0.f;
+            Contact.FloorHeight = State->GroundContactHeight;
+            Contact.SupportAlpha = FMath::FInterpTo(Contact.SupportAlpha, State->bSupportedProne ? 1.f : 0.f, DT, 10.f);
+        }
+        for (auto &Arm : ProneArms)
+        {
+            Arm.Alpha =
+                FMath::FInterpTo(Arm.Alpha, State->bSupportedProne && State->bGroundContacts ? 1.f : 0.f, DT, 10.f);
+            Arm.WeaponAlpha = FMath::FInterpTo(Arm.WeaponAlpha, State->bAiming ? 1.f : 0.f, DT, 10.f);
+            Arm.FloorHeight = State->GroundContactHeight;
+            Arm.GripOffset = State->SupportGripOffset;
+            Arm.GunRotation = State->WeaponRotation;
+        }
+        ProneHands.BlendWeights[0] = FMath::FInterpTo(ProneHands.BlendWeights[0],
+                                                      State->bSupportedProne && State->bAiming ? 1.f : 0.f, DT, 10.f);
+        ProneNeck.Alpha = ProneHead.Alpha =
+            FMath::FInterpTo(ProneNeck.Alpha, State->bSupportedProne ? 1.f : 0.f, DT, 10.f);
         MotionPose.SourceMeshComponent = State->MotionSource;
         ReloadPose.SourceMeshComponent = State->MotionSource;
         ReloadBlend.Alpha =
@@ -365,12 +554,13 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
         bRifleLoop = !State->bRiding;
         // Rifle gait clips carry the weapon low. ADS remains a separate owned
         // upper-body pose over their matching lower-body motion.
-        UpperBody.BlendWeights[0] = FMath::FInterpTo(
-            UpperBody.BlendWeights[0],
-            (State->bAiming || State->bMountedReload || (State->bRiding && AimTime < AimDuration)) && State->RifleAim
-                ? 1.f
-                : 0.f,
-            DT, 10.f);
+        UpperBody.BlendWeights[0] = FMath::FInterpTo(UpperBody.BlendWeights[0],
+                                                     ((State->bAiming && !State->bProne) || State->bMountedReload ||
+                                                      (State->bRiding && AimTime < AimDuration)) &&
+                                                             State->RifleAim
+                                                         ? 1.f
+                                                         : 0.f,
+                                                     DT, 10.f);
         Left.Alpha = Right.Alpha = State->FootLock;
         SupportHand.Alpha = UpperBody.BlendWeights[0] * (1.f - ReloadBlend.Alpha);
         SupportHand.GripOffset = State->SupportGripOffset;
@@ -457,8 +647,8 @@ void UHoverAnimInstance::DestroyAnimInstanceProxy(FAnimInstanceProxy *Proxy)
 // Purchased FPS poses and reload montage; ammo/timing stay with the native weapon.
 struct FHoverViewProxy final : FAnimInstanceProxy
 {
-    FAnimNode_SequencePlayer_Standalone Idle, Aim;
-    FAnimNode_TwoWayBlend AimBlend;
+    FAnimNode_SequencePlayer_Standalone Idle, Aim, Melee;
+    FAnimNode_TwoWayBlend AimBlend, MeleeBlend;
     FAnimNode_Slot Reload;
     FAnimNode_ConvertLocalToComponentSpace Component;
     FHoverSupportHandNode Support;
@@ -471,13 +661,19 @@ struct FHoverViewProxy final : FAnimInstanceProxy
             LoadObject<UAnimSequence>(nullptr, TEXT("/Game/ZESP/ZE/Animations/M16/AS_FPS_Idle_M16.AS_FPS_Idle_M16"));
         State->AimIdle = LoadObject<UAnimSequence>(
             nullptr, TEXT("/Game/ZESP/ZE/Animations/M16/AS_FPS_Idle_Aim_M16.AS_FPS_Idle_Aim_M16"));
+        State->MeleeIdle =
+            LoadObject<UAnimSequence>(nullptr, TEXT("/Game/HoverPrototype/Animations/QA_KatanaIdle.QA_KatanaIdle"));
         Idle.SetSequence(State->Idle);
         Aim.SetSequence(State->AimIdle);
         Idle.SetLoopAnimation(true);
         Aim.SetLoopAnimation(true);
+        Melee.SetSequence(State->MeleeIdle);
+        Melee.SetLoopAnimation(true);
         AimBlend.A.SetLinkNode(&Idle);
         AimBlend.B.SetLinkNode(&Aim);
-        Reload.Source.SetLinkNode(&AimBlend);
+        MeleeBlend.A.SetLinkNode(&AimBlend);
+        MeleeBlend.B.SetLinkNode(&Melee);
+        Reload.Source.SetLinkNode(&MeleeBlend);
         Reload.SlotName = TEXT("DefaultSlot");
         Reload.bAlwaysUpdateSourcePose = true;
         Component.LocalPose.SetLinkNode(&Reload);
@@ -492,17 +688,19 @@ struct FHoverViewProxy final : FAnimInstanceProxy
     }
     virtual void GetCustomNodes(TArray<FAnimNode_Base *> &Nodes) override
     {
-        Nodes = {&Idle, &Aim, &AimBlend, &Reload, &Component, &Support, &Root};
+        Nodes = {&Idle, &Aim, &Melee, &AimBlend, &MeleeBlend, &Reload, &Component, &Support, &Root};
     }
     virtual void PreUpdate(UAnimInstance *Instance, float DT) override
     {
         FAnimInstanceProxy::PreUpdate(Instance, DT);
         auto *State = CastChecked<UHoverViewAnimInstance>(Instance);
         AimBlend.Alpha = State->AimAlpha;
+        MeleeBlend.Alpha = State->bMelee ? 1.f : 0.f;
         Support.GripOffset = State->SupportGripOffset;
         Support.GunRotation = State->WeaponRotation;
         // Let the authored reload hand leave the foregrip.
-        Support.Alpha = FMath::FInterpTo(Support.Alpha, State->IsAnyMontagePlaying() ? 0.f : 1.f, DT, 16.f);
+        Support.Alpha =
+            State->bMelee ? 0.f : FMath::FInterpTo(Support.Alpha, State->IsAnyMontagePlaying() ? 0.f : 1.f, DT, 16.f);
     }
 };
 
