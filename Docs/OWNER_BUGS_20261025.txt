@@ -76,8 +76,26 @@ and accepted ground body physics remain. The dive holds the owned prone pose;
 a dedicated human dive transition remains an animation asset gap.
 CPU test:500cm/s walking slide,900cm/s dive,34cm prone capsule,120cm/s landed crawl.
 
+FOLLOW-UP: VISIBLE GUN RECOIL
+Each actual rifle shot now kicks the visible gun upward, with FPS backward travel
+and a critically damped return. ADS reduces the presentation strength to55percent.
+TPS pivots around the hand grip; it does not slide the rifle out of Vexa's hand.
+Burst accumulation is capped. The next round uses the currently recoiling barrel,
+and its flash remains attached to that muzzle. Native vendor camera recoil, spread,
+ammo and fire cadence remain authoritative. Katana selection/mount/reset clear recoil.
+The rest sight anchor is rebuilt from the camera each update, avoiding cumulative
+drift. Tune GunRecoilPitch, GunRecoilDistance and GunRecoilRecovery in DA_HoverPilot.
+Native defaults:2.6degrees,3cm,22springfrequency. Existing asset files were not saved.
+CPU transform measurements show kick and recovery in hip, ADS, TPS and glider fire;
+final perceived strength/visual appearance remain unverified without GPU tests.
+Follow-up build recoil_build1 succeeded25.35s; both changedC++files pass formatting
+and diff checks. Actual controller-triggered NullRHI runs pass with and without ZE:
+hip kick3cm/2.62degrees,ADS1.45degrees,TPS/glider1.40degrees; burst remains capped,
+sights recover without drift. Empty-magazine trigger causes reload without recoil
+or a phantom shot. These checks measure transforms/behavior, not rendered quality.
+
 VALIDATION / PRESERVATION
-Latest native build: Build11 succeeded10.63s. Eleven changedC++/header files pass
+Main owner-bug pass before recoil: Build11 succeeded10.63s. Eleven changedC++/header files pass
 clang-format; git diff whitespace check and20projectPythonAST checks pass. Native
 AFS.HoverMotion automation passes1/1 with0warnings. Fresh combined regression also
 passes slide/dive, tapR3damage, close FPS/TPS gun alignment, tuningApply/Cancel and

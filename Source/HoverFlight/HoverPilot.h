@@ -66,6 +66,12 @@ class HOVERFLIGHT_API UHoverPilotAssets : public UDataAsset
     UPROPERTY(EditAnywhere, Category = "Weapon") FVector GunForward = FVector::RightVector;
     UPROPERTY(EditAnywhere, Category = "Weapon") FVector GunGrip = FVector(0, -20, -3);
     UPROPERTY(EditAnywhere, Category = "Weapon") FVector GunSight = FVector(0, 0, 12);
+    UPROPERTY(EditAnywhere, Category = "Weapon", meta = (ClampMin = "0", ClampMax = "10"))
+    float GunRecoilPitch = 2.6f;
+    UPROPERTY(EditAnywhere, Category = "Weapon", meta = (ClampMin = "0", ClampMax = "10"))
+    float GunRecoilDistance = 3.f;
+    UPROPERTY(EditAnywhere, Category = "Weapon", meta = (ClampMin = "1", ClampMax = "60"))
+    float GunRecoilRecovery = 22.f;
     UPROPERTY(EditAnywhere, Category = "Weapon") TObjectPtr<UFXSystemAsset> SurfaceImpact;
     UPROPERTY(EditAnywhere, Category = "Weapon") TObjectPtr<class USoundBase> ShotSound;
 };
@@ -212,6 +218,7 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     TMap<FName, FTransform> BoardRest;
     FVector StartLocation, ParkedLocation;
     float WeaponAimAlpha = 0;
+    float GunRecoil = 0, GunRecoilVelocity = 0;
     float CameraPostureHeight = 0;
     FVector MountFrom, MountTo, MountFeet[2];
     FRotator StartRotation;

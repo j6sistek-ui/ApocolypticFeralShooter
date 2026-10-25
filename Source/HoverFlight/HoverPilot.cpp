@@ -320,6 +320,7 @@ void AHoverPilot::ToggleMeleeWeapon()
     }
     MeleeWeapon->CancelSwing();
     bMeleeEquipped = !bMeleeEquipped;
+    GunRecoil = GunRecoilVelocity = 0;
     bSuppressFireUntilRelease = true;
     bAiming = false;
     GunRaisedTime = 0;
@@ -376,6 +377,7 @@ bool AHoverPilot::PrepareForRide()
         MeleeWeapon->CancelSwing();
     bMeleeEquipped = false;
     bSuppressFireUntilRelease = true;
+    GunRecoil = GunRecoilVelocity = 0;
     GroundSlideTime = 0;
     bGroundCrouchHeld = false;
     UnCrouch();
@@ -534,6 +536,7 @@ void AHoverPilot::UpdateCameraPosture(float DT)
 
 void AHoverPilot::HoverReset()
 {
+    GunRecoil = GunRecoilVelocity = 0;
     bMeleeEquipped = false;
     bSuppressFireUntilRelease = true;
     bDiving = bProne = false;
@@ -1035,11 +1038,7 @@ void AHoverPilot::UpdateAppearance(float DT)
                                                        bAiming ? 65.f : (bBoost && bMounted ? 105.f : 95.f), DT, 10.f));
     ReviewCamera->SetFieldOfView(FMath::FInterpTo(ReviewCamera->FieldOfView, bAiming ? 72.f : 90.f, DT, 10.f));
     UpdateCameraPosture(DT);
-    const FQuat GunBasis = FQuat::FindBetweenNormals(Assets->GunForward.GetSafeNormal(), FVector::ForwardVector);
-    const FVector SightAligned = FVector(20, 0, 0) - GunBasis.RotateVector(Assets->GunSight);
     WeaponAimAlpha = FMath::FInterpTo(WeaponAimAlpha, bAiming ? 1.f : 0.f, DT, 12.f);
-    ViewGun->SetRelativeLocation(FMath::Lerp(FVector(35, 18, -20), SightAligned, WeaponAimAlpha));
-    ViewGun->SetRelativeRotation(GunBasis);
     const float LockTarget = bMounted && !bSteppingOn ? 1.f : 0.f;
     // Substep the pad spring without discarding elapsed time on slow frames.
     for (float Remaining = DT; Remaining > 0;)
@@ -1214,10 +1213,19 @@ void AHoverPilot::UpdateGunTransform()
         const FVector Muzzle = Origin + WorldRotation.RotateVector(Assets->GunMuzzle);
         WorldRotation = (Target - Muzzle).Rotation().Quaternion() * Basis;
     }
+    const float RecoilStrength = GunRecoil * FMath::Lerp(1.f, .55f, WeaponAimAlpha);
+    const FQuat Kick = FRotator(Assets->GunRecoilPitch * RecoilStrength, 0, 0).Quaternion();
+    // Pitch around the grip in third person so the rifle stays in her hand.
+    WorldRotation = WorldRotation * Basis.Inverse() * Kick * Basis;
     WorldGun->SetWorldLocationAndRotation(Hand - WorldRotation.RotateVector(Assets->GunGrip), WorldRotation);
     // Keep the sight centred while the barrel converges on the same aim point.
     // The tracer then travels along that barrel axis with no steering in flight.
-    const FVector SightAnchor = ViewGun->GetComponentTransform().TransformPosition(Assets->GunSight);
+    // Derive a fresh rest pose: reading the already-kicked component here would
+    // accumulate sight drift when a shot and the appearance tick both update it.
+    const FVector SightAligned = FVector(20, 0, 0) - Basis.RotateVector(Assets->GunSight);
+    const FVector RestLocation = FMath::Lerp(FVector(35, 18, -20), SightAligned, WeaponAimAlpha);
+    const FVector SightAnchor = FirstPersonCamera->GetComponentTransform().TransformPosition(
+        RestLocation + Basis.RotateVector(Assets->GunSight));
     FQuat ViewRotation = FirstPersonCamera->GetComponentQuat() * Basis;
     for (int32 I = 0; I < 3; ++I)
     {
@@ -1225,7 +1233,11 @@ void AHoverPilot::UpdateGunTransform()
         const FVector Muzzle = Origin + ViewRotation.RotateVector(Assets->GunMuzzle);
         ViewRotation = (Target - Muzzle).Rotation().Quaternion() * Basis;
     }
-    ViewGun->SetWorldLocationAndRotation(SightAnchor - ViewRotation.RotateVector(Assets->GunSight), ViewRotation);
+    const FVector ViewGrip = SightAnchor + ViewRotation.RotateVector(Assets->GunGrip - Assets->GunSight);
+    const FVector KickBack = FirstPersonCamera->GetForwardVector() * Assets->GunRecoilDistance * RecoilStrength;
+    ViewRotation = ViewRotation * Basis.Inverse() * Kick * Basis;
+    ViewGun->SetWorldLocationAndRotation(ViewGrip - KickBack - ViewRotation.RotateVector(Assets->GunGrip),
+                                         ViewRotation);
 }
 
 void AHoverPilot::FireShot(float Damage, float Spread, float Range)
@@ -1284,6 +1296,11 @@ void AHoverPilot::FireShot(float Damage, float Spread, float Range)
         CurrentAnimation = nullptr;
         PlayPose(Assets->Fire, false);
     }
+    // Kick only after an actual round is fired. The next shot starts at the
+    // currently recoiling barrel; flashes remain attached to that same muzzle.
+    GunRecoil = FMath::Min(1.5f, GunRecoil + 1.f);
+    GunRecoilVelocity = 0;
+    UpdateGunTransform();
     UE_LOG(LogTemp, Verbose, TEXT("HOVER_SHOT hit=%s"), *GetNameSafe(Hit.GetActor()));
 }
 
@@ -1521,6 +1538,7 @@ void AHoverPilot::Tick(float DT)
     TransitionTime = FMath::Max(0.f, TransitionTime - DT);
     FireCooldown = FMath::Max(0.f, FireCooldown - DT);
     StatusTime = FMath::Max(0.f, StatusTime - DT);
+    HoverMotion::Spring(GunRecoil, GunRecoilVelocity, 0.f, DT, Assets->GunRecoilRecovery);
     UpdateInput(DT);
     UpdateGroundPosture(DT);
     if (LocomotionBridge && LocomotionBridge->bEnabled && !bMounted && GetCharacterMovement()->IsMovingOnGround() &&
