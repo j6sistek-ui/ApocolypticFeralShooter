@@ -34,7 +34,9 @@ class HOVERFLIGHT_API UHoverAnimInstance : public UAnimInstance
     bool bProne = false;
     bool bSupportedProne = false;
     bool bGroundContacts = false;
-    float GroundContactHeight = 0;
+    FPlane GroundPlane = FPlane(0, 0, 1, 0);
+    // Left/right feet, right/left elbows, right/left hands in component space.
+    FPlane ContactPlanes[6];
     bool bLoop = true;
     int32 RestartSerial = 0;
     float FootLock = 0;

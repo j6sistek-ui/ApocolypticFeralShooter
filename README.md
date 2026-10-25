@@ -31,8 +31,10 @@ None of Cyber City's or PostApo's zombies are used there. See
 R3/V uses the supplied bloodied katana on foot in all three levels. It uses the
 purchased knife slash, native melee contact/cooldown and a local hand attachment.
 The rifle hides during the swing. FPS now has fitted view-arm idle/slash clips;
-the blade follows the hand, with its original texture bindings and corrected grip.
-See `Docs/ANIMATION_POLISH_20261025.txt` for the latest animation evidence and
+the blade follows the hand, gripped just below the guard with its curvature reversed.
+Original4K weapon detail is requested while in FPS and released when holstered.
+See `Docs/KATANA_TERRAIN_20261025.txt` for grip, streaming and terrain support checks,
+`Docs/ANIMATION_POLISH_20261025.txt` for the preceding animation evidence and
 `Docs/KATANA_20261023.txt` for historical provenance,
 timing, rollback files and the distinction between CPU checks and rendered review.
 

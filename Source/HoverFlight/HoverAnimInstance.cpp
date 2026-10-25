@@ -120,8 +120,12 @@ struct FHoverSupportHandNode final : FAnimNode_TwoBoneIK
 // Intersect the two-bone bend circle with a support plane. Preserve limb lengths
 // and choose the side nearest the authored bend; unreachable contacts stay at
 // the closest possible height instead of stretching a limb to the floor.
+static float GroundHeight(const FPlane &Plane, const FVector &Point)
+{
+    return (Plane.W - Plane.X * Point.X - Plane.Y * Point.Y) / FMath::Max(Plane.Z, .1);
+}
 static FVector GroundBendTarget(const FVector &Start, const FVector &Joint, const FVector &End, const FVector &Target,
-                                float Height)
+                                FPlane Plane, float Clearance)
 {
     const float A = FVector::Distance(Start, Joint), B = FVector::Distance(Joint, End);
     const FVector Axis = (Target - Start).GetSafeNormal();
@@ -129,10 +133,13 @@ static FVector GroundBendTarget(const FVector &Start, const FVector &Joint, cons
     const float Along = (A * A - B * B + D * D) / (2 * D);
     const float Radius = FMath::Sqrt(FMath::Max(0.f, A * A - Along * Along));
     const FVector Center = Start + Axis * Along;
-    const FVector Up = (FVector::UpVector - Axis * Axis.Z).GetSafeNormal();
-    if (Radius < .01f || Up.Z < .01f)
+    const FVector Normal(Plane.X, Plane.Y, Plane.Z);
+    const FVector Up = (Normal - Axis * FVector::DotProduct(Axis, Normal)).GetSafeNormal();
+    const float Projection = FVector::DotProduct(Up, Normal);
+    if (Radius < .01f || Projection < .01f)
         return Joint;
-    const float Z = FMath::Clamp(float((Height - Center.Z) / (Radius * Up.Z)), -1.f, 1.f);
+    const float Z = FMath::Clamp(
+        float((Plane.W + Clearance - FVector::DotProduct(Normal, Center)) / (Radius * Projection)), -1.f, 1.f);
     FVector Side = FVector::CrossProduct(Axis, Up);
     if (FVector::DotProduct(Joint - Center, Side) < 0)
         Side *= -1;
@@ -144,7 +151,7 @@ struct FHoverProneArmNode final : FAnimNode_TwoBoneIK
     FBoneReference Shoulder, Elbow, RightHand, Palm;
     bool bLeft = false;
     float WeaponAlpha = 0;
-    float FloorHeight = 0;
+    FPlane ElbowPlane = FPlane(0, 0, 1, 0), HandPlane = FPlane(0, 0, 1, 0);
     FVector GripOffset = FVector::ZeroVector;
     FQuat GunRotation = FQuat::Identity;
     FHoverProneArmNode()
@@ -178,9 +185,13 @@ struct FHoverProneArmNode final : FAnimNode_TwoBoneIK
         if (bLeft)
             WeaponTarget = Position(RightHand) + GunRotation.RotateVector(GripOffset) - (Position(Palm) - Hand) * .5f;
         else
-            WeaponTarget = FVector(-16, Start.Y + 8.f, FloorHeight + 18.f);
-        EffectorLocation = FMath::Lerp(FVector(Hand.X, Hand.Y, FloorHeight + 7.f), WeaponTarget, WeaponAlpha);
-        JointTargetLocation = GroundBendTarget(Start, Joint, Hand, EffectorLocation, FloorHeight + 5.f);
+        {
+            WeaponTarget = FVector(-16, Start.Y + 8.f, 0);
+            WeaponTarget.Z = GroundHeight(HandPlane, WeaponTarget) + 18.f;
+        }
+        EffectorLocation =
+            FMath::Lerp(FVector(Hand.X, Hand.Y, GroundHeight(HandPlane, Hand) + 7.f), WeaponTarget, WeaponAlpha);
+        JointTargetLocation = GroundBendTarget(Start, Joint, Hand, EffectorLocation, ElbowPlane, 5.f);
         FAnimNode_TwoBoneIK::EvaluateSkeletalControl_AnyThread(Output, Transforms);
     }
 };
@@ -190,7 +201,7 @@ struct FHoverProneArmNode final : FAnimNode_TwoBoneIK
 struct FHoverPostureContactNode final : FAnimNode_TwoBoneIK
 {
     FBoneReference Thigh, Calf, Ball;
-    float FloorHeight = 0;
+    FPlane FloorPlane = FPlane(0, 0, 1, 0);
     float SupportAlpha = 0;
     FHoverPostureContactNode()
     {
@@ -214,9 +225,9 @@ struct FHoverPostureContactNode final : FAnimNode_TwoBoneIK
             return;
         const FVector Foot = Output.Pose.GetComponentSpaceTransform(IKBone.GetCompactPoseIndex(Bones)).GetLocation();
         const FVector Toe = Output.Pose.GetComponentSpaceTransform(Ball.GetCompactPoseIndex(Bones)).GetLocation();
-        const float Lowest = float(FMath::Min(Foot.Z, Toe.Z));
-        const float Lift =
-            FMath::Lerp(FMath::Max(0.f, FloorHeight + 2.f - Lowest), FloorHeight + 4.f - Lowest, SupportAlpha);
+        const float Lowest =
+            float(FMath::Min(Foot.Z - GroundHeight(FloorPlane, Foot), Toe.Z - GroundHeight(FloorPlane, Toe)));
+        const float Lift = FMath::Lerp(FMath::Max(0.f, 2.f - Lowest), 4.f - Lowest, SupportAlpha);
         if (FMath::Abs(Lift) < .01f && SupportAlpha < .01f)
             return;
         const FVector Hip = Output.Pose.GetComponentSpaceTransform(Thigh.GetCompactPoseIndex(Bones)).GetLocation();
@@ -224,7 +235,7 @@ struct FHoverPostureContactNode final : FAnimNode_TwoBoneIK
         EffectorLocation = Foot + FVector(0, 0, Lift);
         JointTargetLocation = Knee + (Knee - (Hip + Foot) * .5f).GetSafeNormal() * 30.f;
         JointTargetLocation = FMath::Lerp(
-            JointTargetLocation, GroundBendTarget(Hip, Knee, Foot, EffectorLocation, FloorHeight + 6.f), SupportAlpha);
+            JointTargetLocation, GroundBendTarget(Hip, Knee, Foot, EffectorLocation, FloorPlane, 6.f), SupportAlpha);
         FAnimNode_TwoBoneIK::EvaluateSkeletalControl_AnyThread(Output, Transforms);
     }
 };
@@ -254,7 +265,7 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
     int32 RideTurn = 0;
     bool bWasRiding = false, bWasThrust = false, bWasAiming = false;
     FAnimNode_ConvertLocalToComponentSpace ToComponent;
-    FAnimNode_ModifyBone ProneNeck, ProneHead;
+    FAnimNode_ModifyBone ProneGround, ProneNeck, ProneHead;
     FHoverPelvisNode Pelvis;
     FAnimNode_TwoBoneIK Left, Right;
     FHoverPostureContactNode GroundContacts[2];
@@ -330,7 +341,12 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
         ProneHands.InvalidatePerBoneBlendWeights();
         ProneHands.BlendWeights[0] = 0;
         ToComponent.LocalPose.SetLinkNode(&ProneHands);
-        ProneNeck.ComponentPose.SetLinkNode(&ToComponent);
+        ProneGround.ComponentPose.SetLinkNode(&ToComponent);
+        ProneGround.BoneToModify.BoneName = TEXT("root");
+        ProneGround.RotationMode = ProneGround.TranslationMode = BMM_Additive;
+        ProneGround.RotationSpace = ProneGround.TranslationSpace = BCS_ComponentSpace;
+        ProneGround.Alpha = 0;
+        ProneNeck.ComponentPose.SetLinkNode(&ProneGround);
         ProneHead.ComponentPose.SetLinkNode(&ProneNeck);
         ProneNeck.BoneToModify.BoneName = TEXT("neck_01");
         ProneHead.BoneToModify.BoneName = TEXT("head");
@@ -417,6 +433,7 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
         Nodes.Add(&GroundContacts[0]);
         Nodes.Add(&GroundContacts[1]);
         Nodes.Add(&ProneHands);
+        Nodes.Add(&ProneGround);
         Nodes.Add(&ProneNeck);
         Nodes.Add(&ProneHead);
         Nodes.Add(&ProneArms[0]);
@@ -429,18 +446,31 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
         FAnimInstanceProxy::PreUpdate(Instance, DT);
         auto *State = CastChecked<UHoverAnimInstance>(Instance);
         UpperBody.bMeshSpaceRotationBlend = !State->bProne;
-        for (auto &Contact : GroundContacts)
+        ProneGround.Alpha =
+            FMath::FInterpTo(ProneGround.Alpha, State->bSupportedProne && State->bGroundContacts ? 1.f : 0.f, DT, 10.f);
+        if (State->bGroundContacts)
         {
+            const FVector Normal(State->GroundPlane.X, State->GroundPlane.Y, State->GroundPlane.Z);
+            const FQuat Align = FQuat::FindBetweenNormals(FVector::UpVector, Normal);
+            const FVector Pivot(0, 0, GroundHeight(State->GroundPlane, FVector::ZeroVector));
+            ProneGround.Rotation = Align.Rotator();
+            ProneGround.Translation = Pivot - Align.RotateVector(Pivot);
+        }
+        for (int32 I = 0; I < 2; ++I)
+        {
+            auto &Contact = GroundContacts[I];
             Contact.Alpha = State->bGroundContacts && !State->bRiding ? 1.f : 0.f;
-            Contact.FloorHeight = State->GroundContactHeight;
+            Contact.FloorPlane = State->ContactPlanes[I];
             Contact.SupportAlpha = FMath::FInterpTo(Contact.SupportAlpha, State->bSupportedProne ? 1.f : 0.f, DT, 10.f);
         }
-        for (auto &Arm : ProneArms)
+        for (int32 I = 0; I < 2; ++I)
         {
+            auto &Arm = ProneArms[I];
             Arm.Alpha =
                 FMath::FInterpTo(Arm.Alpha, State->bSupportedProne && State->bGroundContacts ? 1.f : 0.f, DT, 10.f);
             Arm.WeaponAlpha = FMath::FInterpTo(Arm.WeaponAlpha, State->bAiming ? 1.f : 0.f, DT, 10.f);
-            Arm.FloorHeight = State->GroundContactHeight;
+            Arm.ElbowPlane = State->ContactPlanes[2 + I];
+            Arm.HandPlane = State->ContactPlanes[4 + I];
             Arm.GripOffset = State->SupportGripOffset;
             Arm.GunRotation = State->WeaponRotation;
         }

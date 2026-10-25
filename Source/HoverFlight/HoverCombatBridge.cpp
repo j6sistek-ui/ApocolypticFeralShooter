@@ -127,6 +127,7 @@ bool AHoverMeleeWeapon::IsSwinging() const
 }
 void AHoverMeleeWeapon::CancelSwing()
 {
+    SetFirstPersonDetail(false);
     if (IsSwinging())
         if (auto *Pilot = Cast<AHoverPilot>(OwnerPawn); Pilot && Pilot->LocomotionBridge)
         {
@@ -152,6 +153,7 @@ void AHoverMeleeWeapon::Tick(float DT)
     const bool Active = Pilot && Pilot->IsOnFoot() && !Pilot->IsKnockedDown() && !Pilot->IsDefeated() &&
                         !(Pilot->Combat && Pilot->Combat->IsInventoryOpen()) &&
                         (Pilot->IsMeleeEquipped() || IsSwinging());
+    SetFirstPersonDetail(Active && !Pilot->IsThirdPersonView());
     SetActorHiddenInGame(!Active);
     if (!Active)
     {
@@ -165,6 +167,16 @@ void AHoverMeleeWeapon::Tick(float DT)
     StaticMeshFP->SetHiddenInGame(ThirdPerson);
     StaticMeshTP->SetVisibility(ThirdPerson);
     StaticMeshFP->SetVisibility(!ThirdPerson);
+}
+void AHoverMeleeWeapon::SetFirstPersonDetail(bool Enabled)
+{
+    if (bFirstPersonDetail != Enabled)
+    {
+        // A near-camera weapon must not settle on the world-mesh 1K mip.
+        // Release the request when holstered or viewed in third person.
+        StaticMeshFP->SetTextureForceResidentFlag(Enabled);
+        bFirstPersonDetail = Enabled;
+    }
 }
 void AHoverMeleeWeapon::PerformMeleeTrace()
 {
@@ -211,10 +223,14 @@ void AHoverMeleeWeapon::ConfigureGrip(AHoverPilot *Pilot)
     const FVector Palm = HandWorld.InverseTransformPosition(Body->GetSocketLocation(TEXT("middle_01_r")));
     const FVector BladeAxis = (Index - Pinky).GetSafeNormal(SMALL_NUMBER, FVector::UpVector);
     StaticMeshTP->AttachToComponent(Body, FAttachmentTransformRules::SnapToTargetNotIncludingScale, TEXT("hand_r"));
-    // Centre the handle inside the curled fingers, towards the palm instead of
-    // balancing its centre on the outer finger knuckles.
-    StaticMeshTP->SetRelativeLocation(FMath::Lerp((Index + Pinky) * .5f, Palm, .75f));
-    StaticMeshTP->SetRelativeRotation(FRotationMatrix::MakeFromZX(BladeAxis, FVector::ForwardVector).Rotator());
+    const FVector Grip = FMath::Lerp((Index + Pinky) * .5f, Palm, .75f);
+    const FQuat Rotation =
+        FRotationMatrix::MakeFromZX(BladeAxis, FVector::ForwardVector).ToQuat() * FQuat(FVector::UpVector, PI);
+    // The mesh origin is 11cm above its pommel; its guard is at local Z=20cm.
+    // Grip 5cm below the guard, and turn the cutting edge around the handle.
+    const FVector HandleContact(-.4f, -.4f, 15.f);
+    StaticMeshTP->SetRelativeLocation(Grip - Rotation.RotateVector(HandleContact));
+    StaticMeshTP->SetRelativeRotation(Rotation);
     StaticMeshFP->AttachToComponent(Pilot->ViewArms, FAttachmentTransformRules::SnapToTargetNotIncludingScale,
                                     TEXT("hand_r"));
     StaticMeshFP->SetRelativeTransform(StaticMeshTP->GetRelativeTransform());

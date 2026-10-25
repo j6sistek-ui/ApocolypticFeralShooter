@@ -1139,8 +1139,24 @@ void AHoverPilot::UpdateAppearance(float DT)
                 Ground.ImpactNormal.Z > .65f)
             {
                 Instance->bGroundContacts = true;
-                Instance->GroundContactHeight =
-                    GetMesh()->GetComponentTransform().InverseTransformPosition(Ground.ImpactPoint).Z;
+                const FTransform MeshTransform = GetMesh()->GetComponentTransform();
+                auto PlaneForHit = [&](const FHitResult &Hit) {
+                    return FPlane(MeshTransform.InverseTransformPosition(Hit.ImpactPoint),
+                                  MeshTransform.InverseTransformVectorNoScale(Hit.ImpactNormal).GetSafeNormal());
+                };
+                Instance->GroundPlane = PlaneForHit(Ground);
+                const FName Contacts[] = {TEXT("ball_l"),     TEXT("ball_r"), TEXT("lowerarm_r"),
+                                          TEXT("lowerarm_l"), TEXT("hand_r"), TEXT("hand_l")};
+                for (int32 I = 0; I < UE_ARRAY_COUNT(Contacts); ++I)
+                {
+                    Instance->ContactPlanes[I] = Instance->GroundPlane;
+                    const FVector Point = GetMesh()->GetSocketLocation(Contacts[I]);
+                    FHitResult Contact;
+                    if (GetWorld()->LineTraceSingleByChannel(Contact, Point + FVector(0, 0, 150),
+                                                             Point - FVector(0, 0, 250), ECC_Visibility, Query) &&
+                        Contact.ImpactNormal.Z > .65f)
+                        Instance->ContactPlanes[I] = PlaneForHit(Contact);
+                }
             }
         }
         const FVector LocalVelocity =

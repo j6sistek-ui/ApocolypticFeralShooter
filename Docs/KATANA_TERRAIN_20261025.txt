@@ -1,0 +1,62 @@
+AFS KATANA GRIP / TEXTURE DETAIL AND TERRAIN CONTACT — 2026-10-25
+
+Supersedes the lower katana grip, 2K cap and capsule-floor-only support described
+in ANIMATION_POLISH_20261025.txt. This remains a local sandbox checkpoint.
+
+Katana: grip centre is now 5cm below the guard, using measured mesh coordinates
+(-0.4,-0.4,15)cm; guard Z is approximately20cm. The blade rotates180 degrees
+around its length axis so its curvature faces the requested direction. Both
+views retain the same right-hand attachment and native melee damage/timing.
+FPS idle/strike/recovery/holster/quick-slash and TPS idle/strike were checked.
+Measured contact-centre deviation from the animated palm target was1.09cm idle,
+2.35cm during FPS strikes and under0.75cm in the two TPS samples. These distances
+are skeletal anchor checks, not a claim of perfect finger-surface intersection.
+
+The source has three4K textures. The previous2K cap streamed only1K mips in the
+close FPS view. The three owned textures now use their original4096 sources and
+Weapon/WeaponNormalMap/WeaponSpecular groups. An FPS-only residency request loads
+all allowed mips while equipped/swinging, then releases on holster/TPS/end-play.
+NeverStream remains false. Native ListTextures confirmed4096 resident, totaling
+42.75MiB across the three textures. Releasing the request permits normal streaming;
+it does not promise immediate eviction. Original source bytes and PBR bindings are
+unchanged. DOF-off comparison showed no clear weapon improvement; no global camera,
+DLSS, sharpening or graphics preferences were changed. Native1920x1080 captures
+are supplied instead of the lower-resolution window captures. Source surface
+detail and artistic quality still depend on the supplied model/textures.
+
+Terrain: the prior single horizontal support height reproduced elbow penetration
+of7cm and toe penetration of18.54cm on12-degree slopes. The prone root now aligns
+to the capsule's ground plane. Six additional posture-only traces sample left/right
+feet, elbows and hands; two-bone solving uses their planes without limb stretching.
+This does not change the capsule, locomotion speeds or glider/body-spring tuning.
+Flat and four12-degree slope directions plus a15cm curb retained four supported
+contacts. Flat+45-degree gun aim retained three; -45-degree aim retained four.
+Slope elbow centres were5.11cm above their local surface; toes2.86-4.38cm.
+Joint centres include limb thickness and are not the visible skin contact surface.
+The transition regression retained1.335cm minimum foot/toe clearance and0cm camera
+arm variation; the19-case glider regression passed. Rendered fixtures and actual
+scripted input were used. Broad moving-terrain/stair/ledge traversal, physical
+controller feel and owner visual acceptance remain open. Dedicated human dive/
+prone entry/exit clips and a matched Ballista magazine exchange remain asset gaps.
+
+Validation: editor build2 passed in2.29s and native Development game build passed
+in28.33s. Five authored C++ files passed formatting and diff checks. All four final
+runtime reports completed without assertion errors. The glider report was followed
+by the known0xc0000005 shutdown exit; the other three final runs exited0.
+The editor build passed after preserving an old mapped DLL whose completed
+owned editor process retained a lock. The process reported HasExited and taskkill
+reported no running instance. The old DLL is retained as
+Binaries/Win64/UnrealEditor-HoverFlight.dll.retained-267aa37. This is not an engine
+shutdown fix. Two preliminary katana scripts had validation API/metadata errors;
+their evidence is preserved separately from the successful final capture.
+Build/static/runtime details and individual exit codes are in RESULTS.json.
+The earlier packaged build is not refreshed by this pass. Existing engine/vendor
+deprecation warnings, known shutdown issue, VSM and packaged navigation warnings
+remain separate open topics; no production/performance acceptance is claimed.
+
+Report and preview: workspace outputs/AFS_Test/KatanaTerrain20261025.
+Private rollback: D:/AFS_Comparisons/KatanaTerrain_20261025, immutable Before.
+Authoring/measurement scripts: workspace work/*katana*20261025.py and
+work/review_prone_terrain*_20261025.py; manifests retain exact files and hashes.
+Original GLB, purchased assets, SpaceSurvival, owner descriptor and saved graphics
+preferences are preserved. Native assets remain local and outside Git.
