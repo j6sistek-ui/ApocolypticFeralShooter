@@ -50,8 +50,8 @@ void UHoverGraphicsMenu::NativeOnInitialized()
     HealthText = AddText(TEXT(""), 23, FLinearColor::White);
     DetailText = AddText(TEXT("Invincible off: take damage. At zero health, reset at the start after 3 seconds."), 16,
                          FLinearColor(.7f, .76f, .84f));
-    AddText(TEXT("Changing level starts a fresh test with Vexa and all three vehicles. Lakeside uses its own five "
-                 "creatures."),
+    AddText(TEXT("NYC: explore with Vexa, hoverboard and truck, without zombies. Other levels keep their "
+                 "vehicles and encounters. Lakeside uses its own five creatures."),
             16, FLinearColor(.7f, .76f, .84f));
     ImageHelpText = AddText(TEXT("DLAA keeps full resolution. DLSS Quality is a good starting point for more speed."),
                             16, FLinearColor(.7f, .76f, .84f));
@@ -67,9 +67,10 @@ void UHoverGraphicsMenu::Open(UHoverGraphicsSettings *InSettings)
     Settings = InSettings;
     Pending = Settings->GetOptions();
     const FString Map = UGameplayStatics::GetCurrentLevelName(this);
-    PendingLevel = Map.Contains(TEXT("L_Showcase")) || Map.Contains(TEXT("L_Lakeside")) ? 2
-                   : Map.Contains(TEXT("Cyber"))                                        ? 1
-                                                                                        : 0;
+    PendingLevel = Map.Contains(TEXT("L_NYC_Explore"))                                    ? 3
+                   : Map.Contains(TEXT("L_Showcase")) || Map.Contains(TEXT("L_Lakeside")) ? 2
+                   : Map.Contains(TEXT("Cyber"))                                          ? 1
+                                                                                          : 0;
     SelectedRow = 0;
     bZombiePage = false;
     if (const auto *Mode = GetWorld()->GetAuthGameMode<AHoverCyberCityGameMode>())
@@ -119,7 +120,7 @@ void UHoverGraphicsMenu::Adjust(int32 Direction)
         Pending.FrameGeneration = Options[(Index + Direction + Options.Num()) % Options.Num()];
     }
     else if (SelectedRow == 2)
-        PendingLevel = (PendingLevel + Direction + 3) % 3;
+        PendingLevel = (PendingLevel + Direction + 4) % 4;
     else
         Pending.bInvincible = !Pending.bInvincible;
     Refresh();
@@ -167,7 +168,8 @@ void UHoverGraphicsMenu::Refresh()
     FramesText->SetColorAndOpacity(FSlateColor(SelectedRow == 1 ? FLinearColor(.3f, .8f, 1) : FLinearColor::White));
     LevelText->SetText(
         FText::FromString(FString::Printf(TEXT("%s Test level:  < %s >"), SelectedRow == 2 ? TEXT(">") : TEXT("  "),
-                                          PendingLevel == 2   ? TEXT("Chinese Lakeside Town")
+                                          PendingLevel == 3   ? TEXT("NYC - Exploration")
+                                          : PendingLevel == 2 ? TEXT("Chinese Lakeside Town")
                                           : PendingLevel == 1 ? TEXT("Cyber City")
                                                               : TEXT("Post-apocalypse"))));
     LevelText->SetColorAndOpacity(FSlateColor(SelectedRow == 2 ? FLinearColor(.3f, .8f, 1) : FLinearColor::White));

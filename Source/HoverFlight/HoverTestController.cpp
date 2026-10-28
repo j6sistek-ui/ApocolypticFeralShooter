@@ -78,9 +78,10 @@ void AHoverTestController::CloseGraphicsMenu(bool bApply)
         return;
     const int32 Level = GraphicsMenu->GetSelectedLevel();
     const FString CurrentMap = UGameplayStatics::GetCurrentLevelName(this);
-    const int32 CurrentLevel = CurrentMap.Contains(TEXT("L_Showcase")) || CurrentMap.Contains(TEXT("L_Lakeside")) ? 2
-                               : CurrentMap.Contains(TEXT("Cyber"))                                               ? 1
-                                                                                                                  : 0;
+    const int32 CurrentLevel = CurrentMap.Contains(TEXT("L_NYC_Explore"))                                           ? 3
+                               : CurrentMap.Contains(TEXT("L_Showcase")) || CurrentMap.Contains(TEXT("L_Lakeside")) ? 2
+                               : CurrentMap.Contains(TEXT("Cyber"))                                                 ? 1
+                                                                                                                    : 0;
     const bool ChangeLevel = bApply && Level != CurrentLevel;
     if (bApply)
     {
@@ -102,7 +103,8 @@ void AHoverTestController::CloseGraphicsMenu(bool bApply)
 
 void AHoverTestController::HoverLoadLevel(int32 Level)
 {
-    const FName Map(Level == 2   ? TEXT("/Game/Chinese_Lakeside_Town/Levels/L_Showcase")
+    const FName Map(Level == 3   ? TEXT("/Game/HoverPrototype/Maps/L_NYC_Explore")
+                    : Level == 2 ? TEXT("/Game/Chinese_Lakeside_Town/Levels/L_Showcase")
                     : Level == 1 ? TEXT("/Game/HoverPrototype/Maps/L_CyberCity")
                                  : TEXT("/Game/JustBStudios/PostApo/Levels/PostApo"));
     if (!FPackageName::DoesPackageExist(Map.ToString()))
@@ -111,7 +113,8 @@ void AHoverTestController::HoverLoadLevel(int32 Level)
         return;
     }
     UGameplayStatics::OpenLevel(this, Map, true,
-                                Level != 0
+                                Level == 3 ? TEXT("game=/Script/HoverFlight.HoverExplorationGameMode")
+                                : Level != 0
                                     ? TEXT("game=/Game/HoverPrototype/ZombieEngine/BP_CyberWaves.BP_CyberWaves_C")
                                     : TEXT("game=/Script/HoverFlight.HoverGameMode"));
 }
@@ -566,8 +569,11 @@ void AHoverTestController::PlayerTick(float DT)
             return Starts.IsEmpty() ? FTransform(Pilot->GetActorRotation(), Pilot->GetActorLocation() + Offset)
                                     : Starts[0]->GetActorTransform();
         };
+        const auto *Mode = GetWorld()->GetAuthGameMode<AHoverGameMode>();
         UClass *Class =
-            LoadClass<APawn>(nullptr, TEXT("/Game/ScifiHoverbike/Vehicles/Blueprint/BP_Hoverbike.BP_Hoverbike_C"));
+            !Mode || Mode->bSpawnBike
+                ? LoadClass<APawn>(nullptr, TEXT("/Game/ScifiHoverbike/Vehicles/Blueprint/BP_Hoverbike.BP_Hoverbike_C"))
+                : nullptr;
         if (Class)
         {
             FTransform Transform = RideStart(TEXT("AFS_BikeStart"), FVector(550, 120, 80));

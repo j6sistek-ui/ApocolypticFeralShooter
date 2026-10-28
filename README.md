@@ -28,7 +28,7 @@ None of Cyber City's or PostApo's zombies are used there. See
 `Docs/ZOMBIE_SPECIALS_20261024.txt` for Cyber roles and
 `Docs/LAKESIDE_CREATURES_20261024.txt` for the independent roster and texture reimport.
 
-R3/V uses the supplied bloodied katana on foot in all three levels. It uses the
+R3/V uses the supplied bloodied katana on foot in all test levels. It uses the
 purchased knife slash, native melee contact/cooldown and a local hand attachment.
 The rifle hides during the swing. FPS now has fitted view-arm idle/slash clips;
 the blade follows the hand, gripped just below the guard with its curvature reversed.
@@ -165,9 +165,12 @@ Landing shockwaves are intentionally brief. Landings request a light
 controller pulse, whose physical feel still needs owner review.
 
 Press D-pad Up or F6 for test settings. The Test level row switches between Post-apocalypse,
-Cyber City (`/Game/HoverPrototype/Maps/L_CyberCity`) and Chinese Lakeside Town
-(`/Game/Chinese_Lakeside_Town/Levels/L_Showcase`), starting a fresh test session
-with Vexa and all three vehicles. Switching levels discards the current test session.
+Cyber City (`/Game/HoverPrototype/Maps/L_CyberCity`), Chinese Lakeside Town
+(`/Game/Chinese_Lakeside_Town/Levels/L_Showcase`) and NYC - Exploration
+(`/Game/HoverPrototype/Maps/L_NYC_Explore`), starting a fresh test session.
+NYC uses Vexa, the hoverboard and Doomsday truck, with no zombies or wave systems.
+The other three levels retain their existing vehicles and encounters.
+Switching levels discards the current test session. See `Docs/NYC_EXPLORATION_20261028.txt`.
 D-pad/arrows select and adjust, A/Enter
 applies and saves, B/F6 cancels. DLAA, DLSS quality modes and supported frame-generation
 multipliers are available. Frame generation requires Standalone Game; editor Play saves

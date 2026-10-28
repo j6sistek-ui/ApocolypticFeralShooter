@@ -23,6 +23,9 @@ settings. Preserve Vexa/CLS/Parkour instead of replacing her with the vendor paw
 PostApo remains outside Zombie Engine. Chinese Lakeside Town has separate wave data
 using its own five newly supplied creatures; never reuse the Cyber City or
 PostApo zombie roster there. Keep later texture replacements reimportable.
+NYC exploration uses HoverExplorationGameMode, Vexa, hoverboard and Doomsday truck.
+It must not spawn zombies, waves or the bike. Preserve original PostApocalypticCity
+vendor content; author changes in HoverPrototype/Maps/L_NYC_Explore.
 No main-game integration, network play,
 or production release is implied. See Docs/KATANA_TERRAIN_20261025.txt for latest
 grip/texture residency and slope contacts, Docs/ANIMATION_POLISH_20261025.txt for

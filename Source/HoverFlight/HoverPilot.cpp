@@ -1954,7 +1954,14 @@ void AHoverGameMode::BeginPlay()
     if (FParse::Param(FCommandLine::Get(), TEXT("AFSReviewNoVehicles")))
         return;
 #endif
-    GetWorld()->SpawnActor<AHoverZombieRange>();
+    if (bSpawnRangeZombies)
+        GetWorld()->SpawnActor<AHoverZombieRange>();
+}
+
+AHoverExplorationGameMode::AHoverExplorationGameMode()
+{
+    bSpawnRangeZombies = false;
+    bSpawnBike = false;
 }
 
 void AHoverGameMode::InitGame(const FString &MapName, const FString &Options, FString &ErrorMessage)

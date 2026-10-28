@@ -7,8 +7,9 @@ Zombie health and speed apply to living enemies; wave size changes next round.
 Spawn interval: larger means slower spawning. These adjustments last for this session.
 D-pad / arrow up-down: choose row; left-right: change the pending option.
 A / Enter: apply, save and resume. B / F6: cancel and resume.
-Test level: Post-apocalypse, Cyber City or Chinese Lakeside Town. Applying a different level starts a fresh
-session with Vexa, glider, bike and truck; current positions/kills are not carried over.
+Test level: Post-apocalypse, Cyber City, Chinese Lakeside Town or NYC - Exploration.
+NYC has Vexa, hoverboard and Doomsday truck, with no zombies. Other levels retain all three vehicles.
+Applying a different level starts a fresh session; current positions/kills are not carried over.
 Invincible: On by default; turn Off to test Vexa's health. At zero health she
 resets at the level start after3seconds. A saves; B cancels. Vehicle damage is unchanged.
 Lakeside uses its own Horror, BogZombie, Mythical, Plant and Pirate creatures.

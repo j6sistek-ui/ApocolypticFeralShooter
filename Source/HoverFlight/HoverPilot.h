@@ -314,4 +314,17 @@ class HOVERFLIGHT_API AHoverGameMode : public AGameModeBase
     AHoverGameMode();
     virtual void InitGame(const FString &MapName, const FString &Options, FString &ErrorMessage) override;
     virtual void BeginPlay() override;
+    UPROPERTY(EditDefaultsOnly, Category = "Test Level")
+    bool bSpawnRangeZombies = true;
+    UPROPERTY(EditDefaultsOnly, Category = "Test Level")
+    bool bSpawnBike = true;
+};
+
+// Shares the current playable character and vehicles, without any combat encounters.
+UCLASS()
+class HOVERFLIGHT_API AHoverExplorationGameMode : public AHoverGameMode
+{
+    GENERATED_BODY()
+  public:
+    AHoverExplorationGameMode();
 };

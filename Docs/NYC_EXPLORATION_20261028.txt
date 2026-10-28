@@ -1,0 +1,68 @@
+POST-APOCALYPTIC NYC EXPLORATION
+
+Active project: M:/UnrealProjects/AFS/AFS.uproject.
+During Play, press D-pad Up / F6. Select Test level, choose NYC - Exploration,
+and press A / Enter. From Post-apocalypse, left on that row selects NYC.
+Or open /Game/HoverPrototype/Maps/L_NYC_Explore directly in the editor and Play.
+
+NYC uses the existing Vexa CLS/Parkour character, black/red hoverboard and
+Doomsday truck. No zombie range, Zombie Engine waves or bike are spawned here.
+The original three levels retain their existing encounter and vehicle policies.
+Current outfit, weapons and control mappings are retained. This does not adopt
+the separate Blender holster/chain preview or change the wider gameplay backlog.
+
+Hold X near the board/truck to enter. Board: R2 thrust, left stick climb/dive/steer,
+right stick look, held L1 stronger bank, held L3 boost. Rise above street debris
+before accelerating. Release thrust to slow; hold X to dismount near clear ground.
+Truck: R2 throttle, L2 brake/reverse, left stick steer; hold Y to exit.
+Home resets Vexa and the board. See CONTROLS.txt for the full existing bindings.
+
+The supplied ZIP is M:/PostApocalypticNYC.zip. Its Content tree contains2056 files,
+8.21GiB; one shared ThirdPerson external actor already existed with identical bytes.
+Vendor assets and the original PostApocalypticCity map are retained unchanged.
+The owned L_NYC_Explore map references CityMeshes, SetDressing, Lighting_Main and
+Lighting_Main_Directional as always-loaded sublevels. Camera-specific lighting
+variants are excluded. The vendor street PlayerStart is retained at approximately
+(271,5241,162)cm, facing -90deg. The owned truck marker is (200,5900,120.54)cm,
+facing +90deg. Road floor and truck clearance were checked with collision traces.
+
+HoverExplorationGameMode inherits current Vexa initialization and disables the
+simple zombie range and bike. HoverTestController/graphics menu add level index3.
+The existing runtime cook label retains its78 roots and adds this map as root79.
+The previous packaged build is not refreshed by this editor integration.
+
+Required compatibility setting: the vendor's DefaultEngine.ini explicitly sets
+MaximumLoopIterationCount=10000000 under /Script/Engine.Engine. AFS's default1M
+budget aborted PIE during procedural building construction. Only that required
+setting was carried over; vendor renderer/input/project settings were not imported.
+This loop budget applies across the AFS project. No building Blueprint was modified.
+
+VALIDATION
+Editor build succeeded (339.26s). C++ format and diff checks passed.
+Docker daemon unavailable; installed bundled Python used for portable syntax checks.
+All Unreal authoring/checks used NullRHI, with no rendered viewport or GPU captures.
+CPU temporary cache: D:/AFS_Cache. SpaceSurvival editor was not controlled or closed.
+Native play and travel results are recorded in the local evidence directory below.
+The NYC60-second CPU play check passed all eight samples: Vexa/board/truck spawn,
+controller board mount, climb/thrust, descent/dismount, truck entry/drive/exit,
+current-level menu apply without reloading, and zero enemies throughout.
+Controller-menu round trip passed: PostApo -> NYC -> PostApo. Both PostApo
+samples retained20 zombies, one range, bike, truck and the same Vexa class;
+NYC had zero zombies/ranges, no bike, the truck and the same Vexa class.
+Final runtime/travel logs exited normally. Cold-start PoseSearch index warnings
+settled after preparation; vendor landscape legacy-class notices remain. The native
+build reports existing UE/plugin deprecation warnings and a newer-than-preferred
+MSVC toolchain. These are separate from the resolved procedural-build loop abort.
+Rendered lighting/material quality, physical controller feel, city-wide performance,
+and a refreshed packaged build remain unverified in this low-VRAM pass.
+
+ROLLBACK / EVIDENCE
+D:/AFS_Comparisons/NYC_20261028 holds the import SHA256 manifest, pre-edit backups,
+native authoring reports, runtime/travel results, build log and final delivery audit.
+Before/ retains the original source files, DefaultEngine.ini and cook label.
+The owner project descriptor and pre-test GameUserSettings are preserved.
+To undo this addition, close AFS, restore the authored code/config/cook label from
+Before/, and remove only the new owned NYC map and unchanged imported NYC content
+after checking that no later user work depends on them. Keep the source ZIP.
+The shared ThirdPerson external actor predates this import and must be retained.
+Source-only local Git history excludes licensed assets, private config and evidence.
