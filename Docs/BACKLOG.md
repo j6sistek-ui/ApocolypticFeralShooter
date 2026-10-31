@@ -39,8 +39,10 @@ Owner 2026-10-31: ideas get tabled when they come (logged, not designed); the pr
 While the owner cannot playtest, in-between work chips away at the top items that do not need a playtest.
 
 **Now**
-0. Finishing: power-up style check (14 looks on the medkit and the Nuke, owner picks; then the chosen look on the
-   six existing pickups). Owner pulled this ahead while away.
+0. Finishing, time-boxed (owner 2026-10-31: "a few examples of each, no overkill, I don't want to derail on
+   power-ups for days"): the Nuke as a real in-engine display actor with four variants in NYC Exploration (building
+   now), then one pass giving every power-up model two or three in-engine choices placed in NYC Exploration, then
+   back to perks. The owner picks later and revisits the round-2 numbers; changing a look later is fine.
 1. **Phase 1 core loop: perks** (`PERKS.md`; the owner is drafting the ideas). Design the perk mechanics and the machines, then build them: the six perks (owner
    drafts so far: Necrosiphon (health), Life Blood (revive), Headhunter (ammo efficiency), Survivalist (speed,
    melee, carry), Bioreactor (passive damage); one more to decide) with effects, prices (design: 2,500 + 500 per perk
