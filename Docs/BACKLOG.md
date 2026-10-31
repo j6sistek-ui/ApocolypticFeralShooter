@@ -31,40 +31,47 @@ Severity: **G** game-breaking, **M** major (hurts play), **m** minor.
 | First-person arms fill the view (`HoverView` is Exec-only; needs an FP capture to tune offset and FOV) | m |
 | Brute, Kid horde round and bosses not yet seen in a rendered run with the new roster | m |
 
-## Priority to-do (ranked, proposed; owner to confirm)
+## Priority to-do (ranked; owner confirmed the direction 2026-10-31)
+
+Owner 2026-10-31: ideas get tabled when they come (logged, not designed); the priority is the Stage 1 core loop.
+While the owner cannot playtest, in-between work chips away at the top items that do not need a playtest.
 
 **Now**
-0. In progress (owner pulled ahead 2026-10-31, "work on the 15 until I get back"): power-up models cleaned and
-   imported, plus effect style options (hologram, blood magic, Niagara) for the owner to pick from.
-1. Owner playtest of everything in `DONE.md`; the results re-rank this list.
-2. Life Engine movement feel: measured 2026-10-31 (`Scripts/ProveLifeEngineCompare.py`); waiting on the owner's test
-   to choose jump height and air control (options: match Classic, or a middle ground), then wall slide and wall runs.
-3. Zombie follow-ups: rendered check of the Brute, Kid horde and bosses; foot slide; grab and tackle attacks from
-   `AbductionAnimPack` (shoulder grab, grab and pull, choke, push, knockout).
-4. Melee feel: spear reach and jab angle; katana feel after the owner's check.
-5. Power-ups: the owner's 15 models as holograms with their effects (`POWERUP_CATALOG.md`): unlimited ammo (rare),
-   Max Ammo (common, needs a model), invincibility, slow time, perfect vision, Curse, boss totem, sprint, health.
+0. Finishing: power-up style check (14 looks on the medkit and the Nuke, owner picks; then the chosen look on the
+   six existing pickups). Owner pulled this ahead while away.
+1. **Phase 1 core loop: perks.** Design the perk mechanics and the machines, then build them: the six perks (Second
+   Wind, Ironhide, Fast Lane, Bullseye, Hair Trigger, Marathon) with effects, prices (design: 2,500 + 500 per perk
+   owned), limits, HUD icons, the machine (Tripo perk station placeholder, pickup pops onto its pad), placement in
+   NYC, and how buying works. Then the rest of the loop: doors and zones, the power objective, wall buys, vests, the
+   upgrade machine (Pack-a-Punch equivalent, original name), the downed state, the HUD.
+2. Owner playtest of everything in `DONE.md` (whenever the owner can); the results re-rank this list.
+3. Life Engine movement feel: measured 2026-10-31 (`Scripts/ProveLifeEngineCompare.py`); waiting on the owner's
+   test to choose jump height and air control, then wall slide and wall runs.
+4. Zombie follow-ups: rendered check of the Brute, Kid horde and bosses; foot slide; grab and tackle attacks from
+   `AbductionAnimPack`.
+5. Melee feel: spear reach and jab angle; katana feel after the owner's check.
 
 **Next**
-6. Ammo economy: buy points (staged in `Scripts/AuthorNukeAmmoStations.py`, waiting on the owner), glint toned down.
-7. Weather: migrate Dreamrise from `M:\MultiplayerDynamicWeather`, rain/snow toggle in the menu (owner: after the big
-   bugs).
-8. ZESP in-game settings menu in the pause menu: the owner says what it should expose.
-9. Vehicles: drivable Doomsday pickup (owner adds the pack to the project); gas can if rides need fuel.
-10. Dead-body poses: corpse dressing and dormant ambush zombies that rise (owner adds the Unreal Engine format).
-11. Visuals: rifle at 4K (owner re-exports GUN.spp at 4096), first-person arms, small-gun flash.
+6. Power-up effects: the new effects from `POWERUP_CATALOG.md` (unlimited ammo, invincibility, slow time, perfect
+   vision, Curse, boss totem, sprint, health) and a Max Ammo model, after the core loop.
+7. Ammo economy: buy points (staged in `Scripts/AuthorNukeAmmoStations.py`, waiting on the owner), glint toned down;
+   folds into the wall-buy work in item 1 if that comes first.
+8. Weather: migrate Dreamrise from `M:\MultiplayerDynamicWeather`, rain/snow toggle in the menu.
+9. ZESP in-game settings menu in the pause menu: the owner says what it should expose.
+10. Vehicles: drivable Doomsday pickup (owner adds the pack to the project); gas can if rides need fuel.
+11. Dead-body poses: corpse dressing and dormant ambush zombies that rise (owner adds the Unreal Engine format).
+12. Visuals: rifle at 4K (owner re-exports GUN.spp at 4096), first-person arms, small-gun flash.
 
-**Later**
-- Tacticals: Silk spider drone with modes (tabled by the owner): mini-nuke hunter, electrical defence field, healing
-  pulse waves for nearby players; trap-pod pickup grants a charge, also in the shop; toxic gas bomb, Blood Bomb,
-  the painted Fab grenades, the other EM gun rigs as finds or buys.
+**Later (tabled ideas, not designed)**
+- Tacticals: Silk spider drone with modes (mini-nuke hunter, electrical defence field, healing pulse waves for nearby
+  players; trap-pod pickup grants a charge, also in the shop); toxic gas bomb; Blood Bomb; the painted Fab grenades;
+  the other EM gun rigs as finds or buys.
 - Bosses and specials: blood-magic boss (vortex telegraph, blood projectiles), thin blood haze in hordes (only if
-  cheap), boss totem ally, zombies throwing spears at a player they cannot reach (rooftop, glitch spot, board).
-- Power-up idea bank (owner's reference boards, 2026-10-31): Corpse Magnet, Boom Box, Ghost Snack / Zombie Buddy,
-  Caffeine Overdrive, Be-Gone Cloud, Frostbite Shake, Lucky Scav Box, Hemo Burst, Static Surprise, Banshee's Whistle,
-  Good Boy companion and more; listed in `POWERUP_CATALOG.md` with which owner model each could repurpose.
-- Stations and economy: perks (Second Wind, Ironhide, Fast Lane, Bullseye, Hair Trigger, Marathon), wall buys,
-  mystery crate, armour box, health station.
+  cheap), boss totem ally, zombies throwing spears at a player they cannot reach.
+- Power-up idea bank (owner's reference boards): Corpse Magnet, Boom Box, Ghost Snack / Zombie Buddy, Caffeine
+  Overdrive, Be-Gone Cloud, Frostbite Shake, Lucky Scav Box, Hemo Burst, Static Surprise, Banshee's Whistle, Good
+  Boy companion; in `POWERUP_CATALOG.md` with the model each could repurpose.
+- Stations beyond Stage 1: mystery crate, armour box, health station.
 - Movement extras: a vault (needs a pack clip), motion matching locomotion option.
 - Controls and HUD naming (PlayStation glyphs), tracer trial (Free Arrow Trail), EM_11 right-side camera, revolver
   cup reading as a barrel.
