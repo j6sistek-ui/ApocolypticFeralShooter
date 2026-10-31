@@ -60,5 +60,7 @@ familiar quick-revive perk, but it's necessary".
   chance is not instantly lost, and the 3 uses shown as three blood vials on the HUD.
 - Owner (2026-10-31): "same name, the indicator can get a small sub indicator (red x in corner of it)". Read as:
   after a Life Blood revival the perk keeps its name and its HUD icon stays, with a small red X in the icon's corner
-  marking the spent use. To confirm: does a used Life Blood still work for the remaining uses (the X just counts), or
-  is it spent until re-bought (the X means "inactive")?
+  marking the spent use.
+- Owner (2026-10-31): "once it's all spent you get the passive effects, not the continuation security". So Life Blood
+  keeps working for its remaining uses; after all 3 second chances are used it stays as a passive perk (2x revive
+  speed, the 3 s shield it gives the players you revive) and no longer brings you back. The red X marks that state.
