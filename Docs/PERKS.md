@@ -33,3 +33,22 @@ what helps while hurt ("gives it a better home"). This answers the "does nothing
 - Name: Necrosiphon (owner, 2026-10-31; typed "Neceosiphon", spelling to confirm), replacing Necroflora: it siphons
   the hosts' souls.
 - Open: does it replace the Ironhide slot? Souls per player or shared in multiplayer?
+
+## 2. Life Blood (owner draft, 2026-10-31): the revive perk
+
+**Owner's idea.** Revive teammates faster. A second chance when downed: in solo it brings Vexa back up; in
+multiplayer it covers not being revived in time. Works 3 times per match. After a Life Blood revival you lose your
+perks but keep your guns and gear. In multiplayer, a normal death (no Life Blood) respawns you the next round with the
+match's starting loadout, regardless of difficulty, and without the perk. The owner's own note: "basically the
+familiar quick-revive perk, but it's necessary".
+
+**Design notes (AI, for the owner to accept or reject):**
+- Familiar on purpose is right here: players look for a revive perk and its job should read instantly.
+- Small twists that make it AFS without changing the job: the revive shown as blood (the Blood Magic pack: her own
+  blood pulls her back up), a short blood shockwave on a self-revive that pushes nearby zombies back so the second
+  chance is not instantly lost, and the 3 uses shown as three blood vials on the HUD.
+- Needs the downed state first (Phase 1 core loop, not built yet): how long downed lasts, can she crawl and use the
+  pistol while down, and how a self-revive plays (instant, or a few seconds of vulnerability).
+- Open: is Life Blood itself lost after the revive like the other perks (re-buy to get the next use), and do the 3
+  uses count across re-buys? Revive speed bonus (the familiar value is about twice as fast)? Does it take the
+  Second Wind slot?
