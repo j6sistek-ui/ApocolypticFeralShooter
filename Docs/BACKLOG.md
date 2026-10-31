@@ -59,6 +59,9 @@ Severity: **G** game-breaking, **M** major (hurts play), **m** minor.
   the painted Fab grenades, the other EM gun rigs as finds or buys.
 - Bosses and specials: blood-magic boss (vortex telegraph, blood projectiles), thin blood haze in hordes (only if
   cheap), boss totem ally, zombies throwing spears at a player they cannot reach (rooftop, glitch spot, board).
+- Power-up idea bank (owner's reference boards, 2026-10-31): Corpse Magnet, Boom Box, Ghost Snack / Zombie Buddy,
+  Caffeine Overdrive, Be-Gone Cloud, Frostbite Shake, Lucky Scav Box, Hemo Burst, Static Surprise, Banshee's Whistle,
+  Good Boy companion and more; listed in `POWERUP_CATALOG.md` with which owner model each could repurpose.
 - Stations and economy: perks (Second Wind, Ironhide, Fast Lane, Bullseye, Hair Trigger, Marathon), wall buys,
   mystery crate, armour box, health station.
 - Movement extras: a vault (needs a pack clip), motion matching locomotion option.

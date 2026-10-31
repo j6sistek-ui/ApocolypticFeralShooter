@@ -20,6 +20,34 @@ twist or game appropriate style" ("yes, better ideas"), so four looks take the s
 ring pad with hazard lights, a graffiti circle glowing like UV paint, a busted NYC neon-sign icon, a searchlight
 pillar. The section below was the first idea.
 
+## Closer references (owner, 2026-10-31)
+
+Seven reference boards the owner found closer to the target (local copies in `Docs/References/PowerUpStyle/`, not in
+git): **realistic, grimy PBR objects with strong coloured Niagara energy around them** (glow swirls, goo pools and
+splashes, sparks and embers, lightning arcs, ghostly wisps) on a dark wet street; tone "dark, gritty, playful, not
+overly serious". This is the direction for round two of the style tests, after the owner picks from round one.
+
+### Idea bank from those boards (not adopted; for repurposing the owner's models into something better)
+
+| Idea | Effect | Could repurpose |
+|---|---|---|
+| Corpse Magnet | a necrotic gravity well pulls zombies in, slams them together | Curse tower (#2) |
+| Puke Napalm / Toxic Sludge Grenade / Sludge Cocktail | goo explosion, slippery toxic puddle that slows and damages | Toxic gas (#13), already close |
+| Boom Box | a dropped speaker blasts cursed music: zombies disoriented, explosive beats | needs a model |
+| Ghost Snack / Zombie Buddy Vial | friendly spectral wisps or a pal that bite zombies and heal you | Boss totem (#9) alternative |
+| Molten Coffee / Caffeine Overdrive | speed and damage boost with jitter streaks, heartbeat VFX | Energy cell (#11) |
+| Zombie Be-Gone Cloud | a plume that makes zombies dance | needs a model |
+| Frostbite Shake | ground shake that freezes zombies in place | Hourglass (#4) variant |
+| Lucky Scav Box / Loot Goblin Orb | risky random loot, maybe a rubber chicken | Loot crate (#5) or clover flask (#15) |
+| Bouncy Grenade | glowing ribbon-trail grenade that bounces, then explodes | a tactical |
+| Shrink Ray | shrink zombies to pocket size | a weapon, later |
+| Good Boy (spectral or zombie dog) | a companion that distracts and bites zombies | Boss totem (#9) alternative |
+| Hemo Burst | zombies burst from the inside, blood shockwave (blood-magic pack fits) | Curse (#2) or eye (#7) |
+| Static Surprise | a dropped device zaps zombies in a radius, ragdolls | Spider pod (#16) variant |
+| Radioactive Burger | weird lucky buff with Geiger ticks and heat waves | humour item, needs a model |
+| Rusty Revitalizer | heal over time plus a damage buff, sparks and dust vortex | Medkit (#6) variant |
+| Banshee's Whistle | a wail that confuses zombies (some flee, some trip) | needs a model |
+
 ## First idea: holograms
 
 One shared master material, a material instance per power-up colour:
