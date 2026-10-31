@@ -5,7 +5,7 @@ AFS is a UE 5.8 project (`M:\UnrealProjects\AFS`, module `HoverFlight`) built on
 on `L_NYC_Survival`, benchmarked on Black Ops 7 Zombies, played with Vexa, a DualSense pad or mouse and keyboard.
 
 The full design is `NYC_ZOMBIE_SURVIVAL_DESIGN_20261029.md` (numeric spine, rounds, AI, gunplay, economy, equipment,
-zones, HUD, roster). Its build order was reordered in `NYC_PRIORITIES_AND_ANIMATION_NEEDS_20261029.md`.
+zones, HUD, roster). The current order lives in `BACKLOG.md` (the old running log is `Archive/NYC_PRIORITIES_AND_ANIMATION_NEEDS_20261029.md`).
 
 ## Owner direction
 

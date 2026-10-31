@@ -5,6 +5,10 @@ tell which is newer.
 
 ## Owner rulings
 
+- **The backlog comes first.** `Docs/BACKLOG.md` is maintained above all else: every idea, bug and piece of feedback
+  is added and ranked the same day and pushed. When the owner raises something that is not game-breaking, confirm its
+  priority. When the owner asks for it now, name the current top task and confirm the owner wants to pull it ahead.
+  Keep the repo simple: design, issues, needs and context. (2026-10-31)
 - **Feel first.** Gameplay and feel before bells and whistles; placeholders are fine. (2026-10-29)
 - **No Call of Duty names.** Perks use the original six names (Second Wind, Ironhide, Fast Lane, Bullseye, Hair
   Trigger, Marathon). (2026-10-29)

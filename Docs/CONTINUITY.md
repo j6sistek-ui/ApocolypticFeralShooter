@@ -6,9 +6,9 @@ How a fresh chat or a new machine picks this project up without re-learning it.
 
 1. `Docs/SCOPE.md` (what we are building and the current phase)
 2. `Docs/RULES.md` (owner rulings and operational rules)
-3. `Docs/OPEN_ISSUES.md` (what is open, with status)
+3. `Docs/BACKLOG.md` (bugs, ranked to-do, owner decisions; maintained first)
 4. `Docs/LESSONS.md` (what already went wrong)
-5. `Docs/NYC_PRIORITIES_AND_ANIMATION_NEEDS_20261029.md` (the running log with Done blocks and the playtest list)
+5. `Docs/POWERUP_CATALOG.md` and `Docs/ASSET_KITS.md` (power-up designs; which packs exist and where)
 6. `Docs/NYC_ZOMBIE_SURVIVAL_DESIGN_20261029.md` (the design, by section)
 
 ## Build and run
@@ -83,4 +83,4 @@ Stills are 1280x720 or 1920x1080 PNG; the owner looks at stills, not videos.
 
 The assistant keeps a private memory index outside the repo (facts, rulings, gotchas). This repo's docs are the
 shared, durable copy; anything decided in chat that matters later goes into `RULES.md`, `LESSONS.md` or
-`OPEN_ISSUES.md` the same day.
+`BACKLOG.md` the same day.

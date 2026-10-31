@@ -4,8 +4,17 @@ UE 5.8 zombie shooter prototype (module `HoverFlight`) on the Zombie Engine Stud
 **NYC Survival**: wave-based, third-person, mortal, on `L_NYC_Survival`.
 
 This repository holds **source, scripts and docs only**; purchased content, generated assets and local configuration
-stay on the owner's machine. Tracking lives in `Docs/`: start with `CONTINUITY.md`, then `SCOPE.md`, `RULES.md`,
-`OPEN_ISSUES.md`, `LESSONS.md`. The prototype history below is the original README.
+stay on the owner's machine. The docs are the point of the repo: design, issues, needs and context.
+
+| Read | For |
+|---|---|
+| `Docs/BACKLOG.md` | bugs, the ranked to-do list, decisions waiting on the owner (maintained first) |
+| `Docs/SCOPE.md` | what the game is and the current phase |
+| `Docs/NYC_ZOMBIE_SURVIVAL_DESIGN_20261029.md`, `Docs/POWERUP_CATALOG.md` | design |
+| `Docs/RULES.md` | owner rulings and working rules |
+| `Docs/CONTINUITY.md`, `Docs/LESSONS.md`, `Docs/ASSET_KITS.md` | context: how to build and run, what went wrong, which packs exist |
+
+`Docs/Archive/` holds dated logs from before the repo existed. The prototype history below is the original README.
 
 ---
 
