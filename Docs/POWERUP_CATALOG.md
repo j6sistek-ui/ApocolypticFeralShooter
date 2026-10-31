@@ -36,6 +36,17 @@ plus effects on and around it. No added props, ground features, rings or marking
 Keep 5 Radioactive, 6 Blood Relic, 7 Infected, 8 Dust Shaft, 13 Busted Neon; round 2 refines those and adds new
 options built with the closer references below.
 
+## Style round 2 (2026-10-31): kept looks refined, new effect-only looks, owner combo
+
+Sheets (local): `D:/AFS_Comparisons/PowerUps_20261031/Styles/round2_sheet.png`, `round2_sheet_10m.png`,
+`round1_vs_round2_kept.png`. Looks 5, 6, 7, 8, 13 refined; new 15 Energy Swirl, 16 Arc Crawl, 17 Soul Wisps, 18 Ember
+Corona, 19 Inner Glow, 20 Heartbeat, 21 Toxic Aura, 22 Rarity Mist; 23 is the owner's combo of 5 + 6 + 13.
+Independent check, top four: 23 Combo (strongest at 10 m, item readable), 8 Dust Shaft, 21 Toxic Aura (closest to the
+references), 17 Soul Wisps (clearest item). Known gaps: sparks, embers, bolts and the heartbeat echo in 16, 18, 20 are
+driven by the preview script and need real Niagara emitters to ship; most looks light a soft pool on the street from a
+key light; 6 and 21 show doubled outlines on the Nuke; 7 still reads as lava cracks; colourable Niagara on disk is
+scarce.
+
 ## Closer references (owner, 2026-10-31)
 
 Seven reference boards the owner found closer to the target (local copies in `Docs/References/PowerUpStyle/`, not in
