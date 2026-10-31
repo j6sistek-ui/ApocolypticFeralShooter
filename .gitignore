@@ -16,8 +16,6 @@ Source/**
 !Source/**/
 Scripts/__pycache__/
 *.pyc
-Docs/*
-!Docs/CONTROLS.txt
 !Docs/VALIDATION.txt
 !Docs/QUALITY_20261023.txt
 !Docs/KATANA_20261023.txt
@@ -29,3 +27,9 @@ Docs/*
 !Docs/ANIMATION_POLISH_20261025.txt
 !Docs/KATANA_TERRAIN_20261025.txt
 !Docs/NYC_EXPLORATION_20261028.txt
+# Docs are the shared record (scope, rules, lessons, open issues, design); binaries and references stay out.
+Docs/References/
+Docs/**/*.png
+Docs/**/*.jpg
+Docs/**/*.mp4
+Docs/**/*.json

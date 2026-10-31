@@ -452,3 +452,61 @@ rigs and jetpack backlog. The current B binding is Parkour crouch/slide. CLS doe
 not repair unrelated gun, glider or mesh animations automatically. Existing vendor
 stale pose/UDIM warnings, installed-engine deprecations and earlier intermittent
 editor-exit crash remain tracked; passing tests do not establish their root cause.
+
+
+NYC SURVIVAL REVIEW FIXES - 2026-10-29
+
+Native-only pass on the NYC - Survival slice (no editor run, no rendered evidence, no
+owner acceptance). The build is the only check made here; the editor pass that re-authors
+L_NYC_Survival (AuthorNYCSurvival.py) and the offscreen VerifyNYCSurvival.py run are still
+pending, so every runtime claim below is design intent until that run writes its JSON.
+
+Applied in this pass:
+- Boss schedule (06.4): EHoverZombieRole gains Boss and Riot; UHoverNYCEncounterSettings gains
+  StoneGolem / GiantKid / AlphaBrute pointers, BossRounds[], BossTriggerFraction 0.40 and the
+  generated 33 + 6k cycle (FindBossRound, horde shift). GetRoundKind returns Boss; the row's
+  entries are additive to the quota, released at 40% kills through the director's armed state
+  (credit ignored, farthest reachable entrance), the second boss waiting for 50% lead-boss HP.
+  DA_NYCEncounters still has to be authored with the boss pointers; until then no boss round
+  exists and R13/R19/R27 run as Normal rounds, which HOVER_NYC_ROUND bosses=0 shows.
+- DA_NYCWaves.ZombieClass is only replaced when missing or not an AHoverNYCZombie child.
+- AHoverPilot::GetMaxHealth(); HoverReset and the HUD HP label use it (150 in NYC).
+- Game over: at 0 HP under ForcesMortal the pilot no longer runs the 3 s reset; the mode's
+  BeginGameOver stops the zombies, runs a 2 s slow-motion death cam at dilation 0.3, then
+  reaches the vendor OnPlayerHealthChanged / HandleGameOver by name (death widget, RestartLevel)
+  with OpenLevel(RestartLevelName) as the fallback. Home/R reset is off in survival.
+- P0-1 gun feel: StartFire/HandleFire cadence cap with a buffered semi press,
+  GetEffectiveSpreadDegrees (ADS x0.35) into FireShot and the HUD marker gap, FireRateScale,
+  held-trigger auto-reload, and the survival sprint-fire gate (bSurvivalRules from the policy).
+  All of it sits behind bEnhancedGunFeel, so Cyber City keeps the vendor cadence.
+- OTS camera: SurvivalArmLength 300 / SurvivalAimArmLength 210 / SurvivalSocketOffset (0,58,42)
+  / SurvivalHipFOV 88 / SurvivalAimFOV 68 on UHoverPilotAssets, interpolated in UpdateAppearance,
+  camera lag 14 / 60 cm, and the reload term in UsesAimFacing. Only when ForcesThirdPerson().
+- Starting kit: the bridge grants GrenadeItem x GrenadeCount on GrenadeQuickbarSlot;
+  ConfigureCityStartingGear takes AmmoQuantity / GrenadeCount and accepts /Game/HoverPrototype/NYC/.
+- UHoverNYCNavigationSystem (one 55 x 320 agent, step 50, CrowdManagerClass =
+  UHoverNYCCrowdManager). AuthorNYCSurvival.py binds it when present; VerifyNYCSurvival.py now
+  fails when the running class is not HoverNYCNavigationSystem. The current L_NYC_Survival bake
+  was made with the default system (nav_agent DEFAULT_PLACEHOLDER) and must be re-authored.
+- Definition fields from Section 4 §3 added with behaviour-preserving defaults. Consumed now:
+  bUsesStomp / StompInterval / StompDamageMultiplier (StompImpact), AnimClassOverride,
+  KillPoints / HeadshotKillPoints / MeleeKillPoints (OnKilledBy; 0 keeps the vendor gold roll),
+  and the Boss role yaw default. Hooks added on AHoverCyberZombie: GetStompInterval,
+  ModifyIncomingDamage, OnKilledBy.
+- UpdateStragglers is round-robin (a quarter of the live set per 2 s pass), skips the sync
+  path test for a zombie already moving on a complete path, and only traces sight past the
+  nearer distance gate.
+
+Deferred, stated so the design checks are known to be unmet rather than silently passing
+(also logged as HOVER_NYC_SURVIVAL deferred=... at InitGame):
+- Zone pools (player zone + one open hop), AHoverZoneVolume/Door/PowerSwitch, door prices,
+  the power hold, Pack-a-Punch, perk and armory stations. Zones are tagged volumes only and
+  every spawner is a candidate from round 1, so the 06.8 "Pool rule" and the Section 8 §11
+  "Door isolation" checks are skipped.
+- Boss phases, specials, intros and the Giant Kid second life (BossPhases, SpecialMontages,
+  SecondLifeFraction, StompCooldown are data only).
+- Crawlers, dismemberment and gore (bCanCrawl, bAlwaysCrawl, bCanBeDismembered), the vocal
+  routes (SlowTierVocal, FastTierVocal, SightRoar), CloseWalkSpeed, bNeverSprints, ArmorHP.
+- AI hooks GetWaveScales, ApplyPursuitSpeed, SelectChaseTarget and the frozen damage scale.
+- VerifyNYCSurvival's "no health factor / KillPoints 90 / CapsuleHalfHeight 23" assertions
+  depend on the DA_NYC_* authoring pass and are not asserted by code.
