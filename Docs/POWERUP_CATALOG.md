@@ -126,7 +126,7 @@ catalogue number (catalogue #8 was the duplicate flask). This table supersedes t
 | 13 | 12 | Radiation sphere | **Toxic gas** tactical: throw a gas sludge bomb that melts zombies in an area for 60 s in one spot (acid death) | tactical (equipment slot) |
 | 14 | 13 | Medical crate | Health pickup: recover 20-25 % health instantly; more common than the power-ups | pickup |
 | 15 | 14 | Clover flask | Gas can: fuel for the hoverboard and cars, if they stay and need fuel to be fair (maybe) | pickup (maybe) |
-| 16 | 15 | Trap pod | Silk spider drone: picking it up grants one Robot Mine charge (same seek-and-explode effect); also buyable in the shop | tactical charge / shop |
+| 16 | 15 | Trap pod | Silk spider drone, a tool with modes (owner 2026-10-31, tabled, not designed): mini-nuke hunter (seeks a zombie, area explosion); a temporary electrical defence field that protects; a healing pulse that sends several waves over time and heals all nearby players. A pickup grants a charge; also in the shop | tactical tool / shop |
 
 Notes for implementation:
 - Most power-ups are 30 s timed effects with a HUD timer; the vendor already has `ActivatePowerUp(Type, Duration)`.

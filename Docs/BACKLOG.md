@@ -55,7 +55,8 @@ Severity: **G** game-breaking, **M** major (hurts play), **m** minor.
 11. Visuals: rifle at 4K (owner re-exports GUN.spp at 4096), first-person arms, small-gun flash.
 
 **Later**
-- Tacticals: Silk spider drone (Robot Mine charge from the trap pod, also in the shop), toxic gas bomb, Blood Bomb,
+- Tacticals: Silk spider drone with modes (tabled by the owner): mini-nuke hunter, electrical defence field, healing
+  pulse waves for nearby players; trap-pod pickup grants a charge, also in the shop; toxic gas bomb, Blood Bomb,
   the painted Fab grenades, the other EM gun rigs as finds or buys.
 - Bosses and specials: blood-magic boss (vortex telegraph, blood projectiles), thin blood haze in hordes (only if
   cheap), boss totem ally, zombies throwing spears at a player they cannot reach (rooftop, glitch spot, board).
