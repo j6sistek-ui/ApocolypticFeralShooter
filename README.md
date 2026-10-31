@@ -9,6 +9,7 @@ stay on the owner's machine. The docs are the point of the repo: design, issues,
 | Read | For |
 |---|---|
 | `Docs/BACKLOG.md` | bugs, the ranked to-do list, decisions waiting on the owner (maintained first) |
+| `Docs/DONE.md` | completed work, how the AI validated it, and whether the owner confirmed it in game: the in-game review list |
 | `Docs/SCOPE.md` | what the game is and the current phase |
 | `Docs/NYC_ZOMBIE_SURVIVAL_DESIGN_20261029.md`, `Docs/POWERUP_CATALOG.md` | design |
 | `Docs/RULES.md` | owner rulings and working rules |

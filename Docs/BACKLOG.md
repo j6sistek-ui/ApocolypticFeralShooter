@@ -11,6 +11,8 @@ the same day an idea, piece of feedback or result comes in, and pushed. Last upd
   item ahead of it before starting.
 - Game-breaking bugs (crash, softlock, can't play the mode) go straight to the top.
 - Keep the repo simple: design, issues, needs and context come first.
+- Finished work moves to `DONE.md` with its validation and an owner column (Pending / Confirmed / Rejected); a
+  rejection comes back here.
 
 ## Bugs
 

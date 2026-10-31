@@ -6,7 +6,8 @@ How a fresh chat or a new machine picks this project up without re-learning it.
 
 1. `Docs/SCOPE.md` (what we are building and the current phase)
 2. `Docs/RULES.md` (owner rulings and operational rules)
-3. `Docs/BACKLOG.md` (bugs, ranked to-do, owner decisions; maintained first)
+3. `Docs/BACKLOG.md` (bugs, ranked to-do, owner decisions; maintained first) and `Docs/DONE.md` (finished work
+   waiting on the owner's in-game review)
 4. `Docs/LESSONS.md` (what already went wrong)
 5. `Docs/POWERUP_CATALOG.md` and `Docs/ASSET_KITS.md` (power-up designs; which packs exist and where)
 6. `Docs/NYC_ZOMBIE_SURVIVAL_DESIGN_20261029.md` (the design, by section)
