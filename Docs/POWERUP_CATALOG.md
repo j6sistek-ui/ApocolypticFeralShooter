@@ -8,7 +8,16 @@ Sources are in `SourceAssets/PowerUps/<Batch>/` (GLB, Tripo, about 1 m tall, one
 contact sheet are in `D:/AFS_Comparisons/PowerUps_<date>/<Batch>/` (`sheet_34.png`, per-model `_34` and `_front`
 PNGs, `props.json` with triangles and sizes), made by `Scripts/Blender/RenderPropSheet.py`.
 
-## The look: holograms
+## The look: must fit the vibe (owner, 2026-10-31)
+
+After seeing typical store pickup VFX (neon ring pads, magic circles, pentagrams, glowing swords, rainbow sparks) the
+owner said "none of those are it; let's see what fits the vibe". Power-ups must look like they belong in a ruined,
+dusty, dusk-lit New York: grounded, a bit grimy, readable at 10 m in dust and low light; holograms dirty, low-fi or
+projected, not clean neon. Ten looks are being tried on the medkit and the Nuke (road flare, chemlight, supply-drop
+beacon, salvaged holo-projector, radioactive, blood-magic relic, infected glow, dust shaft, tagged salvage, dirty
+hologram shell) before any is applied to all 15. The section below was the first idea.
+
+## First idea: holograms
 
 One shared master material, a material instance per power-up colour:
 - fresnel-edge emissive in the power-up's colour, with the model's own texture kept faint inside for detail;
