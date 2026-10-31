@@ -69,6 +69,16 @@ the arc crawl (look 16) comes on in the LAST 5 SECONDS as the despawn warning ("
 Every other power-up
 uses the heartbeat pulse (look 20) as its last-5-seconds despawn warning (owner, 2026-10-31).
 
+## DECIDED (owner, 2026-10-31): the look
+
+- **Every power-up except the Nuke:** Busted Neon (look 13: a storefront neon icon over the item in its colour) plus
+  Toxic Aura (look 21: a coloured haze hugging the item, in the item's colour) plus a touch of Blood Magic (look 6:
+  a thin red mist and ember rim). Last 5 s before despawn: the heartbeat pulse.
+- **The Nuke:** its own volatile signature (N4 shake, mild N1 sparks, a few N2 pops over its 30 s life; the arc crawl
+  in the last 5 s), variants being built live in NYC Exploration.
+- The GIF variants are kept for a trial another day; no more GIF rounds now. Build the decided look in-engine on the
+  display actor, then back to perks.
+
 ## Closer references (owner, 2026-10-31)
 
 Seven reference boards the owner found closer to the target (local copies in `Docs/References/PowerUpStyle/`, not in

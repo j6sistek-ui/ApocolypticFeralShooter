@@ -41,7 +41,8 @@ While the owner cannot playtest, in-between work chips away at the top items tha
 **Now**
 0. Finishing, time-boxed (owner 2026-10-31: "a few examples of each, no overkill, I don't want to derail on
    power-ups for days"): the Nuke as a real in-engine display actor with four variants in NYC Exploration (building
-   now), then one pass giving every power-up model two or three in-engine choices placed in NYC Exploration, then
+   now), then the decided shared look (Busted Neon + Toxic Aura + a touch of Blood Magic, heartbeat warning) built in-engine for
+   the other power-ups in NYC Exploration, then
    back to perks. The owner picks later and revisits the round-2 numbers; changing a look later is fine.
 1. **Phase 1 core loop: perks** (`PERKS.md`; the owner is drafting the ideas). Design the perk mechanics and the machines, then build them: the six perks (owner
    drafts so far: Necrosiphon (health), Life Blood (revive), Headhunter (ammo efficiency), Survivalist (speed,
