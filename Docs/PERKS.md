@@ -58,5 +58,7 @@ familiar quick-revive perk, but it's necessary".
 - Small twists that make it AFS without changing the job: the revive shown as blood (the Blood Magic pack: her own
   blood pulls her back up), a short blood shockwave on a self-revive that pushes nearby zombies back so the second
   chance is not instantly lost, and the 3 uses shown as three blood vials on the HUD.
-- Open: is Life Blood itself lost after the revive like the other perks (re-buy to get the next use), and do the 3
-  uses count across re-buys? Is the Second Wind name reused for another perk or dropped?
+- Owner (2026-10-31): "same name, the indicator can get a small sub indicator (red x in corner of it)". Read as:
+  after a Life Blood revival the perk keeps its name and its HUD icon stays, with a small red X in the icon's corner
+  marking the spent use. To confirm: does a used Life Blood still work for the remaining uses (the X just counts), or
+  is it spent until re-bought (the X means "inactive")?
