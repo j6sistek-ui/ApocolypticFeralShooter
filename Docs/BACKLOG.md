@@ -45,7 +45,8 @@ While the owner cannot playtest, in-between work chips away at the top items tha
    Wind, Ironhide, Fast Lane, Bullseye, Hair Trigger, Marathon) with effects, prices (design: 2,500 + 500 per perk
    owned), limits, HUD icons, the machine (Tripo perk station placeholder, pickup pops onto its pad), placement in
    NYC, and how buying works. Then the rest of the loop: doors and zones, the power objective, wall buys, vests, the
-   upgrade machine (Pack-a-Punch equivalent, original name), the downed state, the HUD.
+   upgrade machine (Pack-a-Punch equivalent, original name), the downed state (comes first for Life Blood: crawl
+   and shoot while down; solo without the perk ends the run), the HUD.
 2. Owner playtest of everything in `DONE.md` (whenever the owner can); the results re-rank this list.
 3. Life Engine movement feel: measured 2026-10-31 (`Scripts/ProveLifeEngineCompare.py`); waiting on the owner's
    test to choose jump height and air control, then wall slide and wall runs.
