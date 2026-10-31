@@ -18,7 +18,8 @@ Severity: **G** game-breaking, **M** major (hurts play), **m** minor.
 
 | Bug | Sev |
 |---|---|
-| Life Engine jump peaks at 111 cm vs 251 cm on classic movement | M |
+| Life Engine jumps are low and short: 110 cm peak, 0.6 s in the air, 4.1 m running jump vs Classic 248 cm, 0.9 s, 6.1 m (preset gravity 2032, jump 686) | M |
+| Life Engine has almost no air steering: 41 cm sideways in a jump vs 236 cm on Classic (Source-style air control needs mouse air-strafing) | M |
 | Life Engine: running into a wall at an angle stops dead (no wall slide); template wall runs are very short | M |
 | Spear hits land 1.7-3.4 m out while the visible head reaches about 1 m; the jab points about 40 degrees high | m |
 | Ammo pickup glint lights the area like a lamp (and nearby zombies) | m |
@@ -34,7 +35,8 @@ Severity: **G** game-breaking, **M** major (hurts play), **m** minor.
 
 **Now**
 1. Owner playtest of everything in `DONE.md`; the results re-rank this list.
-2. Life Engine movement feel: jump height, wall slide, wall runs.
+2. Life Engine movement feel: measured 2026-10-31 (`Scripts/ProveLifeEngineCompare.py`); waiting on the owner's test
+   to choose jump height and air control (options: match Classic, or a middle ground), then wall slide and wall runs.
 3. Zombie follow-ups: rendered check of the Brute, Kid horde and bosses; foot slide; grab and tackle attacks from
    `AbductionAnimPack` (shoulder grab, grab and pull, choke, push, knockout).
 4. Melee feel: spear reach and jab angle; katana feel after the owner's check.

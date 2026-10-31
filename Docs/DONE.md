@@ -31,7 +31,12 @@ Receipts and stills live under `D:\AFS_Comparisons\` (local, not in git).
 - [ ] **6. Life Engine movement** (2026-10-31, `a492e17`, `21eb065`). F6 menu row "Movement": Life Engine / Classic.
   *Check:* walk, sprint and jump feel in both modes; wall run and wall jump with the Life Engine on; a jump pose
   instead of a running stride.
-  *AI:* `ProveLifeEngineAudio.py`; `ProveParkourLifeEngine.py`: wall-run hand-off and resume in both modes.
+  *AI:* `ProveLifeEngineAudio.py`; `ProveParkourLifeEngine.py`: wall-run hand-off and resume in both modes;
+  `ProveLifeEngineCompare.py` (Life Engine vs Classic): same top speeds (500 walk, 680 sprint); reaches 90 % of
+  speed in 0.3 s vs 0.5-0.67 s; 90-degree turn in 0.27 s keeping 285 cm/s vs 0.4 s dropping to 115; reverse in
+  0.4 s vs 0.63; stops about the same (0.23-0.27 s vs 0.2 s, 3-5 cm longer); jump 110 cm / 0.6 s vs 248 cm / 0.9 s;
+  running jump 4.1 m vs 6.1 m; air steering 41 cm vs 236 cm; holding jump while sprinting gives no speed gain
+  in a straight line in either mode.
 - [ ] **7. Fixed-distance camera, sprint 680** (2026-10-31, `a492e17`).
   *Check:* the camera keeps its distance except aiming (in) and sprinting (a little out); sprint no longer too fast.
   *AI:* built; feel cannot be judged headless.

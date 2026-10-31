@@ -67,6 +67,8 @@ Things that were expensive to find out. Newest first within each group.
 - Actors spawned at runtime are not in a static navmesh; cut them out with a nav modifier or the AI paths into them
   (the NYC truck, 2026-10-31).
 - AHUD::Canvas is protected in UE 5.8; Blueprint variable names can end in "?" (`IsWallRunning?`) (2026-10-31).
+- A background run redirected into a folder that does not exist yet fails before the editor starts (twice on
+  2026-10-31): mkdir the receipt folder before launching.
 - Two zombie playlists exist: DA_NYCEncounters.Standards and DA_NYCWaves CustomWaves rows. Changing one left the old
   standards spawning (2026-10-31).
 
