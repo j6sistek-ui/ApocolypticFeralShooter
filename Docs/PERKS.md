@@ -179,3 +179,24 @@ Built from primitives for Unreal:
   orange accents.
 
 Not in Unreal yet.
+
+### In Unreal (2026-10-31)
+
+Both machines stand in NYC Exploration as props, about 10 m ahead of the player start and facing it. They are
+evaluation only: there's no buying yet. Script `Scripts/ImportPerkMachines.py` (re-runnable); stills from
+`Scripts/CapturePerkMachines.py` in `D:/AFS_Comparisons/PerkMachines_20261031/Unreal/stills/`.
+
+Assets are in `/Game/HoverPrototype/PerkMachines/`. There are four shared masters:
+- `M_PerkMachine`: the part's own maps plus glow. The glow is a mask texture and/or the strongly saturated
+  colours, with a sine or lub-dub pulse.
+- `M_PerkGlass`: fresnel glass.
+- `M_PerkLiquid`: glowing, slowly rising noise.
+- `M_PerkMetal`: metal with an optional world-position-offset spin, which runs in the editor too.
+
+Tuning lives in each `MI_<Machine>_<Part>`:
+- **Lifeblood:** the core and heart beat at 1.1 Hz as a lub-dub. Cabinet metal is scaled to 0.35, because it read
+  black in the street light.
+- **Bioreactor:** the shaft turns at 0.35 turns/s, and the liquid sits at 22 % opacity so the shaft shows.
+
+Placement searches for a flat 1.2 m footprint, in clear sight from the start and clear of small props. The first
+pick stood the Lifeblood on a car, the next ones behind a barrel. Box collision is on the bodies only.

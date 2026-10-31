@@ -55,6 +55,14 @@ Receipts and stills live under `D:\AFS_Comparisons\` (local, not in git).
 - [ ] **12. Fill light on Vexa, texture pass** (2026-10-31, `21eb065`).
   *Check:* Vexa a little brighter, zombies beside her not; console `HoverFillLight 0` / `1` to compare.
   *AI:* `ProveVisualPass.py`: torso +54 % at 2.5 cd, a zombie beside her unchanged.
+- [ ] **13. Perk machines in NYC Exploration** (2026-10-31). Lifeblood and Bioreactor as props (no buying yet),
+  about 10 m ahead of the player start, facing it.
+  *Check:* LIFEBLOOD reads on the front and both sides; the blood core and heart sign beat; the cabinet colour
+  holds up in the street light; the Bioreactor screen and biohazard sign glow, the liquid moves, the stirring
+  shaft turns behind the glass; you cannot walk through either machine.
+  *AI:* `ImportPerkMachines.py` (12 parts, 4 materials compiled with no link failures, 12 actors after a map
+  reload); `CapturePerkMachines.py` stills from the spawn point and close up, 0.7 s apart: the shaft and the beat
+  move. Glass is a plain fresnel glass; no bubbles yet.
 
 ## Confirmed by the owner
 

@@ -40,15 +40,15 @@ While the owner cannot playtest, in-between work chips away at the top items tha
 
 **Now**
 0. Finishing, time-boxed (owner 2026-10-31: "a few examples of each, no overkill, I don't want to derail on
-   power-ups for days"): the Nuke as a real in-engine display actor in NYC Exploration (building now; then set to the
-   decided sequence and drop the test variants), then the decided shared look (Busted Neon + Toxic Aura + a touch of Blood Magic, heartbeat warning) built in-engine for
+   power-ups for days"): the Nuke as a real in-engine display actor in NYC Exploration (the first build run stopped on
+   2026-10-31 before it produced anything; to restart, then set to the decided sequence and drop the test variants), then the decided shared look (Busted Neon + Toxic Aura + a touch of Blood Magic, heartbeat warning) built in-engine for
    the other power-ups in NYC Exploration, then
    back to perks. The owner picks later and revisits the round-2 numbers; changing a look later is fine.
 1. **Phase 1 core loop: perks** (`PERKS.md`; the owner is drafting the ideas). Design the perk mechanics and the machines, then build them: the six perks (owner
    drafts so far: Necrosiphon (health), Life Blood (revive), Headhunter (ammo efficiency), Survivalist (speed,
    melee, carry), Bioreactor (passive damage); one more to decide) with effects, prices (design: 2,500 + 500 per perk
-   owned), limits, HUD icons, the machine (Tripo perk station placeholder, pickup pops onto its pad), placement in
-   NYC, and how buying works. Then the rest of the loop: doors and zones, the power objective, wall buys, vests, the
+   owned), limits, HUD icons, the machine (Lifeblood and Bioreactor machines stand in NYC Exploration since 2026-10-31,
+   `DONE.md` #13; the other four await the owner's Tripo parts), placement in NYC, and how buying works. Then the rest of the loop: doors and zones, the power objective, wall buys, vests, the
    upgrade machine (Pack-a-Punch equivalent, original name), the downed state (comes first for Life Blood: crawl
    and shoot while down; solo without the perk ends the run), the HUD.
 2. Owner playtest of everything in `DONE.md` (whenever the owner can); the results re-rank this list.
