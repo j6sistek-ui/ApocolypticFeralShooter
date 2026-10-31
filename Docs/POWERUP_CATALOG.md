@@ -47,6 +47,11 @@ driven by the preview script and need real Niagara emitters to ship; most looks 
 key light; 6 and 21 show doubled outlines on the Nuke; 7 still reads as lava cracks; colourable Niagara on disk is
 scarce.
 
+**Owner on round 2 (2026-10-31):** the moving looks should be shown as GIFs (recorded). A few items need their own
+signature on top of the shared look, starting with the Nuke: it must read as volatile and nuclear, with sparks, tracer
+streaks and micro-explosions; a yellow fog makes it look like toxic waste, not a nuclear device. Round 3: a signature
+pass per item, Nuke first.
+
 ## Closer references (owner, 2026-10-31)
 
 Seven reference boards the owner found closer to the target (local copies in `Docs/References/PowerUpStyle/`, not in
