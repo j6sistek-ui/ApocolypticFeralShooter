@@ -138,3 +138,12 @@ re-modelling; one shared real-world scale (about 2.1-2.4 m tall, like a vending 
 bottom centre. The concept art's own text (taglines, the Survivalist dial labels) is placeholder.
 
 Open: "Lifeblood" (one word, as on the machine) or "Life Blood"?
+
+### Lifeblood machine assembled (2026-10-31)
+
+Four owner parts, separate meshes, 2.2 m, pivot bottom centre, 13k tris total (`Scripts/Blender/AssembleLifeblood.py`,
+outputs `SourceAssets/PerkMachines/Lifeblood/Clean/`; renders `D:/AFS_Comparisons/PerkMachines_20261031/Lifeblood/clean/`).
+Body, blood core (with a glow mask `T_Lifeblood_Core_Emissive` for an Unreal pulse), coin panel, tagline plate.
+Reads like the concept. Known gaps from the source meshes: the core fills about 55 % of the window (the concept about
+75 %), rails dark metal not brass, five rods baked in the cabinet show behind the core, the side panel text is garbled
+in the cabinet texture ("LIFEPAOON"), the coin panel sits proud like a box. Not in Unreal yet.
