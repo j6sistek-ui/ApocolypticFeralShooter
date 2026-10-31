@@ -32,6 +32,21 @@ front-ray depth map, horizontal and vertical mesh sections), then everything is 
                   ~15 degrees; the detailed panel is tilted to the fitted plane of that face.
   tagline strip   dark strip under the alcove lip, z 0.224-0.276, x -0.159..0.152, vertical at y ~ -0.098; the baked
                   "RESTORE. REVIVE. SURVIVE." text is x -0.10..0.085, so the plate covers it (it reads once).
+
+Pass 2 (2026-10-31, owner: "back to the blender clean ups"):
+  rods            Tripo baked five rods into the alcove (axes found where face normals point all the way round in a
+                  2 cm cell, mid-height). The two free-standing front ones, which showed beside the core, are
+                  deleted with the stub islands left at their ends; the back three are fused to the back wall and
+                  stay hidden behind the core. The alcove walls (same radius band) are kept.
+  coin panel      narrowed to the plate's bottom width (it hung over the red jamb) and everything behind its plate
+                  plane squashed to COIN_BACK_KEEP of its depth, so it no longer reads as a thick box from below.
+  side labels     Tripo garbled the side text ("LIFEPAOON / PEIRK"). Each side is rendered flat and orthographic,
+                  the light letters are inpainted (cv2), "LIFEBLOOD" and "- PERK -" are drawn into the same boxes in
+                  a matching serif and colour. The side view before and after, and the label box, are baked into
+                  the cabinet's own UVs (Cycles emission, planar projection along X, outer skin facing that side
+                  only, raw values) and only the difference is added to the texture, so untouched texels and UV
+                  seams stay exact; texels just outside the islands around the label are refilled from inside (Tripo's
+                  seams cut through it). The normal map is flattened under the old and new letters.
 """
 import json
 import math
@@ -66,10 +81,20 @@ CORE_CENTRE_XY = (-0.004, -0.040)
 CORE_FLOOR_PROBE_Z, CORE_ALCOVE_MID_Z = 0.30, 0.42
 COIN_RECT = {'x': (-0.140, 0.128), 'z': (0.130, 0.205)}      # inner part of the baked plate, used to fit its plane
 COIN_CENTRE_XZ = (-0.006, 0.168)
-COIN_WIDTH = 0.268                                            # average of the trapezoid's top and bottom widths
+COIN_WIDTH = 0.250                                            # the trapezoid's bottom width (average hung over the jamb)
+COIN_BACK_KEEP = 0.4                                          # depth kept behind the coin panel's plate plane
 TAG_RECT = {'x': (-0.120, 0.120), 'z': (0.237, 0.267)}      # flat part only (no frame sides, no lip edge)
 TAG_CENTRE_XZ = (-0.004, 0.2505)
 TAG_WIDTH = 0.250
+
+ROD_AXES = ((-0.081, -0.020), (0.080, -0.019))  # the two free-standing front rods (the back three, at (-0.071, 0.030),
+                                                 # (0.007, 0.035), (0.068, 0.033), are fused to the back wall and
+                                                 # hidden by the core: cutting them holes the wall)
+ROD_RADIUS, ROD_Z = 0.016, (0.303, 0.552)                    # faces this close to an axis (feet included) are cut
+SIDE_SKIN_X = 0.17                                            # outer side skin only (the alcove walls face X too)
+SIDE_PX_PER_UNIT = 2000                                       # flat side renders: 1000 x 2000 px over y +-0.25, z 0..1
+SIDE_TEXT_BAND = {'z': (0.405, 0.485), 'y': (-0.045, 0.165)}  # the burgundy side panel around the garbled label
+SIDE_FONT = 'C:/Windows/Fonts/timesbd.ttf'
 
 PARTS = [  # (object name, source file, texture size)
     ('SM_Lifeblood_Body', 'lifeblood_machine', 2048),
@@ -376,7 +401,8 @@ def mount_panel(o, body_bvh, rect, centre_xz, width, proud, z_bias=0.0):
     o.data.update()
     target = target - nrm * settle
     rim = [g - settle for inner, g in gaps if not inner]
-    return {'scale': round(s, 4), 'settled_back_src': round(settle, 4), 'settle_samples': len(gaps),
+    return {'_nrm': nrm, '_plate': target,
+            'scale': round(s, 4), 'settled_back_src': round(settle, 4), 'settle_samples': len(gaps),
             'rim_tucked_samples': sum(1 for g in rim if g < -proud),
             'rim_zfight_risk_samples': sum(1 for g in rim if -proud <= g < 0.5 * proud), 'tilt_back_deg': round(math.degrees(math.asin(max(-1, min(1, nrm.z)))), 2),
             'plate_plane_centre_src': [round(v, 4) for v in target], 'surface_relief_src': round(max(d) - min(d), 4),
@@ -440,6 +466,294 @@ def place_core(o, body_bvh):
     return {'forward_shift_src': round(shift, 4), 'touch_search': tried,'scale': round(s, 4), 'floor_src': round(floor, 4), 'ceiling_src': round(ceil, 4),
             'centre_src': [cx, cy], 'cap_radius_src': round(cap_r_rel * src_h * s, 4),
             'height_src': round(src_h * s, 4)}
+
+
+def flatten_behind_plate(o, nrm, plate, keep):
+    """Squash everything behind the plate plane towards it (keep = fraction of depth kept); bosses in front stay."""
+    me = o.data
+    a = verts_np(o)
+    n = np.array(nrm[:])
+    d = (a - np.array(plate[:])) @ n
+    back = d < 0
+    a[back] -= np.outer(d[back] * (1 - keep), n)
+    me.vertices.foreach_set('co', a.ravel())
+    me.update()
+    return {'verts_squashed': int(back.sum()), 'depth_behind_plate_src': round(float(-d.min()), 4),
+            'depth_kept_src': round(float(-d.min() * keep), 4)}
+
+
+def remove_rods(o):
+    """Delete the five rods standing around the core (ROD_AXES) and the stub islands left at their ends."""
+    def near_rod(c, r):
+        return min(math.hypot(c.x - ax, c.y - ay) for ax, ay in ROD_AXES) < r
+    bm = bmesh.new()
+    bm.from_mesh(o.data)
+    doomed = [f for f in bm.faces if ROD_Z[0] < f.calc_center_median().z < ROD_Z[1]
+              and near_rod(f.calc_center_median(), ROD_RADIUS)]
+    bmesh.ops.delete(bm, geom=doomed, context='FACES')
+    loose = [v for v in bm.verts if not v.link_faces]
+    bmesh.ops.delete(bm, geom=loose, context='VERTS')
+    # rod stubs left hanging on the floor and ceiling: small face islands inside the alcove
+    seen, stubs = set(), []
+    for f in bm.faces:
+        if f in seen:
+            continue
+        isl, todo = [], [f]
+        seen.add(f)
+        while todo:
+            g = todo.pop()
+            isl.append(g)
+            for e in g.edges:
+                for h in e.link_faces:
+                    if h not in seen:
+                        seen.add(h)
+                        todo.append(h)
+        if len(isl) < 80:
+            c = sum((g.calc_center_median() for g in isl), Vector()) / len(isl)
+            if 0.28 < c.z < 0.57 and near_rod(c, 0.03):
+                stubs.extend(isl)
+    bmesh.ops.delete(bm, geom=stubs, context='FACES')
+    loose = [v for v in bm.verts if not v.link_faces]
+    bmesh.ops.delete(bm, geom=loose, context='VERTS')
+    bm.to_mesh(o.data)
+    bm.free()
+    o.data.update()
+    return {'faces_deleted': len(doomed), 'stub_faces_deleted': len(stubs)}
+
+
+def fix_side_text(o, others):
+    """Repaint the garbled side labels (docstring, pass 2). Works in the cabinet's source units, before placement."""
+    import cv2
+    from PIL import Image, ImageDraw, ImageFont
+    sc = bpy.context.scene
+    hidden = [(x, x.hide_render) for x in others]
+    for x, _ in hidden:
+        x.hide_render = True
+    eng = sc.render.engine
+    sc.render.engine = 'BLENDER_WORKBENCH'
+    sc.display.shading.light = 'FLAT'
+    sc.display.shading.color_type = 'TEXTURE'
+    sc.display.shading.show_cavity = False
+    sc.display.shading.show_shadows = False
+    vt = sc.view_settings.view_transform
+    sc.view_settings.view_transform = 'Standard'
+    sc.world = sc.world or bpy.data.worlds.new('w')
+    sc.world.color = (1, 0, 1)
+    cd = bpy.data.cameras.new('side_cam')
+    cd.type, cd.ortho_scale = 'ORTHO', 1.0
+    cam = bpy.data.objects.new('side_cam', cd)
+    sc.collection.objects.link(cam)
+    sc.camera = cam
+    W, H, K = 1000, 2000, SIDE_PX_PER_UNIT
+    sc.render.resolution_x, sc.render.resolution_y = W, H
+    sc.render.resolution_percentage = 100
+    rep_, patches = {}, {}
+    for side, sg in (('px', 1), ('nx', -1)):
+        cam.location = (2 * sg, 0, 0.5)
+        cam.rotation_euler = (math.pi / 2, 0, sg * math.pi / 2)
+        path = OUT + 'side_%s_before.png' % side
+        sc.render.filepath = path
+        bpy.ops.render.render(write_still=True)
+        img = np.asarray(Image.open(path).convert('RGB')).astype(np.float32) / 255
+        r0 = int(H / 2 - (SIDE_TEXT_BAND['z'][1] - 0.5) * K)
+        r1 = int(H / 2 - (SIDE_TEXT_BAND['z'][0] - 0.5) * K)
+        c0, c1 = sorted(int(W / 2 + sg * y * K) for y in SIDE_TEXT_BAND['y'])
+        band = img[r0:r1, c0:c1]
+        lum = band.mean(2)
+        sat = band.max(2) - band.min(2)
+        light = (lum > 0.33) & (sat < 0.30)
+        light[:, light.mean(0) > 0.4] = False           # the grey frame bars run through the whole band
+        rows = np.where(light.sum(1) > 3)[0]
+        lines, start = [], rows[0]
+        for a, b in zip(rows[:-1], rows[1:]):
+            if b - a > 4:
+                lines.append((start, a))
+                start = b
+        lines.append((start, rows[-1]))
+        lines = sorted(sorted(lines, key=lambda t: -(t[1] - t[0]))[:2])
+        boxes = []
+        for a, b in lines:
+            cols = np.where(light[a:b + 1].sum(0) > 0)[0]
+            boxes.append([r0 + a, r0 + b, c0 + cols.min(), c0 + cols.max()])
+        (t0, t1, l0, l1), (u0, u1, m0, m1) = boxes        # the big word, then the "- PERK -" line
+        mask = np.zeros((H, W), np.uint8)
+        for a, b, c, d in boxes:
+            win = mask[a - 3:b + 4, c - 3:d + 4]
+            win[img[a - 3:b + 4, c - 3:d + 4].mean(2) > 0.26] = 255
+        mask = cv2.dilate(mask, np.ones((11, 11), np.uint8))     # the old letters carry a dark drop shadow
+        clean = cv2.inpaint((img * 255).astype(np.uint8), mask, 9, cv2.INPAINT_TELEA)
+        txt = np.median(img[t0:t1 + 1, l0:l1 + 1][light[t0 - r0:t1 - r0 + 1, l0 - c0:l1 - c0 + 1]], axis=0)
+        S4 = 4
+        layer = Image.new('L', (W * S4, H * S4), 0)
+
+        def word(text, box, track):
+            a, b, c, d = box
+            hpx = (b - a + 1) * S4
+            f = ImageFont.truetype(SIDE_FONT, int(hpx * 1.45))
+            tmp = Image.new('L', (int(hpx * 2 * len(text)), int(hpx * 3)), 0)
+            td = ImageDraw.Draw(tmp)
+            x = 0
+            for ch in text:
+                td.text((x, 0), ch, font=f, fill=255)
+                x += td.textlength(ch, font=f) + track * hpx
+            tmp = tmp.crop(tmp.getbbox()).resize((int((d - c + 1) * S4), int(hpx)), Image.LANCZOS)
+            layer.paste(tmp, (int(c * S4), int(a * S4)), tmp)
+        word('LIFEBLOOD', (t0, t1, l0, l1), 0.06)
+        mid, ww = (m0 + m1) / 2, (u1 - u0 + 1) * 3.4
+        word('PERK', (u0, u1, int(mid - ww / 2), int(mid + ww / 2)), 0.15)
+        dr = ImageDraw.Draw(layer)
+        ry, gap = int((u0 + u1) / 2 * S4), ww / 2 + (u1 - u0 + 1) * 1.2
+        for xa, xb in ((m0, mid - gap), (mid + gap, m1)):
+            dr.rectangle([int(xa * S4), ry - S4 // 2, int(xb * S4), ry + S4 // 2], fill=255)
+        alpha = np.asarray(layer.resize((W, H), Image.LANCZOS)).astype(np.float32)[..., None] / 255
+        out = clean.astype(np.float32) / 255 * (1 - alpha) + txt[None, None, :] * alpha
+        box = np.zeros((H, W), np.float32)
+        for a, b, c, d in boxes:
+            box[a - 10:b + 11, c - 14:d + 15] = 1
+        box = cv2.GaussianBlur(box, (0, 0), 3)
+        letters = cv2.GaussianBlur(np.maximum(mask.astype(np.float32) / 255, alpha[..., 0]), (0, 0), 2)
+        Image.fromarray((out * 255 + 0.5).astype(np.uint8)).save(OUT + 'side_%s_after.png' % side)
+        oldm = cv2.GaussianBlur(cv2.dilate(mask, np.ones((5, 5), np.uint8)).astype(np.float32) / 255, (0, 0), 1.5)
+        Image.fromarray((np.dstack([box, letters, oldm]) * 255).astype(np.uint8)).save(
+            OUT + 'side_%s_masks.png' % side)
+        patches[side] = {k: OUT + 'side_%s_%s.png' % (side, k) for k in ('before', 'after', 'masks')}
+
+        def to_y(c):
+            return round(sg * (c + 0.5 - W / 2) / K, 4)
+
+        def to_z(r):
+            return round(0.5 + (H / 2 - r - 0.5) / K, 4)
+        rep_[side] = {'word_box_yz': [to_y(l0), to_y(l1), to_z(t1), to_z(t0)],
+                      'perk_line_box_yz': [to_y(m0), to_y(m1), to_z(u1), to_z(u0)],
+                      'text_rgb': [round(float(v), 3) for v in txt], 'inpainted_px': int((mask > 0).sum())}
+    bpy.data.objects.remove(cam)
+    sc.view_settings.view_transform = vt
+
+    # bake both sides' masks into the cabinet's own UVs (planar projection along X, outer skin facing that side)
+    mat = o.material_slots[0].material
+    texs = [n.image for n in mat.node_tree.nodes if n.type == 'TEX_IMAGE' and n.image]
+    base = next(i for i in texs if i.name.endswith('_BaseColor'))
+    nrmi = next((i for i in texs if i.name.endswith('_Normal')), None)
+    w, h = base.size
+    tm = bpy.data.materials.new('bake_side')
+    tm.use_nodes = True
+    nt = tm.node_tree
+    for n in list(nt.nodes):
+        nt.nodes.remove(n)
+    outn = nt.nodes.new('ShaderNodeOutputMaterial')
+    emi = nt.nodes.new('ShaderNodeEmission')
+    nt.links.new(emi.outputs[0], outn.inputs[0])
+    sep = nt.nodes.new('ShaderNodeSeparateXYZ')
+    nt.links.new(nt.nodes.new('ShaderNodeTexCoord').outputs['Object'], sep.inputs[0])
+    gsep = nt.nodes.new('ShaderNodeSeparateXYZ')
+    nt.links.new(nt.nodes.new('ShaderNodeNewGeometry').outputs['True Normal'], gsep.inputs[0])
+
+    def math_node(op, a, b=None, c=None):
+        m_ = nt.nodes.new('ShaderNodeMath')
+        m_.operation = op
+        for i, v in enumerate((a, b, c)):
+            if v is None:
+                continue
+            if isinstance(v, (int, float)):
+                m_.inputs[i].default_value = v
+            else:
+                nt.links.new(v, m_.inputs[i])
+        return m_.outputs[0]
+
+    def side_sample(side, sg, which):
+        cmb = nt.nodes.new('ShaderNodeCombineXYZ')
+        nt.links.new(math_node('MULTIPLY_ADD', sep.outputs['Y'], sg * K / W, 0.5), cmb.inputs[0])
+        nt.links.new(math_node('MULTIPLY_ADD', sep.outputs['Z'], K / H, 0.5 - 0.5 * K / H), cmb.inputs[1])
+        t = nt.nodes.new('ShaderNodeTexImage')
+        t.image = bpy.data.images.load(patches[side][which])
+        t.image.colorspace_settings.name = 'Non-Color'     # raw values in, raw values out: no colour round trip
+        t.extension = 'CLIP'
+        nt.links.new(cmb.outputs[0], t.inputs[0])
+        facing = math_node('GREATER_THAN' if sg > 0 else 'LESS_THAN', gsep.outputs['X'], 0.3 * sg)
+        outer = math_node('GREATER_THAN', math_node('MULTIPLY', sep.outputs['X'], sg), SIDE_SKIN_X)
+        col = nt.nodes.new('ShaderNodeMix')
+        col.data_type = 'RGBA'
+        col.inputs['A'].default_value = (0, 0, 0, 1)
+        nt.links.new(math_node('MULTIPLY', facing, outer), col.inputs['Factor'])
+        nt.links.new(t.outputs['Color'], col.inputs['B'])
+        return col.outputs['Result']
+    tgt = nt.nodes.new('ShaderNodeTexImage')
+    nt.nodes.active = tgt
+    keep_mats = [sl.material for sl in o.material_slots]
+    for sl in o.material_slots:
+        sl.material = tm
+    sc.render.engine = 'CYCLES'
+    sc.cycles.device = 'CPU'
+    sc.cycles.samples = 1
+    sc.render.bake.margin = 16
+    select_only(o)
+    baked = {}
+    for which in ('before', 'after', 'masks'):
+        addc = nt.nodes.new('ShaderNodeMix')
+        addc.data_type, addc.blend_type = 'RGBA', 'ADD'
+        addc.inputs['Factor'].default_value = 1.0
+        nt.links.new(side_sample('px', 1, which), addc.inputs['A'])
+        nt.links.new(side_sample('nx', -1, which), addc.inputs['B'])
+        nt.links.new(addc.outputs['Result'], emi.inputs['Color'])
+        im = bpy.data.images.new('bake_' + which, w, h, alpha=False, float_buffer=True)
+        im.colorspace_settings.name = 'Non-Color'
+        tgt.image = im
+        bpy.ops.object.bake(type='EMIT')
+        px_ = np.empty(w * h * 4, np.float32)
+        im.pixels.foreach_get(px_)
+        baked[which] = px_.reshape(h, w, 4)[..., :3]
+        bpy.data.images.remove(im)
+    for sl, m_ in zip(o.material_slots, keep_mats):
+        sl.material = m_
+    bpy.data.materials.remove(tm)
+    sc.render.engine = eng
+    # only the change goes into the texture: where the side view did not change, before == after and the texture is
+    # untouched, and UV-seam artefacts of the projection cancel out
+    box, letters = np.clip(baked['masks'][..., :1], 0, 1), np.clip(baked['masks'][..., 1], 0, 1)
+    oldm = np.clip(baked['masks'][..., 2:3], 0, 1)
+    a = np.empty(w * h * 4, np.float32)
+    base.pixels.foreach_get(a)
+    a = a.reshape(h, w, 4)
+    # where the old letters were, the texture is sharper/blurrier than the side view, so a difference leaves fringes:
+    # take the fixed view there, shifted by the texture-vs-view offset measured on the plain panel around it
+    plain = (box[..., 0] > 0.9) & (oldm[..., 0] < 0.01) & (letters < 0.01)
+    off = np.median(a[..., :3][plain] - baked['before'][plain], axis=0) if plain.any() else np.zeros(3)
+    rep_['view_to_texture_offset'] = [round(float(v), 4) for v in off]
+    delta = a[..., :3] + box * (baked['after'] - baked['before'])
+    swap = baked['after'] + off[None, None, :]
+    a[..., :3] = np.clip(delta * (1 - oldm) + swap * oldm, 0, 1)
+    # Tripo's islands sit close together and the label is cut by seams: refill the texels just outside the islands
+    # around the label from inside, so filtering at a seam does not pull dark atlas gaps into the letters
+    cov = Image.new('L', (w, h), 0)
+    cdr = ImageDraw.Draw(cov)
+    uvd = o.data.uv_layers[0].data
+    for poly in o.data.polygons:
+        cdr.polygon([(uvd[li].uv.x * w - 0.5, uvd[li].uv.y * h - 0.5) for li in poly.loop_indices], fill=255)
+    cov = np.asarray(cov) > 0
+    near = cv2.dilate((box[..., 0] > 0.02).astype(np.uint8), np.ones((15, 15), np.uint8)) > 0
+    gap = (near & ~cov).astype(np.uint8) * 255
+    rgb8 = (a[..., :3] * 255 + 0.5).astype(np.uint8)
+    padded = cv2.inpaint(rgb8, gap, 3, cv2.INPAINT_TELEA).astype(np.float32) / 255
+    a[..., :3] = np.where((gap > 0)[..., None], padded, a[..., :3])
+    rep_['gap_texels_padded'] = int((gap > 0).sum())
+    base.pixels.foreach_set(a.ravel())
+    base.update()
+    if nrmi is not None:
+        nw, nh = nrmi.size
+        mm = letters if (nw, nh) == (w, h) else cv2.resize(letters, (nw, nh))
+        mm = mm[..., None]
+        b = np.empty(nw * nh * 4, np.float32)
+        nrmi.pixels.foreach_get(b)
+        b = b.reshape(nh, nw, 4)
+        b[..., :3] = b[..., :3] * (1 - mm) + np.array([0.5, 0.5, 1.0], np.float32) * mm
+        nrmi.pixels.foreach_set(b.ravel())
+        nrmi.update()
+    for x, hr in hidden:
+        x.hide_render = hr
+    rep_['texels_changed'] = int((box[..., 0] > 0.5).sum())
+    rep_['texels_normal_flattened'] = int((letters > 0.5).sum())
+    rep_['normal_flattened'] = nrmi is not None
+    return rep_
 
 
 def overlap_report(a, b):
@@ -508,6 +822,9 @@ for name, fn, size in PARTS:
     print('CLEANED', name, r['weld'], r['strays']['removed'], flush=True)
 
 body = objs['SM_Lifeblood_Body']
+rec['parts']['SM_Lifeblood_Body']['rods'] = remove_rods(body)
+rec['parts']['SM_Lifeblood_Body']['side_labels'] = fix_side_text(body, [o for o in objs.values() if o is not body])
+print('SIDE_LABELS', rec['parts']['SM_Lifeblood_Body']['side_labels'], flush=True)
 lo, hi = vbounds(body)
 K = TARGET_HEIGHT / (hi.z - lo.z)
 K_EST = K
@@ -519,8 +836,12 @@ place = {}
 place['SM_Lifeblood_Core'] = place_core(objs['SM_Lifeblood_Core'], body_bvh)
 place['SM_Lifeblood_CoinPanel'] = mount_panel(objs['SM_Lifeblood_CoinPanel'], body_bvh, COIN_RECT, COIN_CENTRE_XZ,
                                               COIN_WIDTH, proud_src)
+cp = place['SM_Lifeblood_CoinPanel']
+cp['flatten'] = flatten_behind_plate(objs['SM_Lifeblood_CoinPanel'], cp.pop('_nrm'), cp.pop('_plate'), COIN_BACK_KEEP)
 place['SM_Lifeblood_Tagline'] = mount_panel(objs['SM_Lifeblood_Tagline'], body_bvh, TAG_RECT, TAG_CENTRE_XZ,
                                             TAG_WIDTH, proud_src)
+for k_ in ('_nrm', '_plate'):
+    place['SM_Lifeblood_Tagline'].pop(k_)
 
 # one transform for all: cabinet bbox centre in X/Y and bottom to the origin, then scale to 2.2 m
 FINAL = Matrix.Scale(K, 4) @ Matrix.Translation(-src_shift)

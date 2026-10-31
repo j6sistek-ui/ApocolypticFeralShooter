@@ -141,9 +141,41 @@ Open: "Lifeblood" (one word, as on the machine) or "Life Blood"?
 
 ### Lifeblood machine assembled (2026-10-31)
 
-Four owner parts, separate meshes, 2.2 m, pivot bottom centre, 13k tris total (`Scripts/Blender/AssembleLifeblood.py`,
-outputs `SourceAssets/PerkMachines/Lifeblood/Clean/`; renders `D:/AFS_Comparisons/PerkMachines_20261031/Lifeblood/clean/`).
-Body, blood core (with a glow mask `T_Lifeblood_Core_Emissive` for an Unreal pulse), coin panel, tagline plate.
-Reads like the concept. Known gaps from the source meshes: the core fills about 55 % of the window (the concept about
-75 %), rails dark metal not brass, five rods baked in the cabinet show behind the core, the side panel text is garbled
-in the cabinet texture ("LIFEPAOON"), the coin panel sits proud like a box. Not in Unreal yet.
+Four owner parts as separate meshes (body, blood core, coin panel, tagline plate), 2.2 m tall, pivot at the bottom
+centre, 12.8k tris. Script `Scripts/Blender/AssembleLifeblood.py`; outputs in
+`SourceAssets/PerkMachines/Lifeblood/Clean/`; renders in `D:/AFS_Comparisons/PerkMachines_20261031/Lifeblood/pass2/`.
+The core has a glow mask (`T_Lifeblood_Core_Emissive`) for an Unreal pulse.
+
+Cleanup pass 2 (same day):
+- **Side labels.** Tripo had garbled them ("LIFEPAOON / PEIRK"). Both sides now read "LIFEBLOOD" with "- PERK -"
+  under it. The fix is baked into the cabinet texture, and the normal map is flattened under the letters. At close
+  range a few tiny dark slivers show where Tripo's bent triangles cross the letters.
+- **Rods.** The two free-standing rods that showed beside the core are removed. The back three are fused to the
+  alcove wall and hidden by the core; cutting them holed the wall.
+- **Coin panel.** Narrowed so it no longer hangs over the red jamb, and its back depth squashed to 40 %.
+
+Still open:
+- The core fills about 55 % of the window, against about 75 % in the concept. The alcove's floor-to-ceiling height
+  limits it.
+- The rails are dark metal, not brass.
+- Not in Unreal yet.
+
+### Bioreactor machine assembled (2026-10-31, quick pass by the owner's call)
+
+The owner's Tripo parts (frame, screen head, sign plate, hose) are only cleaned of strays, scaled and placed, with no
+modelling pass. Total 2.2 m, about 10k tris, pivot at the bottom centre of the frame. Script
+`Scripts/Blender/AssembleBioreactor.py`; outputs in `SourceAssets/PerkMachines/Bioreactor/Clean/`; renders in
+`D:/AFS_Comparisons/PerkMachines_20261031/Bioreactor/pass2/`.
+
+Built from primitives for Unreal:
+- **Glass.** `SM_Bioreactor_TubeGlass`, for Unreal glass.
+- **Liquid.** `SM_Bioreactor_TubeVolume`, filled to 82 % so there is a surface, for the liquid material and Niagara
+  bubbles and swirl.
+- **Stirring shaft.** `SM_Bioreactor_Shaft`: hub, rod, collars and a three-blade impeller. A separate mesh so it can
+  spin; its axis is in `clean.json`.
+- **Collars.** `SM_Bioreactor_TubeCollars`: metal rings at both glass joints, hiding the sloppy Tripo edges, plus a
+  floor plate over the cup.
+- **Glow masks.** `T_Bioreactor_{Frame,Head,Sign}_Emissive` cover the cyan screen, biohazard sign, light strips and
+  orange accents.
+
+Not in Unreal yet.

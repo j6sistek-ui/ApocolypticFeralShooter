@@ -24,6 +24,19 @@ factory settings. Steps:
      meshes), one GLB per part (all share the machine pivot so they snap together at 0,0,0), a .blend with the
      images packed; re-import check; Workbench renders, assembly_sheet.png, concept_compare.png and clean.json.
 scifi_base.glb is not used (see SCIFI_BASE_NOTE).
+
+Pass 2 (2026-10-31, owner: "back to the blender clean ups"; still no modelling pass on the Tripo parts):
+  7. SM_Bioreactor_Shaft: the concept's stirring shaft, built from primitives on the tube axis (stepped hub on the
+     tube floor, rod up into the top ring, coupling, two rod collars, a pitched three-blade impeller). A separate
+     mesh so Unreal can spin it (RotatingMovement about Z, pivot translation = SHAFT axis in clean.json, since all
+     parts keep the shared machine pivot).
+  8. SM_Bioreactor_TubeCollars: metal rings where the glass meets the cup rim and the top ring, hiding the sloppy
+     Tripo edges at both joints, plus a floor plate over the cup well for the shaft hub to stand on.
+  9. Liquid: SM_Bioreactor_TubeVolume now stops at LIQUID_FILL of the tube so there is a surface (Niagara / the
+     liquid material in Unreal); the glass stays full height.
+ 10. T_Bioreactor_<Frame|Head|Sign>_Emissive.png: glow masks from the base colours (cyan screen, biohazard, light
+     strips, plus the orange indicator accents) for an Unreal emissive (BaseColor * mask * strength); not wired
+     into the GLB.
 """
 import json
 import math
@@ -53,6 +66,9 @@ SIGN_PROUD = 0.004      # sign plate in front of the baked sign, metres
 GLASS_WALL = 0.008      # glass shell thickness, metres
 TUBE_SEGMENTS = 32
 TUBE_EMBED = 0.02       # how far the glass ends sink into the seat / top ring
+LIQUID_FILL = 0.82      # liquid height as a fraction of the glass interior
+SHAFT_R = 0.018         # stirring rod radius, metres
+COLLAR_H, COLLAR_OUT = 0.04, 0.018   # tube collar height and how far it stands out from the glass
 PART_SRC = {  # part: (source glb, texture size)
     'Frame': ('futuristic_bioreactor', 2048),
     'Head': ('futuristic_device', 2048),
@@ -239,6 +255,100 @@ def make_cylinder(name, r_out, z0, z1, segs, wall=None, cx=0.0, cy=0.0):
     return o
 
 
+def make_ring(bm, uv, r_in, r_out, z0, z1, segs, cx, cy):
+    """Closed annulus (collar) into an existing bmesh: outer wall, inner wall facing in, annular top and bottom."""
+    def ring(r, z):
+        return [bm.verts.new((cx + r * math.cos(2 * math.pi * i / segs), cy + r * math.sin(2 * math.pi * i / segs), z))
+                for i in range(segs)]
+    ob, ot, ib, it = ring(r_out, z0), ring(r_out, z1), ring(r_in, z0), ring(r_in, z1)
+    for i in range(segs):
+        j = (i + 1) % segs
+        for quad, v0 in (([ob[i], ob[j], ot[j], ot[i]], 0.0), ([ib[j], ib[i], it[i], it[j]], 0.5),
+                         ([ot[i], ot[j], it[j], it[i]], 0.75), ([ib[i], ib[j], ob[j], ob[i]], 0.25)):
+            f = bm.faces.new(quad)
+            for k, loop in enumerate(f.loops):
+                loop[uv].uv = ((i + (1 if k in (1, 2) else 0)) / segs, v0 + (0.25 if k >= 2 else 0.0))
+
+
+def make_solid(bm, uv, r, z0, z1, segs, cx, cy, xf=None):
+    """Capped solid cylinder into an existing bmesh (xf: optional Matrix applied to its verts)."""
+    a = [bm.verts.new((cx + r * math.cos(2 * math.pi * i / segs), cy + r * math.sin(2 * math.pi * i / segs), z0))
+         for i in range(segs)]
+    b = [bm.verts.new((cx + r * math.cos(2 * math.pi * i / segs), cy + r * math.sin(2 * math.pi * i / segs), z1))
+         for i in range(segs)]
+    if xf is not None:
+        for v in a + b:
+            v.co = xf @ v.co
+    for i in range(segs):
+        j = (i + 1) % segs
+        f = bm.faces.new([a[i], a[j], b[j], b[i]])
+        for k, loop in enumerate(f.loops):
+            loop[uv].uv = ((i + (1 if k in (1, 2) else 0)) / segs, 1.0 if k >= 2 else 0.0)
+    for ring_, top in ((a, False), (b, True)):
+        f = bm.faces.new(ring_ if top else ring_[::-1])
+        for loop in f.loops:
+            loop[uv].uv = (0.5, 0.5)
+
+
+def make_box(bm, uv, size, xf):
+    """Box (blade) of size (x, y, z) centred at the origin, then transformed by xf."""
+    sx, sy, sz = [v / 2 for v in size]
+    vs = [bm.verts.new(xf @ Vector((x, y, z))) for x in (-sx, sx) for y in (-sy, sy) for z in (-sz, sz)]
+    for idx in ((0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3)):
+        f = bm.faces.new([vs[i] for i in idx])
+        for loop, t in zip(f.loops, ((0, 0), (1, 0), (1, 1), (0, 1))):
+            loop[uv].uv = t
+
+
+def mesh_object(name, bm):
+    me = bpy.data.meshes.new(name)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.normal_update()
+    bm.to_mesh(me)
+    bm.free()
+    o = bpy.data.objects.new(name, me)
+    bpy.context.scene.collection.objects.link(o)
+    return o
+
+
+def emissive_mask(o, part):
+    """Glow mask from the part's base colour: saturated cyan/teal (screen, biohazard, light strips) and bright orange
+    accents -> white, everything else black, soft edge. Saved next to the GLBs."""
+    mat = o.material_slots[0].material
+    img = next((n.image for n in mat.node_tree.nodes if n.type == 'TEX_IMAGE' and n.image and
+                n.image.name.endswith('_BaseColor')), None)
+    if img is None:
+        return None
+    w, h = img.size
+    px = np.empty(w * h * 4, dtype=np.float32)
+    img.pixels.foreach_get(px)
+    px = px.reshape(h, w, 4)
+    r, g, b = px[..., 0], px[..., 1], px[..., 2]
+
+    def smooth(e0, e1, x):
+        t = np.clip((x - e0) / (e1 - e0), 0, 1)
+        return t * t * (3 - 2 * t)
+    cyan = smooth(0.10, 0.25, np.minimum(g, b) - r) * smooth(0.30, 0.55, np.maximum(g, b))
+    orange = smooth(0.30, 0.50, r - b) * smooth(0.55, 0.75, r) * smooth(0.12, 0.25, g) * (1 - smooth(0.70, 0.85, g))
+    m = np.maximum(cyan, orange)
+
+    def box(a, k=2):
+        c = np.cumsum(np.pad(a, ((0, 0), (k + 1, k)), mode='edge'), axis=1)
+        a = (c[:, 2 * k + 1:] - c[:, :-2 * k - 1]) / (2 * k + 1)
+        c = np.cumsum(np.pad(a, ((k + 1, k), (0, 0)), mode='edge'), axis=0)
+        return (c[2 * k + 1:] - c[:-2 * k - 1]) / (2 * k + 1)
+    m = np.clip(box(m), 0, 1).astype(np.float32)
+    name = 'T_Bioreactor_%s_Emissive' % part
+    out = bpy.data.images.new(name, w, h, alpha=False)
+    out.colorspace_settings.name = 'Non-Color'
+    out.pixels.foreach_set(np.dstack([m, m, m, np.ones_like(m)]).ravel())
+    out.filepath_raw = DST + name + '.png'
+    out.file_format = 'PNG'
+    out.save()
+    return {'file': DST + name + '.png', 'px': [w, h], 'coverage': round(float(m.mean()), 4),
+            'cyan_over_half': round(float((cyan > .5).mean()), 4), 'orange_over_half': round(float((orange > .5).mean()), 4)}
+
+
 def simple_material(name, base, alpha, transmission=0.0, rough=0.05, emission=None, estr=0.0):
     m = bpy.data.materials.get(name) or bpy.data.materials.new(name)
     m.use_nodes = True
@@ -410,19 +520,72 @@ CUP_RIM_Z = 0.655
 gz0 = max(gz0, CUP_RIM_Z)
 glass = make_cylinder('SM_Bioreactor_TubeGlass', r_out, gz0, gz1, TUBE_SEGMENTS, wall=GLASS_WALL, cx=cx, cy=cy)
 r_vol = r_out - GLASS_WALL - 0.004
-vol = make_cylinder('SM_Bioreactor_TubeVolume', r_vol, gz0 + GLASS_WALL + 0.004, gz1 - GLASS_WALL - 0.004,
-                    TUBE_SEGMENTS, cx=cx, cy=cy)
+vz0, vz_top = gz0 + GLASS_WALL + 0.004, gz1 - GLASS_WALL - 0.004
+vz1 = vz0 + (vz_top - vz0) * LIQUID_FILL
+vol = make_cylinder('SM_Bioreactor_TubeVolume', r_vol, vz0, vz1, TUBE_SEGMENTS, cx=cx, cy=cy)
 glass.data.materials.append(simple_material('M_Bioreactor_Glass', (0.75, 0.92, 1.0), 0.22, transmission=1.0))
-vol.data.materials.append(simple_material('M_Bioreactor_Liquid', (0.0, 0.78, 0.9), 0.55, rough=0.1,
+vol.data.materials.append(simple_material('M_Bioreactor_Liquid', (0.0, 0.78, 0.9), 0.35, rough=0.1,
                                           emission=(0.0, 0.85, 1.0), estr=2.0))
 rec['tube'] = {'axis_xy': [round(cx, 4), round(cy, 4)], 'ring_hole_centre': [round(ring_c.x, 4), round(ring_c.y, 4)],
                'seat_centre': [round(seat_c.x, 4), round(seat_c.y, 4)], 'column_clearance_r': round(clear, 4),
                'ring_hole_r': round(r_ring, 4), 'seat_r': round(r_seat, 4), 'glass_outer_r': round(r_out, 4),
                'glass_wall': GLASS_WALL, 'glass_z': [round(gz0, 4), round(gz1, 4)], 'volume_r': round(r_vol, 4),
-               'segments': TUBE_SEGMENTS, 'ring_underside_hits': len(ups), 'seat_top_hits': len(downs)}
+               'segments': TUBE_SEGMENTS, 'ring_underside_hits': len(ups), 'seat_top_hits': len(downs),
+               'liquid_z': [round(vz0, 4), round(vz1, 4)], 'liquid_fill': LIQUID_FILL}
+
+# ---------------------------------------------------------------- 7. stirring shaft (spins in Unreal)
+metal = bpy.data.materials.new('M_Bioreactor_ShaftMetal')
+metal.use_nodes = True
+mb = next(n for n in metal.node_tree.nodes if n.type == 'BSDF_PRINCIPLED')
+mb.inputs['Base Color'].default_value = (0.09, 0.095, 0.1, 1)
+mb.inputs['Metallic'].default_value = 1.0
+mb.inputs['Roughness'].default_value = 0.35
+metal.diffuse_color = (0.16, 0.17, 0.18, 1)
+bm = bmesh.new()
+uv = bm.loops.layers.uv.new('UVMap')
+floor = gz0 + GLASS_WALL                                     # inside the glass bottom
+top = gz1 + TUBE_EMBED * 0.5                                 # up into the top ring
+for r, za, zb in ((0.085, floor, floor + 0.03), (0.062, floor + 0.03, floor + 0.06), (0.042, floor + 0.06, floor + 0.10),
+                  (0.026, floor + 0.10, floor + 0.13)):      # stepped hub on the tube floor
+    make_solid(bm, uv, r, za, zb, TUBE_SEGMENTS, cx, cy)
+make_solid(bm, uv, SHAFT_R, floor + 0.13, top, 16, cx, cy)  # the rod
+for r, za, zb in ((0.05, top - 0.10, top - 0.07), (0.036, top - 0.07, top - 0.03)):   # coupling under the ring
+    make_solid(bm, uv, r, za, zb, TUBE_SEGMENTS, cx, cy)
+span = top - floor
+for f_ in (0.45, 0.72):                                      # two collars on the rod
+    zc = floor + span * f_
+    make_solid(bm, uv, 0.03, zc - 0.008, zc + 0.008, 16, cx, cy)
+imp_z = floor + span * 0.30                                   # pitched three-blade impeller
+make_solid(bm, uv, 0.034, imp_z - 0.025, imp_z + 0.025, 16, cx, cy)
+for k in range(3):
+    ang = 2 * math.pi * k / 3
+    xf = (Matrix.Translation((cx, cy, imp_z)) @ Matrix.Rotation(ang, 4, 'Z') @ Matrix.Translation((0.085, 0, 0))
+          @ Matrix.Rotation(math.radians(30), 4, 'X'))
+    make_box(bm, uv, (0.11, 0.006, 0.045), xf)
+shaft = mesh_object('SM_Bioreactor_Shaft', bm)
+shaft.data.materials.append(metal)
+rec['shaft'] = {'axis_xy': [round(cx, 4), round(cy, 4)], 'z': [round(floor, 4), round(top, 4)], 'rod_r': SHAFT_R,
+                'impeller_z': round(imp_z, 4), 'impeller_r': 0.14, 'tris': tris_of(shaft.data),
+                'unreal_spin': 'RotatingMovement yaw only, PivotTranslation = (axis_x, axis_y, 0) in cm (x100, Y flipped '
+                               'by the glTF import: check in the editor)'}
+
+# ---------------------------------------------------------------- 8. collars where the glass meets the frame
+bm = bmesh.new()
+uv = bm.loops.layers.uv.new('UVMap')
+r_in = r_out - 0.004
+make_ring(bm, uv, r_in, r_out + COLLAR_OUT, gz0 - 0.01, gz0 - 0.01 + COLLAR_H, 48, cx, cy)
+make_ring(bm, uv, r_in, r_out + COLLAR_OUT, gz1 - COLLAR_H, gz1 + 0.005, 48, cx, cy)
+make_solid(bm, uv, r_in, gz0 - 0.01, gz0 + GLASS_WALL, 48, cx, cy)   # floor plate over the cup well (hub stands on it)
+collars = mesh_object('SM_Bioreactor_TubeCollars', bm)
+collars.data.materials.append(metal)
+rec['collars'] = {'r': [round(r_in, 4), round(r_out + COLLAR_OUT, 4)], 'bottom_z': [round(gz0 - 0.01, 4), round(gz0 - 0.01 + COLLAR_H, 4)],
+                  'top_z': [round(gz1 - COLLAR_H, 4), round(gz1 + 0.005, 4)], 'tris': tris_of(collars.data)}
 
 # ---------------------------------------------------------------- 6. export
-order = [frame, head, sign, hose, glass, vol]
+# ---------------------------------------------------------------- 10. glow masks
+rec['emissive_masks'] = {k: emissive_mask(o, k) for k, o in (('Frame', frame), ('Head', head), ('Sign', sign))}
+
+order = [frame, head, sign, hose, glass, vol, shaft, collars]
 bpy.ops.object.select_all(action='DESELECT')
 for o in order:
     o.select_set(True)
@@ -502,6 +665,11 @@ shots['close_head'] = shoot('close_head', 25, 12, hlo - Vector((0.05, 0.05, 0.12
 slo, shi = vb(sign)
 shots['close_sign'] = shoot('close_sign', 25, 10, Vector((slo.x - 0.12, slo.y, slo.z - 0.12)),
                             Vector((shi.x + 0.12, shi.y, shi.z + 0.14)), res=(900, 900), fill=0.85)
+glass.hide_render = vol.hide_render = True                  # look inside: shaft and collars without the glass
+tlo, thi = vb(glass)
+shots['close_tube'] = shoot('close_tube', 20, 8, tlo - Vector((0.05, 0.05, 0.08)), thi + Vector((0.05, 0.05, 0.06)),
+                            res=(900, 1200), fill=0.9)
+glass.hide_render = vol.hide_render = False
 rec['renders'] = shots
 
 blend = DST + 'Bioreactor_Assembly.blend'
@@ -546,9 +714,10 @@ try:
                                       ('back', 'back'))):
         sheet.paste(Image.open(shots[tag]).convert('RGB').resize((cw, chh)), (i * cw, head_px))
         d.text((i * cw + 8, head_px + chh + 4), label, fill=(220, 220, 220), font=small)
-    for j, (tag, label) in enumerate((('close_head', 'head close-up'), ('close_sign', 'sign close-up'))):
-        y = head_px + j * 340
-        sheet.paste(Image.open(shots[tag]).convert('RGB').resize((330, 330)), (cw * 4 + 60, y))
+    for j, (tag, label) in enumerate((('close_head', 'head close-up'), ('close_sign', 'sign close-up'),
+                                      ('close_tube', 'tube, glass hidden'))):
+        y = head_px + j * 225
+        sheet.paste(Image.open(shots[tag]).convert('RGB').resize((220, 220)), (cw * 4 + 60, y))
         d.text((cw * 4 + 66, y + 4), label, fill=(250, 200, 50), font=small)
     sheet.save(os.path.join(OUT, 'assembly_sheet.png'))
     con = Image.open(CONCEPT).convert('RGB')
