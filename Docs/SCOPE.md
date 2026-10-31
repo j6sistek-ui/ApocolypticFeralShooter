@@ -13,7 +13,9 @@ AFS began as a sandbox: the name comes from the Advanced Flight System plugin th
 never built in it). Cyber City, Lakeside, PostApo and NYC Exploration, with their zombies and mechanics, are test
 pads. **NYC Survival is the first map being taken further and is the product.** The test pads may be used to stage
 things for evaluation (NYC Exploration first: same city and lighting as NYC Survival, no zombies). No new secret
-levels unless a GPU or performance concern needs one. Keep it simple, less work.
+levels unless a GPU or performance concern needs one. Keep it simple, less work. Staging is welcome there, but do
+not redesign the test pads to match NYC Survival: their zombies are experimental and cannot hurt the player (Vexa is
+invincible there by default), and that must stay so; no survival rules, lethal damage or new mechanics carried over.
 
 ## Owner direction
 

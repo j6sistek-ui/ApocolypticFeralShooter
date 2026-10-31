@@ -12,7 +12,8 @@ tell which is newer.
   to `Docs/DONE.md` with the AI validation; the owner's in-game check ticks it there or sends it back to the backlog.
   No stale done items in the backlog. (2026-10-31)
 - **The other maps are test pads; NYC Survival is the product.** Stage evaluations in an existing map (NYC
-  Exploration first) instead of new levels, unless performance needs one. Keep it simple. (2026-10-31)
+  Exploration first) instead of new levels, unless performance needs one. Keep it simple. Do not redesign the test
+  pads to match NYC Survival: their zombies must stay harmless (no lethal damage, no survival rules). (2026-10-31)
 - **Effect explorations go in a trial map.** Build options as placed actors in a trial map (an existing test pad, see
   above) the owner can open and see live (motion running in-engine, not only from a preview script), and also send a few shots or GIFs for when the owner
   is away. Only fall back to script-driven renders when building it in the map is much harder. (2026-10-31)
