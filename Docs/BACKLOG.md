@@ -42,8 +42,8 @@ While the owner cannot playtest, in-between work chips away at the top items tha
 0. Finishing: power-up style check (14 looks on the medkit and the Nuke, owner picks; then the chosen look on the
    six existing pickups). Owner pulled this ahead while away.
 1. **Phase 1 core loop: perks** (`PERKS.md`; the owner is drafting the ideas). Design the perk mechanics and the machines, then build them: the six perks (owner
-   drafts so far: Necrosiphon for health, Life Blood for revive; working names Fast Lane, Bullseye, Hair Trigger,
-   Marathon) with effects, prices (design: 2,500 + 500 per perk
+   drafts so far: Necrosiphon (health), Life Blood (revive), Headhunter (ammo efficiency), Survivalist (speed,
+   melee, carry), Bioreactor (passive damage); one more to decide) with effects, prices (design: 2,500 + 500 per perk
    owned), limits, HUD icons, the machine (Tripo perk station placeholder, pickup pops onto its pad), placement in
    NYC, and how buying works. Then the rest of the loop: doors and zones, the power objective, wall buys, vests, the
    upgrade machine (Pack-a-Punch equivalent, original name), the downed state (comes first for Life Blood: crawl

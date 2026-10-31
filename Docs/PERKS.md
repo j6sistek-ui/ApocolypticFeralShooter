@@ -65,7 +65,7 @@ familiar quick-revive perk, but it's necessary".
   keeps working for its remaining uses; after all 3 second chances are used it stays as a passive perk (2x revive
   speed, the 3 s shield it gives the players you revive) and no longer brings you back. The red X marks that state.
 
-## 3. (name needed) Efficiency boost (owner draft, 2026-10-31): replaces the reload perk
+## 3. Headhunter (owner draft, 2026-10-31): replaces the reload perk
 
 **Owner's idea.** Instead of reloading faster: magazines last twice as long, and headshots return ammo into the
 active magazine.
@@ -75,7 +75,7 @@ original twist. "Twice as long" can be each shot costing half a round (the magaz
 50 % chance a shot costs nothing; the first is steadier. Headshot refund: +1 round per headshot, capped at the
 magazine size. It rewards accuracy, so it overlaps the aim / headshot slot (Bullseye); worth deciding whether that
 slot still exists. Interacts with the unlimited-ammo power-up (no effect while it runs).
-Name ideas: Spent Brass, Brass Tithe, Scrap Feed, Headhunter's Tithe, Scavenger's Thrift.
+Name: Headhunter (owner, 2026-10-31).
 
 ## 4. Survivalist (owner draft, 2026-10-31): replaces the stamina perk
 
@@ -100,6 +100,6 @@ machine. Knockdown chance lower on Brutes and bosses. The ripple can reuse the V
 
 ## Slots so far
 
-Health: Necrosiphon. Revive: Life Blood. Reload: the efficiency perk (name needed). Stamina: Survivalist. New
+Health: Necrosiphon. Revive: Life Blood. Reload: Headhunter. Stamina: Survivalist. New
 passive damage: Bioreactor. Still holding working names: Bullseye (aim and headshots) and Hair Trigger (fire rate).
 With five drafted, one more makes six; decide whether it is Bullseye, Hair Trigger or something new.
