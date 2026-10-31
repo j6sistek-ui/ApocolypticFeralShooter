@@ -64,3 +64,42 @@ familiar quick-revive perk, but it's necessary".
 - Owner (2026-10-31): "once it's all spent you get the passive effects, not the continuation security". So Life Blood
   keeps working for its remaining uses; after all 3 second chances are used it stays as a passive perk (2x revive
   speed, the 3 s shield it gives the players you revive) and no longer brings you back. The red X marks that state.
+
+## 3. (name needed) Efficiency boost (owner draft, 2026-10-31): replaces the reload perk
+
+**Owner's idea.** Instead of reloading faster: magazines last twice as long, and headshots return ammo into the
+active magazine.
+
+**Design notes (AI):** keeps the familiar job (less time spent reloading) by a different route, which is a good
+original twist. "Twice as long" can be each shot costing half a round (the magazine shown stays the same size) or a
+50 % chance a shot costs nothing; the first is steadier. Headshot refund: +1 round per headshot, capped at the
+magazine size. It rewards accuracy, so it overlaps the aim / headshot slot (Bullseye); worth deciding whether that
+slot still exists. Interacts with the unlimited-ammo power-up (no effect while it runs).
+Name ideas: Spent Brass, Brass Tithe, Scrap Feed, Headhunter's Tithe, Scavenger's Thrift.
+
+## 4. Survivalist (owner draft, 2026-10-31): replaces the stamina perk
+
+**Owner's idea.** Movement speed buff (exact numbers once the Life Engine has been tested), melee strength buff, and
+carry one extra lethal and one extra tactical.
+
+**Design notes (AI):** three jobs in one perk, so it is the generalist's pick; keep each buff modest (for example
++10 % speed, +25 % melee) so it does not become the automatic first buy. Speed applies to both movement modes (the
+solver's max ground speed and Classic's walk/sprint). Overlaps the energy-cell power-up (unlimited sprint, +25 %
+speed): the power-up should stack on top so it still feels like a burst.
+
+## 5. Bioreactor (owner draft, 2026-10-31; name tentative): a passive damage perk
+
+**Owner's idea.** Sliding into zombies damages them and can knock them down. Walking over blood makes footsteps send
+small shockwaves for a few seconds: a slight local area ripple of damage. A passive, low-impact bonus that adds DPS,
+not meant to be lethal.
+
+**Design notes (AI):** gives the slide and the blood a purpose and fits the gritty-playful tone. Needs: the slide
+(the parkour template's slide, B) to report hits; a record of where blood lands (the death splashes already spawn
+there) so footsteps can check "on blood"; a short cooldown per zombie so the ripple cannot chain into a kill
+machine. Knockdown chance lower on Brutes and bosses. The ripple can reuse the Vefects shockwave at a small scale.
+
+## Slots so far
+
+Health: Necrosiphon. Revive: Life Blood. Reload: the efficiency perk (name needed). Stamina: Survivalist. New
+passive damage: Bioreactor. Still holding working names: Bullseye (aim and headshots) and Hair Trigger (fire rate).
+With five drafted, one more makes six; decide whether it is Bullseye, Hair Trigger or something new.
