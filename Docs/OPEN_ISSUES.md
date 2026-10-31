@@ -64,6 +64,18 @@ Two directional lights compete for forward shading priority in `L_NYC_Survival`.
 Labels: camera. Priority: P3.
 `HoverView` is Exec-only; needs BlueprintCallable and an FP capture to tune the arm offset and FOV.
 
+### First-person prone puts the camera inside the ground (PostApo)
+Labels: camera. Priority: P2.
+Recording 1:06-1:36: she dives in first person, and for thirty seconds the whole screen is the terrain texture
+from underneath until she stands. The first-person camera's prone height sits below the ground surface; it needs a
+floor clamp (trace down, keep the camera a few cm above the hit) or a raised prone eye height.
+
+### Ammo pickup reads as a mystery red thing on the ground
+Labels: economy, HUD. Priority: P2.
+Recording 5:37-5:42: out of ammo, she chases a small red object on the ground, touches it, "RELOADING" appears. No
+toast, no icon, no sound. Same fix as the ammo readout issue: pickup toast, a glint or outline, the item-pickup sound
+that is already imported (`A_ItemPickup_001-004`).
+
 ### Visual quality pass: gun and player resolution, light on the player
 Labels: visuals. Priority: P2. Owner 2026-10-31: "can the gun and player be in higher resolution? maybe the lighting
 on the player just a bit. Any way to enhance visual quality (it's not that bad, I just want to see how far I can

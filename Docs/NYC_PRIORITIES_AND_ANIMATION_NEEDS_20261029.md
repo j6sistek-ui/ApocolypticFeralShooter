@@ -192,6 +192,11 @@ Root causes found 2026-10-31 (code read, patches written, build pending):
 - **Light warning on every frame:** two directional lights compete in L_NYC_Survival (ForwardShadingPriority). Not yet
   changed.
 
+Full-video pass (contact sheets under `D:\AFS_Comparisons\Playtest_20261031\`): 1:06-1:36 first-person prone in PostApo
+puts the camera under the terrain for thirty seconds; 5:37-5:42 the ammo pickup is an unmarked red object on the ground;
+7:30-8:00 the board flight works; 8:55 death to the kid swarm. Zombies sinking into the ground was not caught at the
+5 s sampling; needs the owner's timestamp.
+
 Status at logging time: Life Engine wiring and the audio pass (guns louder on the WW2 set, katana whoosh + cut,
 code-driven footsteps, wind bed) are written and waiting on a build; nothing from this list is started. The owner is
 reviewing a recording and will add to the list.
