@@ -15,7 +15,10 @@ owner said "none of those are it; let's see what fits the vibe". Power-ups must 
 dusty, dusk-lit New York: grounded, a bit grimy, readable at 10 m in dust and low light; holograms dirty, low-fi or
 projected, not clean neon. Ten looks are being tried on the medkit and the Nuke (road flare, chemlight, supply-drop
 beacon, salvaged holo-projector, radioactive, blood-magic relic, infected glow, dust shaft, tagged salvage, dirty
-hologram shell) before any is applied to all 15. The section below was the first idea.
+hologram shell) before any is applied to all 15. Owner follow-up: "it may be something like that, with a different
+twist or game appropriate style" ("yes, better ideas"), so four looks take the store ideas and ground them: a scrap
+ring pad with hazard lights, a graffiti circle glowing like UV paint, a busted NYC neon-sign icon, a searchlight
+pillar. The section below was the first idea.
 
 ## First idea: holograms
 
