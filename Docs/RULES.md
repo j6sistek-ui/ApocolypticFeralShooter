@@ -10,6 +10,13 @@ tell which is newer.
   Trigger, Marathon). (2026-10-29)
 - **Judge in game.** The owner judges animation and feel by playing, not from side-by-side videos. Send stills and a
   launcher, keep the claims to what the receipts show. (2026-10-31)
+- **The Life Engine drives, the parkour template decorates.** In NYC Survival the Source-style solver owns ground
+  movement; the parkour template keeps its animations and capabilities (wall run, wall jump, vault) and only takes the
+  capsule while it is mid-move. (2026-10-31)
+- **Fixed camera distance.** The survival camera stays at its arm length; only the aim zoom and a sprint stretch change
+  it. No positional lag. (2026-10-31)
+- **Sprint was too fast.** 900 cm/s came from our DefaultGame.ini, not the parkour pack; it is 680 now. Walk stays 500
+  until the owner says otherwise. (2026-10-31)
 - **Do not change control bindings** until the owner has tested the current ones. (2026-10-30)
 - **GPU budget while the owner games:** keep rendered captures under about 6 GB VRAM (1280x720, scalability 1,
   streaming pool 1200). CPU (NullRHI) work is unrestricted. (2026-10-31)

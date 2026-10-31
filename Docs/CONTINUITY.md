@@ -47,6 +47,16 @@ Play NYC Survival from the launcher or the editor: `/Game/HoverPrototype/Maps/L_
 | `Scripts/FixNYCLights.py` | directional-light priority in the NYC map |
 | `Scripts/Blender/*.py` | headless Blender rig, cut, split and audit tools |
 
+## State on 2026-10-31 evening (hand-off)
+
+Built green and proven headless: Life Engine on by default in NYC Survival (`LifeEngine 0/1` to toggle), audio pass
+(footsteps, katana whoosh and cut, WW2 machine-gun pool, revolver crack, wind bed), corpse launch cap, unwalkable zombie
+heads, four-sweep katana, Y/G weapon cycle with the DA_NYC_Pistol in slot 2, fixed-distance survival camera, sprint
+680. Open from the proof: the solver still drops to a crawl for ~0.7 s brushing the jersey barrier near the NYC start
+(a wall normal is accepted as floor; `HL_GROUND` Verbose log names the writer; receipts in
+`D:/AFS_Comparisons/LifeEngine_20261031/`). The owner has not yet played any of this. Next by owner priority: the big
+bugs (zombie diversity / behaviour, kid clumping, Nuke presentation, ammo readout), then the pause-menu weather toggle.
+
 ## Where the proofs go
 
 `D:\AFS_Comparisons\<Topic>_<date>\` with a JSON receipt per run (`capture.json`, `proof.json`, `*_report.json`).

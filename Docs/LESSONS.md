@@ -52,6 +52,11 @@ Things that were expensive to find out. Newest first within each group.
 - `read_factory_settings` in headless Blender wipes the extension wheels (three times in one night).
 - `get_editor_property` returns copies for struct arrays; `set_material_instance_texture_parameter_value` reports False
   on success; `FRotator(roll=90).Quaternion()` is `FQuat(X, -90)`.
+- UE Python `unreal.Vector` has no `size2d`; use `math.hypot(v.x, v.y)`. A proof that trips on a helper method
+  measures nothing: read the receipt's error list before its summary.
+- A feature gated on `bParkourMovement` never runs in NYC Survival: the NYC pawn is `BP_Vexa_CLS_Parkour`, so that
+  flag is always true there. Gate on what the template is actually doing (movement mode changed, root-motion montage
+  playing), not on the pawn class (Life Engine, 2026-10-31).
 
 ## Design
 

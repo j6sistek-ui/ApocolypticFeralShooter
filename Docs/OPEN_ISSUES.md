@@ -32,7 +32,10 @@ Dead-body impulse scaled with damage; no-montage deaths got an 18 m/s kick. Capp
 
 ### Zombie heads are trampolines
 Labels: physics. Priority: P1. Status: built 2026-10-31, not yet seen in play.
-Capsule marked unwalkable in `AHoverCyberZombie::BeginPlay`.
+Capsule marked unwalkable in `AHoverCyberZombie::BeginPlay` (character movement path). The Life Engine solver sweeps on
+ECC_Pawn and would stand on a zombie regardless, so it now refuses pawns as floor, slide surface and step target
+(`IsPawnHit` in the plugin). The owner suspects the parkour pack's mantle too; if the bounce persists with the solver
+on, that is the next place to look.
 
 ### Zombies sink into the ground (PostApo)
 Labels: zombies, physics. Priority: P2.
@@ -66,6 +69,11 @@ Clarify what the owner wants exposed (wave settings, difficulty, graphics) and w
 Labels: level. Priority: P2. Status: fixed 2026-10-31 (`Scripts/FixNYCLights.py` ran: DirectionalLight4 priority 1, AtmosphericDirectionalLight2 0).
 Two directional lights compete for forward shading priority in `L_NYC_Survival`.
 
+### Survival camera distance drifts with speed
+Labels: camera. Priority: P2. Status: built 2026-10-31, not yet seen in play.
+Owner: "the camera needs to stay at a fixed distance almost, except zooming or maybe sprinting". The spring arm's
+positional lag (up to 60 cm) is off; the arm is 300 at rest, 210 aiming, 340 sprinting, interpolated at 6/s.
+
 ### First-person arms fill the view
 Labels: camera. Priority: P3.
 `HoverView` is Exec-only; needs BlueprintCallable and an FP capture to tune the arm offset and FOV.
@@ -91,7 +99,12 @@ and after at the owner's settings. Keep the 6 GB VRAM budget while the owner gam
 Labels: vfx. Priority: P3. Status: source radius built, not re-captured.
 
 ### Life Engine locomotion A/B in NYC survival
-Labels: motion. Priority: P2. Status: built 2026-10-31, on by default in NYC Survival; toggle with `LifeEngine 0/1` in the console. Headless proof `Scripts/ProveLifeEngineAudio.py` walks, jumps, sprints and swings with the solver on then off.
+Labels: motion. Priority: P2. Status: built and proven 2026-10-31, on by default in NYC Survival; toggle with
+`LifeEngine 0/1` in the console. Headless proof `Scripts/ProveLifeEngineAudio.py` walks, jumps, sprints and swings with
+the solver on then off (receipt `D:/AFS_Comparisons/LifeEngine_20261031/proof.json`). Fixed along the way: the parkour
+pawn was excluded outright (now the template only takes over mid-move); long frames are substepped; a start-penetrating
+ground sweep took a wall as the floor and projected the velocity onto it (line-trace fallback); step-up now covers any
+non-walkable face. Owner 2026-10-31: the solver drives, the parkour animations and wall run / jump stay.
 
 ### Audio pass
 Labels: audio. Priority: P1. Status: built 2026-10-31, not yet heard by the owner. WW2 machine-gun pools, sniper crack on the revolver,
@@ -100,8 +113,10 @@ katana whoosh and cut, code-driven footsteps on the walk and run sets, wind bed 
 ### Blood Bomb core, Fab grenade import after painting, blood haze in hordes, blood-magic boss, Robot Mine
 Labels: equipment, vfx. Priority: P3. Waiting on the owner for the Blood Bomb and the painted grenades.
 
-### Dreamrise weather integration
-Labels: vfx, level. Priority: P4. The system lives in its own project; migrate the manager and tie it to the wind bed.
+### Dreamrise weather integration with a menu toggle (rain / snow)
+Labels: vfx, level, UI. Priority: P3. Owner 2026-10-31: "Menu toggle, rain/snow. But do that after the big bugs."
+The system lives in its own project (`M:\MultiplayerDynamicWeather`); migrate the manager into AFS, place it in
+`L_NYC_Survival`, expose a pause-menu toggle (off / rain / snow) and tie the rain to the wind bed. After the P1 list.
 
 ### Controls and HUD naming (PlayStation glyphs, NYC vs PostApo differences)
 Labels: UI. Priority: P3. After the owner's binding test.
