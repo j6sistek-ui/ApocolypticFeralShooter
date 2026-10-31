@@ -1,4 +1,5 @@
 #include "HoverShotVisual.h"
+#include "HoverGunFeel.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
@@ -24,20 +25,43 @@ AHoverShotVisual::AHoverShotVisual()
 }
 void AHoverShotVisual::Launch(const FVector &Start, const FVector &End)
 {
+    Launch(Start, End, FHoverGunFeelTier::Legacy());
+}
+void AHoverShotVisual::Launch(const FVector &Start, const FVector &End, const FHoverGunFeelTier &Tier)
+{
     Origin = Start;
     Direction = (End - Start).GetSafeNormal();
     Distance = FVector::Dist(Start, End);
     SetActorLocationAndRotation(Start, Direction.Rotation());
-    Bullet->SetRelativeScale3D(FVector(.55f, .014f, .014f));
+    if (Distance < Tier.MinTracerDistance)
+    {
+        // A point-blank streak reads as a flash artefact; the muzzle flash already covers it.
+        Bullet->SetVisibility(false, false);
+        Destroy();
+        return;
+    }
+    if (!Tier.Tracer.IsNull())
+        if (auto *System = Tier.Tracer.LoadSynchronous())
+            Trail->SetAsset(System);
+    Length = Tier.TracerLength;
+    Width = Tier.TracerWidth;
+    Bullet->SetRelativeScale3D(FVector(Length / 100.f, Width, Width));
     // A short visual travel floor lets a nearby shot render before its tail fades.
     // Hit resolution stays instantaneous and never depends on this presentation.
-    Duration = FMath::Clamp(Distance / 90000.f, .06f, .09f);
-    Trail->SetVariableLinearColor(TEXT("User.Color"), FLinearColor(1.f, .65f, .25f));
-    Trail->SetVariableFloat(TEXT("User.Emissive"), 2.f);
-    Trail->SetVariableFloat(TEXT("User.Lifetime"), .06f);
-    Trail->SetVariableFloat(TEXT("User.Trail Size"), 1.4f);
+    Duration =
+        FMath::Clamp(Distance / FMath::Max(1.f, Tier.TracerSpeed), Tier.TracerMinDuration, Tier.TracerMaxDuration);
+    if (Tier.bTracerColor)
+        Trail->SetVariableLinearColor(TEXT("User.Color"), Tier.TracerColor);
+    if (Tier.bTracerColorAB)
+    {
+        Trail->SetVariableLinearColor(TEXT("User.ColorA"), Tier.TracerColor);
+        Trail->SetVariableLinearColor(TEXT("User.ColorB"), Tier.TracerColorB);
+    }
+    Trail->SetVariableFloat(TEXT("User.Emissive"), Tier.TracerEmissive);
+    Trail->SetVariableFloat(TEXT("User.Lifetime"), Tier.TracerLifetime);
+    Trail->SetVariableFloat(TEXT("User.Trail Size"), Tier.TracerTrailSize);
     Trail->Activate(true);
-    SetLifeSpan(Duration + .25f);
+    SetLifeSpan(Duration + FMath::Max(.25f, Tier.TracerLifetime + .1f));
 }
 void AHoverShotVisual::Tick(float DT)
 {
@@ -54,5 +78,5 @@ void AHoverShotVisual::Tick(float DT)
         Trail->Deactivate();
         return;
     }
-    Bullet->SetRelativeScale3D(FVector(FMath::Min(55.f, Distance - Travel) / 100.f, .014f, .014f));
+    Bullet->SetRelativeScale3D(FVector(FMath::Min(Length, Distance - Travel) / 100.f, Width, Width));
 }

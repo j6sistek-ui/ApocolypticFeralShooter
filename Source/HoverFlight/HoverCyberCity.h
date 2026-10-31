@@ -6,7 +6,9 @@
 #include "Pickups/ZE_PowerUpPickup.h"
 #include "Interaction/ZE_PickupBase.h"
 #include "UI/ZE_WaveHUDWidget.h"
+#include "World/ZE_ZombieSpawnPoint.h"
 #include "HoverCyberVariants.h"
+#include "HoverTestLevelPolicy.h"
 #include "NavigationSystem.h"
 #include "HoverCyberCity.generated.h"
 
@@ -30,9 +32,12 @@ struct FHoverZombieTuning
     UPROPERTY(EditAnywhere, BlueprintReadWrite) float SpawnInterval = 1.f;
 };
 
+class AHoverCyberZombie;
+
 // Cyber City uses the vendor wave state machine and assets, with the AFS player.
+// The level policy keeps its defaults here (all rides, the saved invincibility, first person).
 UCLASS()
-class HOVERFLIGHT_API AHoverCyberCityGameMode : public AZE_ZombieWaveGameMode
+class HOVERFLIGHT_API AHoverCyberCityGameMode : public AZE_ZombieWaveGameMode, public IHoverTestLevelPolicy
 {
     GENERATED_BODY()
   public:
@@ -42,6 +47,25 @@ class HOVERFLIGHT_API AHoverCyberCityGameMode : public AZE_ZombieWaveGameMode
     UPROPERTY(BlueprintReadOnly) FHoverZombieTuning Tuning;
     UFUNCTION(BlueprintCallable) void ApplyTuning(FHoverZombieTuning Value);
     void RecordSpawn(const FVector &Position);
+    // Called once by every AHoverCyberZombie at the end of BeginPlay (inside the vendor
+    // FinishSpawningActor, with ZombieData assigned). The base records the spawn position.
+    virtual void OnZombieSpawned(AHoverCyberZombie &Zombie);
+    // Moves a live zombie to a fresh spawner instead of destroying it. The base has no
+    // director and returns false, so the caller keeps the engine default.
+    virtual bool RelocateZombie(AHoverCyberZombie &Zombie)
+    {
+        return false;
+    }
+    // True when a subclass places and paces spawns itself (NYC Survival). Cyber City and
+    // Lakeside keep the original per-frame spawn gate.
+    bool UsesExternalSpawnDirector() const
+    {
+        return bExternalSpawnDirector;
+    }
+    // Round scaling consumed by the zombie AI and AHoverPilot::TakeDamage. The base returns
+    // the wave asset's multipliers, exactly as before.
+    UFUNCTION(BlueprintPure) virtual float GetRoundHealthScale(int32 Wave) const;
+    UFUNCTION(BlueprintPure) virtual float GetRoundDamageScale(int32 Wave) const;
     UFUNCTION(BlueprintPure) int32 GetActiveSpawnCount() const
     {
         return ActiveSpawnCount;
@@ -52,7 +76,7 @@ class HOVERFLIGHT_API AHoverCyberCityGameMode : public AZE_ZombieWaveGameMode
     UFUNCTION(BlueprintPure) int32 GetGold() const;
     void AddGold(int32 Amount);
     void ActivatePowerUp(EZE_PowerUpType Type, float Duration);
-    UFUNCTION(BlueprintPure) FString GetEncounterLabel() const;
+    UFUNCTION(BlueprintPure) virtual FString GetEncounterLabel() const;
     UFUNCTION(BlueprintPure) UHoverCyberEncounterSettings *GetEncounterSettings() const
     {
         return Encounters;
@@ -64,20 +88,29 @@ class HOVERFLIGHT_API AHoverCyberCityGameMode : public AZE_ZombieWaveGameMode
                                                   const TArray<UZE_ZombieDataAsset *> &Types) override;
     virtual float GetEffectiveSpawnRate() const override;
 
-  private:
-    float SpeedBonusUntil = 0;
-    float InstaKillUntil = 0;
-    int32 Gold = 500;
     int32 ActiveSpawnCount = 0;
-    UPROPERTY() TObjectPtr<class UUserWidget> WaveDisplay;
     UPROPERTY() TObjectPtr<UHoverCyberEncounterSettings> Encounters;
-    bool bLakeside = false;
     TMap<TWeakObjectPtr<AActor>, float> SpawnLastUsed;
     FVector LastSpawnPosition = FVector::ZeroVector;
     TMap<TWeakObjectPtr<AActor>, bool> ReachableSpawns;
     FVector LastNavigationTarget = FVector::ZeroVector;
     float NextReachabilityCheck = 0;
+    // When true, Tick skips the per-frame spawn gate and always runs the vendor tick.
+    bool bExternalSpawnDirector = false;
     bool CanReachPlayer(AActor *Spawn, APawn *Player);
+
+  public:
+    // Uncached complete-path test from a spawn point or zombie to a target location.
+    // Public so the NYC spawn director can share the base's navigation query.
+    bool CanReachPoint(AActor *From, const FVector &Target, const FVector &TargetExtent,
+                       const UObject *Querier = nullptr) const;
+
+  private:
+    float SpeedBonusUntil = 0;
+    float InstaKillUntil = 0;
+    int32 Gold = 500;
+    UPROPERTY() TObjectPtr<class UUserWidget> WaveDisplay;
+    bool bLakeside = false;
 };
 
 UCLASS()
@@ -107,18 +140,41 @@ class HOVERFLIGHT_API AHoverCyberZombie : public AZE_ZombieCharacter
     UFUNCTION(BlueprintCallable) bool StompImpact();
     UPROPERTY(BlueprintReadOnly) int32 StompCount = 0;
     UPROPERTY(BlueprintReadOnly) int32 StompKnockdowns = 0;
+    // Spawn-time state written by the game mode's OnZombieSpawned. HealthScale 0 means
+    // "use the mode's round lookup" and SpeedTier 0 means "use the data asset speeds",
+    // which is what Cyber City and Lakeside zombies keep.
+    UPROPERTY(BlueprintReadOnly) float HealthScale = 0.f;
+    UPROPERTY(BlueprintReadOnly) float SpeedTier = 0.f;
+    UPROPERTY(BlueprintReadOnly) int32 RelocationCount = 0;
+    UPROPERTY(BlueprintReadOnly) float SpawnTime = 0.f;
+    TWeakObjectPtr<AZE_ZombieSpawnPoint> SpawnerUsed;
+    float UnreachableSince = -1.f;
+    bool IsDead() const
+    {
+        return bIsDead;
+    }
     virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type Reason) override;
+    virtual void FellOutOfWorld(const UDamageType &DamageType) override;
     virtual float TakeDamage(float Damage, const FDamageEvent &Event, AController *EventController,
                              AActor *Causer) override;
 
+    // NYC Section 4 Â§5 hooks. The base bodies reproduce the previous behaviour exactly: the DA
+    // StompInterval (default .8 s), the Insta-Kill one-shot, and the vendor gold roll unless the
+    // definition authors KillPoints.
+    virtual float GetStompInterval() const;
+    virtual void ModifyIncomingDamage(float &Damage, const FDamageEvent &Event, AController *EventController,
+                                      AActor *Causer, const FHitResult &Hit);
+    virtual void OnKilledBy(AController *EventController, AActor *Causer, const FHitResult &Hit);
+
   protected:
     virtual void InitializeZombieStats() override;
+    UPROPERTY() TObjectPtr<class UNiagaraSystem> Blood;
+    float LastStompTime = -10;
 
   private:
-    UPROPERTY() TObjectPtr<class UNiagaraSystem> Blood;
     UPROPERTY() TObjectPtr<class USkeletalMeshComponent> Trousers;
     UPROPERTY() TObjectPtr<class USkeletalMeshComponent> Shirt;
-    float LastStompTime = -10;
 };
 
 UCLASS()

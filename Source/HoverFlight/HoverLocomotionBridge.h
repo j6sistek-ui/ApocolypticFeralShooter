@@ -22,7 +22,8 @@ class HOVERFLIGHT_API UHoverLocomotionBridge : public UActorComponent
     UPROPERTY(BlueprintReadOnly) bool bRifleStance = false;
     UFUNCTION(BlueprintCallable) bool PlayAction(UAnimSequence *Sequence, float Duration = 0.f, bool UpperBody = true);
     UFUNCTION(BlueprintCallable) void CancelAction();
-    bool IsActionPlaying() const;
+    // Pure so the headless verify can assert no driver montage runs through a rigged burst (design A1).
+    UFUNCTION(BlueprintPure) bool IsActionPlaying() const;
 
   private:
     UPROPERTY() TObjectPtr<class UAnimMontage> Action;

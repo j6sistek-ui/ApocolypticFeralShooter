@@ -2,6 +2,7 @@
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraComponent.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "TimerManager.h"
 
 void HoverEffects::BloodBurst(UWorld *World, UNiagaraSystem *System, const FVector &Point, const FVector &Direction)
@@ -28,4 +29,15 @@ void HoverEffects::BloodBurst(UWorld *World, UNiagaraSystem *System, const FVect
                 WeakEffect->DestroyComponent();
         },
         2.f, false);
+}
+
+void HoverEffects::HitStop(AActor *Victim, float Dilation, float Seconds, FTimerHandle &Handle)
+{
+    UWorld *World = Victim ? Victim->GetWorld() : nullptr;
+    if (!World || Seconds <= 0)
+        return;
+    Victim->CustomTimeDilation = FMath::Clamp(Dilation, .01f, 1.f);
+    World->GetTimerManager().SetTimer(
+        Handle, FTimerDelegate::CreateWeakLambda(Victim, [Victim]() { Victim->CustomTimeDilation = 1.f; }), Seconds,
+        false);
 }

@@ -49,13 +49,20 @@ Play NYC Survival from the launcher or the editor: `/Game/HoverPrototype/Maps/L_
 
 ## State on 2026-10-31 evening (hand-off)
 
-Built green and proven headless: Life Engine on by default in NYC Survival (`LifeEngine 0/1` to toggle), audio pass
-(footsteps, katana whoosh and cut, WW2 machine-gun pool, revolver crack, wind bed), corpse launch cap, unwalkable zombie
-heads, four-sweep katana, Y/G weapon cycle with the DA_NYC_Pistol in slot 2, fixed-distance survival camera, sprint
-680. Open from the proof: the solver still drops to a crawl for ~0.7 s brushing the jersey barrier near the NYC start
-(a wall normal is accepted as floor; `HL_GROUND` Verbose log names the writer; receipts in
-`D:/AFS_Comparisons/LifeEngine_20261031/`). The owner has not yet played any of this. Next by owner priority: the big
-bugs (zombie diversity / behaviour, kid clumping, Nuke presentation, ammo readout), then the pause-menu weather toggle.
+Built green and proven headless (`Scripts/ProveLifeEngineAudio.py`, receipt
+`D:/AFS_Comparisons/LifeEngine_20261031/proof.json`, ok true): Life Engine on by default in NYC Survival, switched in
+the F6 / D-pad Up test-settings menu ("Movement: Life Engine / Classic", applied on A without a reload; the proof flips
+it through the real menu); audio pass (footsteps, katana whoosh and cut, WW2 machine-gun pool, revolver crack, wind
+bed); corpse launch cap; unwalkable zombie heads (character movement and solver); four-sweep katana; Y/G weapon cycle
+with DA_NYC_Pistol in slot 2; fixed-distance survival camera; sprint 680. The owner has not yet played any of this.
+Next by owner priority: the big bugs (zombie diversity / behaviour, kid clumping, Nuke presentation, ammo readout),
+then the pause-menu weather toggle.
+
+**Local-only changes (not in git, by the ignore rules):** `Config/DefaultGame.ini` SprintSpeed 680, and the patches
+to the purchased `Plugins/HLMovementSystem` solver (each marked `AFS 2026-10-31`): PollInput keeps fed inputs,
+substepped tick, start-penetration rejection in the ground checks, the snap-down floor hit kept, pawns never floor or
+step (`IsPawnHit`), step-up retries while input is held, slide on the sweep normal, `HL_GROUND` / `HL_BLOCK` Verbose
+logs. Back up the plugin folder with the project.
 
 ## Where the proofs go
 

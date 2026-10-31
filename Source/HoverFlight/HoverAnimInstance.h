@@ -3,6 +3,22 @@
 #include "Animation/AnimInstance.h"
 #include "HoverAnimInstance.generated.h"
 
+// A rotation shortened to at most MaxDeg about its own axis (the shortest arc). The hand kick's safety clamp, shared
+// by the gun placement (AHoverPilot::UpdateGunTransform) and the support IK so both see the same turn.
+inline FQuat HoverClampRotation(const FQuat &Rotation, float MaxDeg)
+{
+    FQuat Q = Rotation.GetNormalized();
+    if (Q.W < 0)
+        Q = -Q;
+    FVector Axis;
+    float Angle;
+    Q.ToAxisAndAngle(Axis, Angle);
+    const float Max = FMath::DegreesToRadians(MaxDeg);
+    if (Angle <= Max || !Axis.Normalize())
+        return Q;
+    return FQuat(Axis, Max);
+}
+
 UCLASS(Transient)
 class HOVERFLIGHT_API UHoverAnimInstance : public UAnimInstance
 {
@@ -45,6 +61,32 @@ class HOVERFLIGHT_API UHoverAnimInstance : public UAnimInstance
     FVector RightFoot = FVector::ZeroVector;
     FVector SupportGripOffset = FVector::ZeroVector;
     FQuat WeaponRotation = FQuat::Identity;
+    // The held rig seats grip_r at the right palm centre (UHoverGunRig::bGripAtPalm), so the support IK must
+    // anchor its offset there too, or the left palm lands half a hand short of grip_l.
+    bool bGripAtPalm = false;
+    // Design B1 (2026-10-30): the rig's hand_l_target ROTATION is a gun-space delta from its rest (identity)
+    // meaning "turn the left hand this much from how the aim pose holds it"; its bone-LOCAL scale X is the finger
+    // curl (1 = the aim pose's fingers, 0 = the open reference pose, up to 1.6 = tighter). Identity / 1 when not
+    // rigged or the rig has no such bone, so nothing changes outside an authored reload beat.
+    FQuat SupportHandRotation = FQuat::Identity;
+    float SupportHandCurl = 1.f;
+    // Design A2: a rigged gun is drawn at the right hand (aiming or GunRaisedTime). While true the support IK runs
+    // at weight 1 whatever drops bAiming (hit reacts, parkour actions), so the left hand never leaves the gun.
+    bool bRiggedGunUp = false;
+    // Design A1: the stance fire reaction (UHoverPilotAssets::RifleFireAdd / PistolFireAdd), restarted on every
+    // ShotSerial change as a local-space additive over the aim pose, before the layered blend and the support IK, so
+    // both hands ride the recoil. Null outside a rigged third-person stance. StanceRecoilScale scales it.
+    UPROPERTY(BlueprintReadOnly) TObjectPtr<UAnimSequence> StanceFireAdd;
+    float StanceRecoilScale = 1.f;
+    // Gun-rides-the-hand (2026-10-30 23:30, "her hand is not on the grip"): hand_r's component-space rotation in the
+    // settled stance aim pose, cached by AHoverPilot::UpdateGunTransform while the fire additive is quiet. The support
+    // IK turns its gun frame by (hand_r now) * (rest)^-1, the same kick UpdateGunTransform gives the gun, so the left
+    // hand's target rides the recoil with the gun instead of lagging it by a frame. Invalid = no kick.
+    FQuat GripHandRestRotation = FQuat::Identity;
+    bool bGripHandRestValid = false;
+    // Read-out (verify): the largest right-finger local rotation the fire additive wanted on the last evaluation,
+    // which FHoverStanceFireNode replaced with the aim pose's; 0 while no additive runs.
+    UPROPERTY(BlueprintReadOnly) float StanceFireFingerSplayDeg = 0.f;
 
   protected:
     virtual FAnimInstanceProxy *CreateAnimInstanceProxy() override;
@@ -63,6 +105,9 @@ class HOVERFLIGHT_API UHoverViewAnimInstance : public UAnimInstance
     float AimAlpha = 0;
     FVector SupportGripOffset = FVector::ZeroVector;
     FQuat WeaponRotation = FQuat::Identity;
+    // Same convention as UHoverAnimInstance (design B1/B3), read from ViewGunSkel's hand_l_target.
+    FQuat SupportHandRotation = FQuat::Identity;
+    float SupportHandCurl = 1.f;
 
   protected:
     virtual FAnimInstanceProxy *CreateAnimInstanceProxy() override;

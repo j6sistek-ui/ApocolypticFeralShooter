@@ -1,4 +1,7 @@
 #include "HoverGraphicsMenu.h"
+#include "HoverPilot.h"
+#include "HoverTestController.h"
+#include "HoverTestLevelPolicy.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/CanvasPanel.h"
@@ -48,10 +51,11 @@ void UHoverGraphicsMenu::NativeOnInitialized()
     FramesText = AddText(TEXT(""), 23, FLinearColor::White);
     LevelText = AddText(TEXT(""), 23, FLinearColor::White);
     HealthText = AddText(TEXT(""), 23, FLinearColor::White);
+    MovementText = AddText(TEXT(""), 23, FLinearColor::White);
     DetailText = AddText(TEXT("Invincible off: take damage. At zero health, reset at the start after 3 seconds."), 16,
                          FLinearColor(.7f, .76f, .84f));
-    AddText(TEXT("NYC: explore with Vexa, hoverboard and truck, without zombies. Other levels keep their "
-                 "vehicles and encounters. Lakeside uses its own five creatures."),
+    AddText(TEXT("NYC - Exploration has no zombies. NYC - Survival is the third-person wave mode with no bike. "
+                 "Other levels keep their vehicles and encounters. Lakeside uses its own five creatures."),
             16, FLinearColor(.7f, .76f, .84f));
     ImageHelpText = AddText(TEXT("DLAA keeps full resolution. DLSS Quality is a good starting point for more speed."),
                             16, FLinearColor(.7f, .76f, .84f));
@@ -66,16 +70,19 @@ void UHoverGraphicsMenu::Open(UHoverGraphicsSettings *InSettings)
 {
     Settings = InSettings;
     Pending = Settings->GetOptions();
-    const FString Map = UGameplayStatics::GetCurrentLevelName(this);
-    PendingLevel = Map.Contains(TEXT("L_NYC_Explore"))                                    ? 3
-                   : Map.Contains(TEXT("L_Showcase")) || Map.Contains(TEXT("L_Lakeside")) ? 2
-                   : Map.Contains(TEXT("Cyber"))                                          ? 1
-                                                                                          : 0;
+    PendingLevel = AHoverTestController::GetTestLevelIndex(UGameplayStatics::GetCurrentLevelName(this));
     SelectedRow = 0;
     bZombiePage = false;
+    const auto *Pilot = Cast<AHoverPilot>(GetOwningPlayerPawn());
+    PendingLifeEngine = Pilot && Pilot->HasLifeEngine() ? int32(Pilot->IsLifeEngineEnabled()) : -1;
     if (const auto *Mode = GetWorld()->GetAuthGameMode<AHoverCyberCityGameMode>())
         PendingZombies = Mode->Tuning;
     Refresh();
+}
+
+int32 UHoverGraphicsMenu::GetRowCount() const
+{
+    return !bZombiePage && PendingLifeEngine >= 0 ? 5 : 4;
 }
 
 void UHoverGraphicsMenu::ChangePage()
@@ -94,7 +101,8 @@ void UHoverGraphicsMenu::ApplyZombieSettings()
 
 void UHoverGraphicsMenu::Navigate(int32 Direction)
 {
-    SelectedRow = (SelectedRow + Direction + 4) % 4;
+    const int32 RowCount = GetRowCount();
+    SelectedRow = (SelectedRow + Direction + RowCount) % RowCount;
     Refresh();
 }
 
@@ -120,8 +128,12 @@ void UHoverGraphicsMenu::Adjust(int32 Direction)
         Pending.FrameGeneration = Options[(Index + Direction + Options.Num()) % Options.Num()];
     }
     else if (SelectedRow == 2)
-        PendingLevel = (PendingLevel + Direction + 4) % 4;
-    else
+        PendingLevel = (PendingLevel + Direction + AHoverTestController::TestLevelCount) %
+                       AHoverTestController::TestLevelCount;
+    else if (SelectedRow == 4)
+        PendingLifeEngine = PendingLifeEngine >= 0 ? 1 - PendingLifeEngine : -1;
+    else if (const auto *Policy = IHoverTestLevelPolicy::Get(GetWorld()); !Policy || !Policy->ForcesMortal())
+        // NYC Survival is always mortal; the saved preference stays as it was.
         Pending.bInvincible = !Pending.bInvincible;
     Refresh();
 }
@@ -131,9 +143,11 @@ void UHoverGraphicsMenu::Refresh()
     PageText->SetText(FText::FromString(bZombiePage ? TEXT("ZOMBIE SETTINGS") : TEXT("TEST SETTINGS")));
     HelpText->SetText(FText::FromString(GetWorld()->GetAuthGameMode<AHoverCyberCityGameMode>()
                                             ? TEXT("L1 / R1 switches between test and zombie settings.")
-                                            : TEXT("Zombie wave settings are available in Cyber City and Lakeside.")));
+                                            : TEXT("Zombie wave settings are available in Cyber City, Lakeside and "
+                                                   "NYC - Survival.")));
     if (bZombiePage)
     {
+        MovementText->SetVisibility(ESlateVisibility::Collapsed);
         UTextBlock *Labels[] = {ModeText, FramesText, LevelText, HealthText};
         const TCHAR *Names[] = {TEXT("Zombie health"), TEXT("Zombie speed"), TEXT("Wave size"), TEXT("Spawn interval")};
         const float Values[] = {PendingZombies.Health, PendingZombies.Speed, PendingZombies.Count,
@@ -168,14 +182,21 @@ void UHoverGraphicsMenu::Refresh()
     FramesText->SetColorAndOpacity(FSlateColor(SelectedRow == 1 ? FLinearColor(.3f, .8f, 1) : FLinearColor::White));
     LevelText->SetText(
         FText::FromString(FString::Printf(TEXT("%s Test level:  < %s >"), SelectedRow == 2 ? TEXT(">") : TEXT("  "),
-                                          PendingLevel == 3   ? TEXT("NYC - Exploration")
-                                          : PendingLevel == 2 ? TEXT("Chinese Lakeside Town")
-                                          : PendingLevel == 1 ? TEXT("Cyber City")
-                                                              : TEXT("Post-apocalypse"))));
+                                          AHoverTestController::GetTestLevelLabel(PendingLevel))));
     LevelText->SetColorAndOpacity(FSlateColor(SelectedRow == 2 ? FLinearColor(.3f, .8f, 1) : FLinearColor::White));
     NoteText->SetText(FText::FromString(Settings->GetAvailabilityNote()));
-    HealthText->SetText(
-        FText::FromString(FString::Printf(TEXT("%s Invincible:  < %s >"), SelectedRow == 3 ? TEXT(">") : TEXT("  "),
-                                          Pending.bInvincible ? TEXT("On") : TEXT("Off"))));
+    const auto *Policy = IHoverTestLevelPolicy::Get(GetWorld());
+    HealthText->SetText(FText::FromString(
+        FString::Printf(TEXT("%s Invincible:  < %s >"), SelectedRow == 3 ? TEXT(">") : TEXT("  "),
+                        Policy && Policy->ForcesMortal() ? TEXT("Off (survival)")
+                        : Pending.bInvincible            ? TEXT("On")
+                                                         : TEXT("Off"))));
     HealthText->SetColorAndOpacity(FSlateColor(SelectedRow == 3 ? FLinearColor(.3f, .8f, 1) : FLinearColor::White));
+    MovementText->SetVisibility(PendingLifeEngine >= 0 ? ESlateVisibility::HitTestInvisible
+                                                       : ESlateVisibility::Collapsed);
+    MovementText->SetText(FText::FromString(FString::Printf(
+        TEXT("%s Movement:  < %s >"), SelectedRow == 4 ? TEXT(">") : TEXT("  "),
+        PendingLifeEngine == 1 ? TEXT("Life Engine") : TEXT("Classic (parkour pack)"))));
+    MovementText->SetColorAndOpacity(
+        FSlateColor(SelectedRow == 4 ? FLinearColor(.3f, .8f, 1) : FLinearColor::White));
 }

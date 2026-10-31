@@ -10,6 +10,11 @@ R = {'errors': [], 'samples': []}
 S = {'start': time.monotonic(), 'stage': 0, 'busy': False, 'play': False, 'end': None}
 LE = u.get_editor_subsystem(u.LevelEditorSubsystem)
 assert LE.load_level('/Game/JustBStudios/PostApo/Levels/PostApo')
+# Menu order is PostApo(0), Cyber(1), Lakeside(2), NYC Exploration(3), NYC Survival(4), wrapping
+# at 5. Until the editor pass creates L_NYC_Survival, level 4 reports "not installed" and stays
+# put, so the return trip from Exploration needs one extra Right tap.
+SURVIVAL = u.EditorAssetLibrary.does_asset_exist('/Game/HoverPrototype/Maps/L_NYC_Survival')
+EXPECTED = 4 if SURVIVAL else 3
 
 
 def tap(pc, name):
@@ -17,7 +22,7 @@ def tap(pc, name):
     u.HoverAuthoring.test_key(pc, name, 0, False)
 
 
-def sample(w, pc, label, nyc):
+def sample(w, pc, label, nyc, survival=False):
     mode = u.GameplayStatics.get_game_mode(w).get_class().get_name()
     ranges = len(u.GameplayStatics.get_all_actors_of_class(w, u.HoverZombieRange))
     zombies = len(u.GameplayStatics.get_all_actors_of_class(w, u.HoverZombie))
@@ -27,25 +32,28 @@ def sample(w, pc, label, nyc):
            'pawn': pc.get_controlled_pawn().get_class().get_name()}
     R['samples'].append(row)
     assert row['pawn'] == 'BP_Vexa_CLS_Parkour_C' and row['truck'], row
-    if nyc:
+    if survival:
+        assert mode == 'HoverNYCSurvivalGameMode' and not ranges and not zombies and not row['bike'], row
+    elif nyc:
         assert mode == 'HoverExplorationGameMode' and not ranges and not zombies and not row['bike'], row
     else:
         assert mode == 'HoverGameMode' and ranges == 1 and zombies > 0 and row['bike'], row
     (OUT / 'travel.json').write_text(json.dumps(R, indent=2))
 
 
-def change(pc, direction):
+def change(pc, direction, taps=1):
     tap(pc, 'Gamepad_DPad_Up')
     assert pc.is_graphics_menu_open()
     tap(pc, 'Gamepad_DPad_Down')
     tap(pc, 'Gamepad_DPad_Down')
-    tap(pc, direction)
+    for _ in range(taps):
+        tap(pc, direction)
     tap(pc, 'Gamepad_FaceButton_Bottom')
 
 
 def finish():
     if S['end']: return
-    R['completed'] = not R['errors'] and len(R['samples']) == 3
+    R['completed'] = not R['errors'] and len(R['samples']) == EXPECTED
     (OUT / 'travel.json').write_text(json.dumps(R, indent=2))
     print('NYC_TRAVEL', R['completed'], R['errors'], flush=True)
     LE.editor_request_end_play()
@@ -78,13 +86,17 @@ def tick(dt):
         t = u.GameplayStatics.get_time_seconds(w)
         if S['stage'] == 0 and t > 8:
             sample(w, pc, 'postapo_before', False)
-            change(pc, 'Gamepad_DPad_Left')
+            change(pc, 'Gamepad_DPad_Left', 2)
             S['stage'] = 1
-        elif S['stage'] == 1 and 'NYC' in w.get_name() and t > 12:
+        elif S['stage'] == 1 and 'L_NYC_Explore' in w.get_name() and t > 12:
             sample(w, pc, 'nyc_from_menu', True)
-            change(pc, 'Gamepad_DPad_Right')
+            change(pc, 'Gamepad_DPad_Right', 1 if SURVIVAL else 2)
             S['stage'] = 2
-        elif S['stage'] == 2 and 'PostApo' in w.get_name() and t > 8:
+        elif S['stage'] == 2 and SURVIVAL and 'L_NYC_Survival' in w.get_name() and t > 12:
+            sample(w, pc, 'nyc_survival', True, True)
+            change(pc, 'Gamepad_DPad_Right')
+            S['stage'] = 3
+        elif S['stage'] >= 2 and 'PostApo' in w.get_name() and t > 8:
             sample(w, pc, 'postapo_return', False)
             finish()
     except Exception:

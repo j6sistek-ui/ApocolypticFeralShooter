@@ -17,7 +17,13 @@
 #include "NiagaraSystem.h"
 #include "Animation/BlendSpace.h"
 #include "Animation/AnimSequence.h"
+#include "Animation/AnimData/IAnimationDataModel.h"
 #include "Animation/Skeleton.h"
+#include "Animation/AnimationPoseData.h"
+#include "Animation/AttributesRuntime.h"
+#include "BoneContainer.h"
+#include "BonePose.h"
+#include "Misc/MemStack.h"
 #include "NiagaraEmitter.h"
 #include "NiagaraEmitterHandle.h"
 #include "NiagaraScript.h"
@@ -25,6 +31,19 @@
 #include "NiagaraGraph.h"
 #include "NiagaraSpriteRendererProperties.h"
 #include "NiagaraComponent.h"
+#include "NiagaraRendererProperties.h"
+#include "NiagaraLightRendererProperties.h"
+#include "Particles/ParticleSystem.h"
+#include "Particles/ParticleEmitter.h"
+#include "Particles/ParticleLODLevel.h"
+#include "Particles/ParticleModuleRequired.h"
+#include "Particles/Lifetime/ParticleModuleLifetime.h"
+#include "Particles/Color/ParticleModuleColor.h"
+#include "Distributions/DistributionFloat.h"
+#include "Distributions/DistributionVector.h"
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 #include "NiagaraSystemInstanceController.h"
 #include "NiagaraSystemInstance.h"
 #include "NiagaraEmitterInstance.h"
@@ -51,6 +70,9 @@
 #include "Materials/Material.h"
 #include "PlayInEditorDataTypes.h"
 #include "Settings/LevelEditorPlaySettings.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Null/NullApplication.h"
+#include "Widgets/SWindow.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "Kismet2/BlueprintEditorUtils.h"
@@ -71,12 +93,34 @@
 #include "PhysicsEngine/PhysicsAsset.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "WorldPartition/WorldPartition.h"
+#include "Engine/TriggerVolume.h"
+#include "GameFramework/PlayerStart.h"
+#include "GameFramework/WorldSettings.h"
+#include "World/ZE_ZombieSpawnPoint.h"
+#include "Engine/LevelStreaming.h"
+#include "FileHelpers.h"
 #endif
 
-bool UHoverAuthoring::ConfigureCityStartingGear(UZE_WaveGameModeSettings *Settings)
+#if WITH_EDITOR
+namespace
+{
+const TCHAR *NYCSurvivalMap = TEXT("/Game/HoverPrototype/Maps/L_NYC_Survival");
+
+// Exact package match: refuses L_NYC_Explore, vendor maps and PIE copies (UEDPIE_ prefix).
+bool IsOwnedSurvivalWorld(const UWorld *World)
+{
+    return World && !World->IsGameWorld() && World->GetOutermost()->GetName() == NYCSurvivalMap;
+}
+} // namespace
+#endif
+
+bool UHoverAuthoring::ConfigureCityStartingGear(UZE_WaveGameModeSettings *Settings, int32 AmmoQuantity,
+                                                int32 GrenadeCount, bool bWithSidearm)
 {
 #if WITH_EDITOR
-    if (!Settings || !Settings->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/ZombieEngine/")))
+    // Owned wave assets only: Cyber City (120 / 0 defaults) and NYC Survival (270 / 2 by argument).
+    if (!Settings || !(Settings->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/ZombieEngine/")) ||
+                       Settings->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/NYC/"))))
         return false;
     auto *Weapon = LoadObject<UZE_WeaponDefinition>(
         nullptr, TEXT("/Game/HoverPrototype/ZombieEngine/DA_AFS_Ballista.DA_AFS_Ballista"));
@@ -91,10 +135,66 @@ bool UHoverAuthoring::ConfigureCityStartingGear(UZE_WaveGameModeSettings *Settin
     Slot.QuickbarSlot = 1;
     Gear.StartingWeapons = {Slot};
     Gear.StartingAmmo = {Ammo};
-    Gear.AmmoQuantity = 120;
+    // Owner 2026-10-31: "have the pistol on hand". The owned DA_NYC_Pistol (HoverCyberRifle actor, EM_08 revolver
+    // rig) goes to quickbar slot 2 with its ammo; the vendor pistol is the fallback when the owned one is absent.
+    if (bWithSidearm)
+    {
+        auto *Pistol = LoadObject<UZE_WeaponDefinition>(
+            nullptr, TEXT("/Game/HoverPrototype/NYC/Weapons/DA_NYC_Pistol.DA_NYC_Pistol"));
+        if (!Pistol)
+            Pistol = LoadObject<UZE_WeaponDefinition>(
+                nullptr, TEXT("/Game/ZESP/ZE/Data/Weapons/DA_Weapon_Pistol_001.DA_Weapon_Pistol_001"));
+        auto *PistolAmmo =
+            LoadObject<UZE_AmmoDefinition>(nullptr, TEXT("/Game/ZESP/ZE/Data/Ammo/DA_AMMO_Pistol.DA_AMMO_Pistol"));
+        if (Pistol)
+        {
+            FZE_StartingWeaponConfig Side;
+            Side.WeaponDefinition = Pistol;
+            Side.bAddToQuickbar = true;
+            Side.QuickbarSlot = 2;
+            Gear.StartingWeapons.Add(Side);
+            if (Gear.GrenadeQuickbarSlot == 2)
+                Gear.GrenadeQuickbarSlot = 3;
+        }
+        if (PistolAmmo)
+            Gear.StartingAmmo.Add(PistolAmmo);
+    }
+    Gear.AmmoQuantity = FMath::Max(0, AmmoQuantity);
     Gear.StartingGold = 500;
-    Gear.GrenadeCount = 0;
+    // The frag definition itself (GrenadeItem) is the equipment slice's; only the count is set here.
+    Gear.GrenadeCount = FMath::Max(0, GrenadeCount);
     Settings->MarkPackageDirty();
+    return true;
+#else
+    return false;
+#endif
+}
+
+FName UHoverAuthoring::BindGunRig(UHoverPilotAssets *Assets, FName WeaponKey, UHoverGunRig *Rig, bool bExactKey)
+{
+#if WITH_EDITOR
+    if (!Assets || WeaponKey.IsNone() || !Assets->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/")) ||
+        (Rig && !Rig->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/"))))
+        return NAME_None;
+    const FName Key = bExactKey ? WeaponKey : UHoverGunRig::NormalizeWeaponKey(WeaponKey);
+    Assets->Modify();
+    Assets->GunRigs.Add(Key, Rig);
+    Assets->MarkPackageDirty();
+    return Key;
+#else
+    return NAME_None;
+#endif
+}
+
+bool UHoverAuthoring::UnbindGunRig(UHoverPilotAssets *Assets, FName WeaponKey)
+{
+#if WITH_EDITOR
+    if (!Assets || !Assets->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/")) ||
+        !Assets->GunRigs.Contains(WeaponKey))
+        return false;
+    Assets->Modify();
+    Assets->GunRigs.Remove(WeaponKey);
+    Assets->MarkPackageDirty();
     return true;
 #else
     return false;
@@ -194,10 +294,11 @@ UPhysicsAsset *UHoverAuthoring::CreateVariantPhysics(USkeletalMesh *Mesh)
 #endif
 }
 
-bool UHoverAuthoring::AddCityNavigation(UWorld *World, FVector Center, FVector Size)
+bool UHoverAuthoring::AddCityNavigation(UWorld *World, FVector Center, FVector Size, bool bDynamicModifiersOnly)
 {
 #if WITH_EDITOR
-    if (!World || !(World->GetName().Contains(TEXT("CyberCity")) || World->GetName() == TEXT("L_Showcase")))
+    if (!World || !(World->GetName().Contains(TEXT("CyberCity")) || World->GetName() == TEXT("L_Showcase") ||
+                    IsOwnedSurvivalWorld(World)))
         return false;
     ANavMeshBoundsVolume *Bounds = nullptr;
     for (TActorIterator<ANavMeshBoundsVolume> It(World); It; ++It)
@@ -205,8 +306,10 @@ bool UHoverAuthoring::AddCityNavigation(UWorld *World, FVector Center, FVector S
             Bounds = *It;
     if (!Bounds)
         if (auto *Factory = GEditor->FindActorFactoryForActorClass(ANavMeshBoundsVolume::StaticClass()))
-            Bounds =
-                Cast<ANavMeshBoundsVolume>(Factory->CreateActor(nullptr, World->GetCurrentLevel(), FTransform(Center)));
+            // NYC Survival keeps its bounds in the persistent level, never in a vendor streaming sublevel.
+            Bounds = Cast<ANavMeshBoundsVolume>(Factory->CreateActor(
+                nullptr, IsOwnedSurvivalWorld(World) ? World->PersistentLevel.Get() : World->GetCurrentLevel(),
+                FTransform(Center)));
     if (!Bounds)
         return false;
     Bounds->Tags.AddUnique(TEXT("AFS_CityNavigation"));
@@ -234,9 +337,172 @@ bool UHoverAuthoring::AddCityNavigation(UWorld *World, FVector Center, FVector S
     }
     for (TActorIterator<ARecastNavMesh> It(World); It; ++It)
         if (auto *Property = FindFProperty<FEnumProperty>(It->GetClass(), TEXT("RuntimeGeneration")))
-            Property->GetUnderlyingProperty()->SetIntPropertyValue(Property->ContainerPtrToValuePtr<void>(*It),
-                                                                   static_cast<int64>(ERuntimeGenerationType::Dynamic));
+            Property->GetUnderlyingProperty()->SetIntPropertyValue(
+                Property->ContainerPtrToValuePtr<void>(*It),
+                static_cast<int64>(bDynamicModifiersOnly ? ERuntimeGenerationType::DynamicModifiersOnly
+                                                         : ERuntimeGenerationType::Dynamic));
     return true;
+#else
+    return false;
+#endif
+}
+
+FString UHoverAuthoring::ConfigureCityNavMesh(UWorld *World, float TileSizeUU, float CellSize, float AgentMaxStepHeight,
+                                              int32 TilePoolSize)
+{
+#if WITH_EDITOR
+    if (!IsOwnedSurvivalWorld(World))
+        return TEXT("Refused");
+    FString Report;
+    for (TActorIterator<ARecastNavMesh> It(World); It; ++It)
+    {
+        It->Modify();
+        It->TileSizeUU = TileSizeUU;
+        It->bFixedTilePoolSize = true;
+        It->TilePoolSize = TilePoolSize;
+        // Python cannot reliably write the fixed-size NavMeshResolutionParams array.
+        It->SetCellSize(ENavigationDataResolution::Default, CellSize);
+        It->SetAgentMaxStepHeight(ENavigationDataResolution::Default, AgentMaxStepHeight);
+        It->MarkPackageDirty();
+        Report += FString::Printf(TEXT("%sRecast=%s TileSizeUU=%.1f Cell=%.1f Step=%.1f Pool=%d ActiveTiles=%d"),
+                                  Report.IsEmpty() ? TEXT("") : TEXT("\n"), *It->GetName(), It->TileSizeUU, CellSize,
+                                  AgentMaxStepHeight, It->TilePoolSize, It->GetNumActiveTiles());
+    }
+    return Report.IsEmpty() ? TEXT("No RecastNavMesh") : Report;
+#else
+    return TEXT("");
+#endif
+}
+
+AActor *UHoverAuthoring::AddSurvivalActor(UWorld *World, TSubclassOf<AActor> ActorClass, FTransform Transform,
+                                          const FString &Label, const TArray<FName> &Tags)
+{
+#if WITH_EDITOR
+    // Allow-list: spawn points and player starts only, so this never becomes a general spawner.
+    if (!IsOwnedSurvivalWorld(World) || !ActorClass || Label.IsEmpty() ||
+        !(ActorClass->IsChildOf(AZE_ZombieSpawnPoint::StaticClass()) ||
+          ActorClass->IsChildOf(APlayerStart::StaticClass())))
+        return nullptr;
+    ULevel *Level = World->PersistentLevel;
+    AActor *Actor = nullptr;
+    for (AActor *Existing : Level->Actors)
+        if (Existing && Existing->IsA(ActorClass) && Existing->GetActorLabel() == Label)
+        {
+            Actor = Existing;
+            break;
+        }
+    if (Actor)
+    {
+        Actor->Modify();
+        Actor->SetActorTransform(Transform);
+    }
+    else
+    {
+        FActorSpawnParameters Params;
+        Params.OverrideLevel = Level;
+        Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+        Actor = World->SpawnActor<AActor>(ActorClass, Transform, Params);
+        if (!Actor)
+            return nullptr;
+    }
+    Actor->SetActorLabel(Label);
+    for (const FName &Tag : Tags)
+        Actor->Tags.AddUnique(Tag);
+    Actor->PostEditChange();
+    Actor->MarkPackageDirty();
+    return Actor;
+#else
+    return nullptr;
+#endif
+}
+
+AActor *UHoverAuthoring::AddZoneVolume(UWorld *World, FName ZoneId, int32 Order, FVector Center, FVector Size)
+{
+#if WITH_EDITOR
+    if (!IsOwnedSurvivalWorld(World) || ZoneId.IsNone())
+        return nullptr;
+    ATriggerVolume *Volume = nullptr;
+    for (AActor *Existing : World->PersistentLevel->Actors)
+        if (auto *Trigger = Cast<ATriggerVolume>(Existing))
+            if (Trigger->ActorHasTag(TEXT("AFS_NYCZone")) && Trigger->ActorHasTag(ZoneId))
+            {
+                Volume = Trigger;
+                break;
+            }
+    if (!Volume)
+        if (auto *Factory = GEditor->FindActorFactoryForActorClass(ATriggerVolume::StaticClass()))
+            Volume = Cast<ATriggerVolume>(Factory->CreateActor(nullptr, World->PersistentLevel, FTransform(Center)));
+    if (!Volume)
+        return nullptr;
+    Volume->Modify();
+    // Overlap-only zone marker: the tall box must never carve the navmesh.
+    Volume->GetBrushComponent()->SetCanEverAffectNavigation(false);
+    Volume->GetBrushComponent()->SetCollisionProfileName(TEXT("Trigger"));
+    auto *Builder = NewObject<UCubeBuilder>();
+    Builder->X = Size.X;
+    Builder->Y = Size.Y;
+    Builder->Z = Size.Z;
+    if (!Builder->Build(World, Volume))
+        return nullptr;
+    Volume->GetBrushComponent()->BuildSimpleBrushCollision();
+    Volume->GetBrushComponent()->UpdateBounds();
+    Volume->PostEditMove(true);
+    Volume->SetActorLocation(Center);
+    Volume->Tags.AddUnique(TEXT("AFS_NYCZone"));
+    Volume->Tags.AddUnique(ZoneId);
+    Volume->Tags.AddUnique(FName(*FString::Printf(TEXT("AFS_ZoneOrder_%d"), Order)));
+    Volume->SetActorLabel(FString::Printf(TEXT("AFS Zone %s"), *ZoneId.ToString()));
+    Volume->MarkPackageDirty();
+    return Volume;
+#else
+    return nullptr;
+#endif
+}
+
+FString UHoverAuthoring::DescribeStreamingLevels(UWorld *World)
+{
+#if WITH_EDITOR
+    if (!World)
+        return TEXT("No world");
+    TArray<FString> Lines;
+    for (ULevelStreaming *Streaming : World->GetStreamingLevels())
+    {
+        if (!Streaming)
+            continue;
+        const ULevel *Loaded = Streaming->GetLoadedLevel();
+        Lines.Add(FString::Printf(TEXT("%s class=%s loaded=%d dirty=%d"), *Streaming->GetWorldAssetPackageName(),
+                                  *Streaming->GetClass()->GetName(), Loaded != nullptr,
+                                  Loaded && Loaded->GetOutermost()->IsDirty()));
+    }
+    const AWorldSettings *Settings = World->GetWorldSettings();
+    Lines.Add(FString::Printf(TEXT("PersistentActors=%d DefaultGameMode=%s"),
+                              World->PersistentLevel ? World->PersistentLevel->Actors.Num() : 0,
+                              Settings && Settings->DefaultGameMode ? *Settings->DefaultGameMode->GetPathName()
+                                                                    : TEXT("None")));
+    return FString::Join(Lines, TEXT("\n"));
+#else
+    return TEXT("");
+#endif
+}
+
+bool UHoverAuthoring::SaveSurvivalMap(UWorld *World)
+{
+#if WITH_EDITOR
+    if (!IsOwnedSurvivalWorld(World))
+        return false;
+    // Vendor sublevels are never saved: refuse while any loaded sublevel package is dirty.
+    bool bVendorDirty = false;
+    for (ULevelStreaming *Streaming : World->GetStreamingLevels())
+        if (const ULevel *Loaded = Streaming ? Streaming->GetLoadedLevel() : nullptr)
+            if (Loaded->GetOutermost()->IsDirty())
+            {
+                UE_LOG(LogTemp, Error, TEXT("NYC Survival save refused: dirty sublevel %s"),
+                       *Loaded->GetOutermost()->GetName());
+                bVendorDirty = true;
+            }
+    if (bVendorDirty)
+        return false;
+    return FEditorFileUtils::SaveLevel(World->PersistentLevel);
 #else
     return false;
 #endif
@@ -479,7 +745,7 @@ FString UHoverAuthoring::DescribeBlueprint(UBlueprint *Blueprint)
     return Result;
 }
 
-void UHoverAuthoring::StartPlaytest()
+void UHoverAuthoring::StartPlaytest(int32 Width, int32 Height)
 {
 #if WITH_EDITOR
     if (!GEditor || GEditor->PlayWorld)
@@ -487,12 +753,57 @@ void UHoverAuthoring::StartPlaytest()
     GetMutableDefault<UEditorPerformanceSettings>()->bThrottleCPUWhenNotForeground = false;
     FRequestPlaySessionParams Params;
     auto *Settings = GetMutableDefault<ULevelEditorPlaySettings>();
-    Settings->NewWindowWidth = 1280;
-    Settings->NewWindowHeight = 720;
+    Settings->NewWindowWidth = FMath::Max(Width, 320);
+    Settings->NewWindowHeight = FMath::Max(Height, 240);
     Params.EditorPlaySettings = Settings;
     Params.bAllowOnlineSubsystem = false;
     GEditor->RequestPlaySession(Params);
 #endif
+}
+FString UHoverAuthoring::ConfigureOffscreenDisplay(int32 Width, int32 Height)
+{
+#if WITH_EDITOR
+    if (!FSlateApplication::IsInitialized() || !FSlateApplication::Get().IsRenderingOffScreen())
+        return TEXT("not rendering offscreen");
+    const TSharedPtr<GenericApplication> App = FSlateApplication::Get().GetPlatformApplication();
+    if (!App)
+        return TEXT("no platform application");
+    FPlatformRect Area;
+    Area.Left = 0;
+    Area.Top = 0;
+    Area.Right = FMath::Max(Width, 320);
+    Area.Bottom = FMath::Max(Height, 240);
+    // Offscreen rendering always installs FNullApplication (ApplicationCore), the only platform app with a
+    // settable virtual work area.
+    static_cast<FNullApplication *>(App.Get())->SetWorkArea(Area);
+    const FPlatformRect Now = App->GetWorkArea(Area);
+    return FString::Printf(TEXT("work area %d x %d"), Now.Right - Now.Left, Now.Bottom - Now.Top);
+#else
+    return TEXT("editor only");
+#endif
+}
+FIntPoint UHoverAuthoring::GetPlaytestViewportSize()
+{
+#if WITH_EDITOR
+    if (UWorld *World = GetPlaytestWorld())
+        if (UGameViewportClient *Client = World->GetGameViewport(); Client && Client->Viewport)
+            return Client->Viewport->GetSizeXY();
+#endif
+    return FIntPoint::ZeroValue;
+}
+FIntPoint UHoverAuthoring::ResizePlaytestWindow(int32 Width, int32 Height)
+{
+#if WITH_EDITOR
+    if (UWorld *World = GetPlaytestWorld())
+        if (UGameViewportClient *Client = World->GetGameViewport())
+            if (TSharedPtr<SWindow> Window = Client->GetWindow())
+            {
+                Window->Resize(FVector2D(FMath::Max(Width, 320), FMath::Max(Height, 240)));
+                const FVector2D Size = Window->GetClientSizeInScreen();
+                return FIntPoint(FMath::RoundToInt(Size.X), FMath::RoundToInt(Size.Y));
+            }
+#endif
+    return FIntPoint::ZeroValue;
 }
 
 UWorld *UHoverAuthoring::GetPlaytestWorld()
@@ -612,6 +923,320 @@ TArray<FVector> UHoverAuthoring::FindLightingReviewLocations(UWorld *World, FVec
         }
 #endif
     return Result;
+}
+
+namespace
+{
+#if WITH_EDITOR
+// A Niagara parameter as JSON: name, type and the value when the type is one we can read. Enums read as their
+// int32 payload plus the enum's display name so Loop Behavior (Infinite / Once / Multiple) is legible.
+TSharedPtr<FJsonObject> FlashParameterJson(const FNiagaraParameterStore &Store, const FNiagaraVariable &Variable)
+{
+    auto Row = MakeShared<FJsonObject>();
+    const FNiagaraTypeDefinition &Type = Variable.GetType();
+    Row->SetStringField(TEXT("name"), Variable.GetName().ToString());
+    Row->SetStringField(TEXT("type"), Type.GetName());
+    if (Store.IndexOf(Variable) == INDEX_NONE)
+        return Row;
+    if (Type == FNiagaraTypeDefinition::GetFloatDef())
+        Row->SetNumberField(TEXT("value"), Store.GetParameterValue<float>(Variable));
+    else if (Type == FNiagaraTypeDefinition::GetIntDef())
+        Row->SetNumberField(TEXT("value"), Store.GetParameterValue<int32>(Variable));
+    else if (Type == FNiagaraTypeDefinition::GetBoolDef())
+        Row->SetBoolField(TEXT("value"), Store.GetParameterValue<FNiagaraBool>(Variable).GetValue());
+    else if (Type == FNiagaraTypeDefinition::GetColorDef())
+    {
+        const FLinearColor C = Store.GetParameterValue<FLinearColor>(Variable);
+        TArray<TSharedPtr<FJsonValue>> V;
+        for (float F : {C.R, C.G, C.B, C.A})
+            V.Add(MakeShared<FJsonValueNumber>(F));
+        Row->SetArrayField(TEXT("value"), V);
+    }
+    else if (Type == FNiagaraTypeDefinition::GetVec2Def())
+    {
+        const FVector2f P = Store.GetParameterValue<FVector2f>(Variable);
+        Row->SetArrayField(TEXT("value"), {MakeShared<FJsonValueNumber>(P.X), MakeShared<FJsonValueNumber>(P.Y)});
+    }
+    else if (Type == FNiagaraTypeDefinition::GetVec3Def())
+    {
+        const FVector3f P = Store.GetParameterValue<FVector3f>(Variable);
+        Row->SetArrayField(TEXT("value"), {MakeShared<FJsonValueNumber>(P.X), MakeShared<FJsonValueNumber>(P.Y),
+                                           MakeShared<FJsonValueNumber>(P.Z)});
+    }
+    else if (Type.IsEnum() && Variable.GetSizeInBytes() == sizeof(int32))
+    {
+        const int32 I = Store.GetParameterValue<int32>(Variable);
+        Row->SetNumberField(TEXT("value"), I);
+        if (const UEnum *Enum = Type.GetEnum())
+            Row->SetStringField(TEXT("enum"), Enum->GetDisplayNameTextByValue(I).ToString());
+    }
+    return Row;
+}
+
+// Module-input constants worth an inventory row: loop timing, lifetime, colour, size / scale. Everything else
+// (velocity, drag, camera offset, ...) stays out so the JSON reads.
+bool FlashConstantIsInteresting(const FString &Name)
+{
+    const FString Flat = Name.Replace(TEXT(" "), TEXT("")).ToLower();
+    for (const TCHAR *Key : {TEXT("loop"), TEXT("lifetime"), TEXT("color"), TEXT("colour"), TEXT("tint"), TEXT("size"),
+                             TEXT("scale"), TEXT("spawncount"), TEXT("duration"), TEXT("intensity"), TEXT("radius")})
+        if (Flat.Contains(Key))
+            return true;
+    return false;
+}
+#endif
+} // namespace
+
+FString UHoverAuthoring::DescribeFlashAsset(UObject *Asset)
+{
+    FString Out;
+#if WITH_EDITOR
+    auto Root = MakeShared<FJsonObject>();
+    if (!Asset)
+        return Out;
+    Root->SetStringField(TEXT("path"), Asset->GetPathName());
+    Root->SetStringField(TEXT("class"), Asset->GetClass()->GetName());
+    double Duration = 0.0; // -1 once any emitter loops forever; the longest finite emitter otherwise.
+    bool bDurationKnown = false;
+    if (auto *Effect = Cast<UNiagaraSystem>(Asset))
+    {
+        TArray<TSharedPtr<FJsonValue>> Users;
+        TArray<FNiagaraVariable> Exposed;
+        Effect->GetExposedParameters().GetParameters(Exposed);
+        for (const auto &Variable : Exposed)
+            Users.Add(MakeShared<FJsonValueObject>(FlashParameterJson(Effect->GetExposedParameters(), Variable)));
+        Root->SetArrayField(TEXT("user_parameters"), Users);
+        TArray<TSharedPtr<FJsonValue>> Emitters;
+        for (auto &Handle : Effect->GetEmitterHandles())
+        {
+            auto Row = MakeShared<FJsonObject>();
+            Row->SetStringField(TEXT("name"), Handle.GetName().ToString());
+            Row->SetBoolField(TEXT("enabled"), Handle.GetIsEnabled());
+            auto *Data = Handle.GetEmitterData();
+            if (!Data)
+            {
+                Emitters.Add(MakeShared<FJsonValueObject>(Row));
+                continue;
+            }
+            Row->SetBoolField(TEXT("local_space"), Data->bLocalSpace);
+            Row->SetStringField(TEXT("sim_target"), Data->SimTarget == ENiagaraSimTarget::GPUComputeSim ? TEXT("GPU") : TEXT("CPU"));
+            TArray<TSharedPtr<FJsonValue>> Renderers;
+            for (auto *Renderer : Data->GetRenderers())
+            {
+                if (!Renderer)
+                    continue;
+                auto R = MakeShared<FJsonObject>();
+                R->SetStringField(TEXT("class"), Renderer->GetClass()->GetName());
+                R->SetBoolField(TEXT("enabled"), Renderer->GetIsEnabled());
+                // A light renderer is the part that "whites the character out": its radius and colour add matter.
+                if (auto *Light = Cast<UNiagaraLightRendererProperties>(Renderer))
+                {
+                    R->SetNumberField(TEXT("radius_scale"), Light->RadiusScale);
+                    R->SetBoolField(TEXT("inverse_squared"), Light->bUseInverseSquaredFalloff);
+                    R->SetArrayField(TEXT("color_add"), {MakeShared<FJsonValueNumber>(Light->ColorAdd.X),
+                                                         MakeShared<FJsonValueNumber>(Light->ColorAdd.Y),
+                                                         MakeShared<FJsonValueNumber>(Light->ColorAdd.Z)});
+                }
+                Renderers.Add(MakeShared<FJsonValueObject>(R));
+            }
+            Row->SetArrayField(TEXT("renderers"), Renderers);
+            // Module inputs the stack stores as rapid-iteration constants (editor data). Loop Behavior is read when
+            // it is a constant; as a static switch it is compiled in and absent, which the row then says.
+            TArray<TSharedPtr<FJsonValue>> Constants;
+            TArray<UNiagaraScript *> Scripts;
+            Data->GetScripts(Scripts);
+            double LoopDuration = 0, LoopDelay = 0, LifetimeMax = 0;
+            int32 LoopBehavior = -1, LoopCount = 1;
+            bool bLoopDurationKnown = false;
+            for (auto *Script : Scripts)
+            {
+                if (!Script)
+                    continue;
+                TArray<FNiagaraVariable> Variables;
+                Script->RapidIterationParameters.GetParameters(Variables);
+                for (const auto &Variable : Variables)
+                {
+                    const FString Name = Variable.GetName().ToString();
+                    if (!FlashConstantIsInteresting(Name))
+                        continue;
+                    auto C = FlashParameterJson(Script->RapidIterationParameters, Variable);
+                    Constants.Add(MakeShared<FJsonValueObject>(C));
+                    const FString Flat = Name.Replace(TEXT(" "), TEXT("")).ToLower();
+                    double Number = 0;
+                    const bool bNumber = C->TryGetNumberField(TEXT("value"), Number);
+                    if (Flat.Contains(TEXT("emitterstate")) && bNumber)
+                    {
+                        if (Flat.EndsWith(TEXT("loopduration")))
+                        {
+                            LoopDuration = FMath::Max(LoopDuration, Number);
+                            bLoopDurationKnown = true;
+                        }
+                        else if (Flat.EndsWith(TEXT("loopdelay")))
+                            LoopDelay = FMath::Max(LoopDelay, Number);
+                        else if (Flat.EndsWith(TEXT("loopcount")))
+                            LoopCount = FMath::Max(1, int32(Number));
+                        else if (Flat.EndsWith(TEXT("loopbehavior")))
+                            LoopBehavior = int32(Number);
+                    }
+                    else if (Flat.Contains(TEXT("lifetime")) && bNumber)
+                        LifetimeMax = FMath::Max(LifetimeMax, Number);
+                }
+            }
+            Row->SetArrayField(TEXT("constants"), Constants);
+            // ENiagaraLoopBehavior: Infinite 0, Once 1, Multiple 2. Unknown behaviour with a known duration is
+            // treated as Once (the shipped muzzle flashes all burst once).
+            double EmitterDuration = -1;
+            if (LoopBehavior == 0)
+                EmitterDuration = -1;
+            else if (bLoopDurationKnown)
+                EmitterDuration = LoopDelay + LoopDuration * (LoopBehavior == 2 ? LoopCount : 1) + LifetimeMax;
+            Row->SetNumberField(TEXT("loop_behavior"), LoopBehavior);
+            Row->SetNumberField(TEXT("loop_duration_s"), LoopDuration);
+            Row->SetNumberField(TEXT("loop_count"), LoopCount);
+            Row->SetNumberField(TEXT("lifetime_max_s"), LifetimeMax);
+            Row->SetNumberField(TEXT("duration_s"), EmitterDuration);
+            Row->SetBoolField(TEXT("duration_known"), LoopBehavior == 0 || bLoopDurationKnown);
+            if (Handle.GetIsEnabled())
+            {
+                if (EmitterDuration < 0 && (LoopBehavior == 0 || !bLoopDurationKnown))
+                {
+                    if (LoopBehavior == 0)
+                        Duration = -1;
+                }
+                else if (Duration >= 0)
+                    Duration = FMath::Max(Duration, EmitterDuration);
+                bDurationKnown = bDurationKnown || LoopBehavior == 0 || bLoopDurationKnown;
+            }
+            Emitters.Add(MakeShared<FJsonValueObject>(Row));
+        }
+        Root->SetArrayField(TEXT("emitters"), Emitters);
+    }
+    else if (auto *Cascade = Cast<UParticleSystem>(Asset))
+    {
+        TArray<TSharedPtr<FJsonValue>> Emitters;
+        for (UParticleEmitter *Emitter : Cascade->Emitters)
+        {
+            if (!Emitter)
+                continue;
+            auto Row = MakeShared<FJsonObject>();
+            Row->SetStringField(TEXT("name"), Emitter->EmitterName.ToString());
+            UParticleLODLevel *Lod = Emitter->LODLevels.Num() ? Emitter->LODLevels[0].Get() : nullptr;
+            if (!Lod)
+            {
+                Emitters.Add(MakeShared<FJsonValueObject>(Row));
+                continue;
+            }
+            Row->SetBoolField(TEXT("enabled"), Lod->bEnabled);
+            double EmitterDuration = -1;
+            float LifetimeMax = 0;
+            TArray<TSharedPtr<FJsonValue>> Modules;
+            for (UParticleModule *Module : Lod->Modules)
+            {
+                if (!Module)
+                    continue;
+                auto M = MakeShared<FJsonObject>();
+                M->SetStringField(TEXT("class"), Module->GetClass()->GetName());
+                if (auto *Lifetime = Cast<UParticleModuleLifetime>(Module))
+                {
+                    float Min = 0, Max = 0;
+                    Lifetime->Lifetime.GetOutRange(Min, Max);
+                    M->SetNumberField(TEXT("lifetime_min_s"), Min);
+                    M->SetNumberField(TEXT("lifetime_max_s"), Max);
+                    LifetimeMax = FMath::Max(LifetimeMax, Max);
+                }
+                if (auto *Color = Cast<UParticleModuleColor>(Module))
+                {
+                    float Min = 0, Max = 0;
+                    Color->StartColor.GetOutRange(Min, Max);
+                    M->SetNumberField(TEXT("start_color_min"), Min);
+                    M->SetNumberField(TEXT("start_color_max"), Max);
+                }
+                Modules.Add(MakeShared<FJsonValueObject>(M));
+            }
+            if (UParticleModuleRequired *Required = Lod->RequiredModule)
+            {
+                Row->SetNumberField(TEXT("emitter_duration_s"), Required->EmitterDuration);
+                Row->SetNumberField(TEXT("emitter_loops"), Required->EmitterLoops);
+                EmitterDuration = Required->EmitterLoops == 0
+                                      ? -1
+                                      : Required->EmitterDuration * Required->EmitterLoops + LifetimeMax;
+            }
+            Row->SetNumberField(TEXT("lifetime_max_s"), LifetimeMax);
+            Row->SetNumberField(TEXT("duration_s"), EmitterDuration);
+            Row->SetArrayField(TEXT("modules"), Modules);
+            if (Lod->bEnabled)
+            {
+                if (EmitterDuration < 0)
+                    Duration = -1;
+                else if (Duration >= 0)
+                    Duration = FMath::Max(Duration, EmitterDuration);
+                bDurationKnown = true;
+            }
+            Emitters.Add(MakeShared<FJsonValueObject>(Row));
+        }
+        Root->SetArrayField(TEXT("emitters"), Emitters);
+    }
+    else
+        return Out;
+    Root->SetNumberField(TEXT("duration_s"), bDurationKnown ? Duration : -2); // -2: no emitter said.
+    Root->SetBoolField(TEXT("duration_known"), bDurationKnown);
+    auto Writer = TJsonWriterFactory<>::Create(&Out);
+    FJsonSerializer::Serialize(Root, Writer);
+#endif
+    return Out;
+}
+
+namespace
+{
+#if WITH_EDITOR
+// Finds the exposed user parameter named Parameter (with or without the "User." prefix) of the given type on a
+// prototype-folder system; null when the system is a vendor asset or the parameter is missing / another type.
+const FNiagaraVariable *FindUserParameter(UNiagaraSystem *Effect, FName Parameter, const FNiagaraTypeDefinition &Type,
+                                          TArray<FNiagaraVariable> &Storage)
+{
+    if (!Effect || !Effect->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/Effects/")))
+        return nullptr;
+    Effect->GetExposedParameters().GetParameters(Storage);
+    const FString Wanted = Parameter.ToString();
+    for (const auto &Variable : Storage)
+    {
+        const FString Name = Variable.GetName().ToString();
+        if ((Name == Wanted || Name == TEXT("User.") + Wanted) && Variable.GetType() == Type)
+            return &Variable;
+    }
+    return nullptr;
+}
+#endif
+} // namespace
+
+bool UHoverAuthoring::SetNiagaraUserColor(UNiagaraSystem *Effect, FName Parameter, FLinearColor Value)
+{
+#if WITH_EDITOR
+    TArray<FNiagaraVariable> Storage;
+    if (const auto *Variable = FindUserParameter(Effect, Parameter, FNiagaraTypeDefinition::GetColorDef(), Storage))
+    {
+        Effect->Modify();
+        Effect->GetExposedParameters().SetParameterValue(Value, *Variable);
+        Effect->MarkPackageDirty();
+        return true;
+    }
+#endif
+    return false;
+}
+
+bool UHoverAuthoring::SetNiagaraUserFloat(UNiagaraSystem *Effect, FName Parameter, float Value)
+{
+#if WITH_EDITOR
+    TArray<FNiagaraVariable> Storage;
+    if (const auto *Variable = FindUserParameter(Effect, Parameter, FNiagaraTypeDefinition::GetFloatDef(), Storage))
+    {
+        Effect->Modify();
+        Effect->GetExposedParameters().SetParameterValue(Value, *Variable);
+        Effect->MarkPackageDirty();
+        return true;
+    }
+#endif
+    return false;
 }
 
 FString UHoverAuthoring::DescribeNiagaraEffect(UNiagaraSystem *Effect)
@@ -1094,6 +1719,45 @@ FString UHoverAuthoring::InspectCharacterMesh(USkeletalMesh *Mesh)
     return Result;
 }
 
+TArray<FVector> UHoverAuthoring::SkeletalMeshVertexPositions(USkeletalMesh *Mesh, int32 LOD)
+{
+    TArray<FVector> Out;
+    const FSkeletalMeshRenderData *Render = Mesh ? Mesh->GetResourceForRendering() : nullptr;
+    if (!Render || !Render->LODRenderData.IsValidIndex(LOD))
+        return Out;
+    const auto &Positions = Render->LODRenderData[LOD].StaticVertexBuffers.PositionVertexBuffer;
+    Out.Reserve(Positions.GetNumVertices());
+    for (uint32 V = 0; V < Positions.GetNumVertices(); ++V)
+        Out.Add(FVector(Positions.VertexPosition(V)));
+    return Out;
+}
+
+TArray<FName> UHoverAuthoring::SkeletalMeshVertexBones(USkeletalMesh *Mesh, int32 LOD)
+{
+    TArray<FName> Out;
+    const FSkeletalMeshRenderData *Render = Mesh ? Mesh->GetResourceForRendering() : nullptr;
+    if (!Render || !Render->LODRenderData.IsValidIndex(LOD))
+        return Out;
+    const auto &Level = Render->LODRenderData[LOD];
+    const auto &Weights = Level.SkinWeightVertexBuffer;
+    Out.Init(NAME_None, Level.GetNumVertices());
+    for (const auto &Section : Level.RenderSections)
+        for (uint32 V = Section.BaseVertexIndex; V < Section.BaseVertexIndex + Section.NumVertices; ++V)
+        {
+            uint16 Best = 0;
+            int32 BestBone = INDEX_NONE;
+            for (uint32 I = 0; I < Weights.GetMaxBoneInfluences(); ++I)
+                if (Weights.GetBoneWeight(V, I) > Best)
+                {
+                    Best = Weights.GetBoneWeight(V, I);
+                    BestBone = Weights.GetBoneIndex(V, I);
+                }
+            if (BestBone != INDEX_NONE && Section.BoneMap.IsValidIndex(BestBone) && Out.IsValidIndex(V))
+                Out[V] = Mesh->GetRefSkeleton().GetBoneName(Section.BoneMap[BestBone]);
+        }
+    return Out;
+}
+
 FString UHoverAuthoring::InspectTexture(UTexture2D *Texture)
 {
     FString Result;
@@ -1209,6 +1873,196 @@ FString UHoverAuthoring::InspectReviewEffects()
         }
 #endif
     return Report;
+}
+
+TArray<FTransform> UHoverAuthoring::SampleClipBone(UAnimSequence *Sequence, FName Bone, const TArray<float> &Times)
+{
+    TArray<FTransform> Out;
+    if (!Sequence || !Sequence->GetSkeleton())
+        return Out;
+    const FReferenceSkeleton &Ref = Sequence->GetSkeleton()->GetReferenceSkeleton();
+    const int32 Index = Ref.FindBoneIndex(Bone);
+    if (Index == INDEX_NONE)
+        return Out;
+    if (!ClipHasBoneTrack(Sequence, Bone))
+    {
+        for (int32 I = 0; I < Times.Num(); ++I)
+            Out.Add(Ref.GetRefBonePose()[Index]);
+        return Out;
+    }
+    for (const float Time : Times)
+    {
+        FTransform Atom;
+        Sequence->GetBoneTransform(Atom, FSkeletonPoseBoneIndex(Index), FAnimExtractContext(static_cast<double>(Time)),
+                                   true);
+        Out.Add(Atom);
+    }
+    return Out;
+}
+
+bool UHoverAuthoring::ClipHasBoneTrack(UAnimSequence *Sequence, FName Bone)
+{
+#if WITH_EDITOR
+    if (!Sequence || !Sequence->GetDataModel())
+        return false;
+    return Sequence->GetDataModel()->IsValidBoneTrackName(Bone);
+#else
+    return false;
+#endif
+}
+
+FString UHoverAuthoring::DescribeSequenceOnMesh(UAnimSequence *Sequence, USkeletalMesh *Mesh, float Time,
+                                                const TArray<FName> &Bones)
+{
+    if (!Sequence || !Mesh || !Mesh->GetSkeleton() || !Sequence->GetSkeleton())
+        return TEXT("{\"error\": \"null sequence, mesh or skeleton\"}");
+    USkeleton *MeshSkeleton = Mesh->GetSkeleton();
+    USkeleton *SequenceSkeleton = Sequence->GetSkeleton();
+    const FReferenceSkeleton &Ref = Mesh->GetRefSkeleton();
+    // Track bones the mesh skeleton has no bone for: the engine's name remapping drops them silently.
+    TArray<FString> Missing;
+    int32 Tracks = 0;
+#if WITH_EDITOR
+    if (Sequence->GetDataModel())
+    {
+        TArray<FName> Names;
+        Sequence->GetDataModel()->GetBoneTrackNames(Names);
+        Tracks = Names.Num();
+        for (const FName &Name : Names)
+            if (Ref.FindBoneIndex(Name) == INDEX_NONE)
+                Missing.Add(FString::Printf(TEXT("\"%s\""), *Name.ToString()));
+    }
+#endif
+    // Sample through the runtime path: every mesh bone required, the mesh's own skeleton as the target, so a
+    // sequence on another skeleton goes through FSkeletonRemapping exactly as FAnimNode_SequencePlayer does.
+    // FCompactPose and FBlendedCurve allocate from the anim mem stack, which asserts without a mark in scope
+    // (the anim graph provides one per evaluation; this is a plain editor call).
+    FMemMark Mark(FMemStack::Get());
+    TArray<FBoneIndexType> Required;
+    for (int32 Index = 0; Index < Ref.GetNum(); ++Index)
+        Required.Add(static_cast<FBoneIndexType>(Index));
+    FBoneContainer Container;
+    Container.InitializeTo(Required, UE::Anim::FCurveFilterSettings(), *Mesh);
+    FCompactPose Pose;
+    Pose.SetBoneContainer(&Container);
+    FBlendedCurve Curve;
+    Curve.InitFrom(Container);
+    UE::Anim::FStackAttributeContainer Attributes;
+    FAnimationPoseData PoseData(Pose, Curve, Attributes);
+    Sequence->GetAnimationPose(PoseData, FAnimExtractContext(static_cast<double>(Time)));
+    int32 Moved = 0;
+    TArray<FTransform> ComponentSpace;
+    ComponentSpace.SetNum(Pose.GetNumBones());
+    for (int32 Index = 0; Index < Pose.GetNumBones(); ++Index)
+    {
+        const FCompactPoseBoneIndex Bone(Index);
+        const FTransform &Local = Pose[Bone];
+        const FTransform &RefLocal = Container.GetRefPoseTransform(Bone);
+        if (!Local.GetLocation().Equals(RefLocal.GetLocation(), .05f) ||
+            !Local.GetRotation().Equals(RefLocal.GetRotation(), .001f))
+            ++Moved;
+        const FCompactPoseBoneIndex Parent = Container.GetParentBoneIndex(Bone);
+        ComponentSpace[Index] = Parent.IsValid() ? Local * ComponentSpace[Parent.GetInt()] : Local;
+    }
+    TArray<FString> Locations;
+    for (const FName &Name : Bones)
+    {
+        const int32 Index = Ref.FindBoneIndex(Name);
+        if (Index == INDEX_NONE || !ComponentSpace.IsValidIndex(Index))
+            continue;
+        const FVector L = ComponentSpace[Index].GetLocation();
+        Locations.Add(FString::Printf(TEXT("\"%s\": [%.2f, %.2f, %.2f]"), *Name.ToString(), L.X, L.Y, L.Z));
+    }
+    // The editor's asset-picker rule (CompatibleSkeletons list) each way; the runtime players do not use it.
+    return FString::Printf(
+        TEXT("{\"sequence\": \"%s\", \"sequence_skeleton\": \"%s\", \"mesh\": \"%s\", \"mesh_skeleton\": \"%s\", "
+             "\"same_skeleton\": %s, \"mesh_skeleton_accepts_sequence_skeleton\": %s, "
+             "\"sequence_skeleton_accepts_mesh_skeleton\": %s, \"track_bones\": %d, "
+             "\"track_bones_missing_on_mesh\": [%s], \"mesh_bones\": %d, \"bones_off_reference_pose\": %d, "
+             "\"time\": %.3f, \"component_space_cm\": {%s}}"),
+        *Sequence->GetPathName(), *SequenceSkeleton->GetPathName(), *Mesh->GetPathName(),
+        *MeshSkeleton->GetPathName(), MeshSkeleton == SequenceSkeleton ? TEXT("true") : TEXT("false"),
+        MeshSkeleton->IsCompatibleForEditor(SequenceSkeleton) ? TEXT("true") : TEXT("false"),
+        SequenceSkeleton->IsCompatibleForEditor(MeshSkeleton) ? TEXT("true") : TEXT("false"), Tracks,
+        *FString::Join(Missing, TEXT(", ")), Pose.GetNumBones(), Moved, Time, *FString::Join(Locations, TEXT(", ")));
+}
+
+FString UHoverAuthoring::MakeFrameAdditive(UAnimSequence *Sequence, int32 RefFrame)
+{
+    if (!Sequence)
+        return TEXT("{\"ok\": false, \"error\": \"null sequence\"}");
+#if WITH_EDITOR
+    Sequence->Modify();
+    Sequence->AdditiveAnimType = AAT_LocalSpaceBase;
+    Sequence->RefPoseType = ABPT_AnimFrame;
+    Sequence->RefFrameIndex = FMath::Max(0, RefFrame);
+    // ABPT_AnimFrame reads the base frame from RefPoseSeq and IsValidAdditive() demands one; the clip itself is the
+    // base (the CLS MM_*_Fire sources are built the same way, self-referenced at their rest frame).
+    Sequence->RefPoseSeq = Sequence;
+    // Same path the details panel takes: PostEditChangeProperty on the additive settings invalidates the
+    // compressed data and rebuilds it (baked additive) before the asset is saved.
+    for (const TCHAR *Name : {TEXT("AdditiveAnimType"), TEXT("RefPoseType"), TEXT("RefFrameIndex"), TEXT("RefPoseSeq")})
+        if (FProperty *Property = UAnimSequence::StaticClass()->FindPropertyByName(Name))
+        {
+            FPropertyChangedEvent Event(Property, EPropertyChangeType::ValueSet);
+            Sequence->PostEditChangeProperty(Event);
+        }
+    Sequence->MarkPackageDirty();
+#endif
+    return FString::Printf(TEXT("{\"ok\": %s, \"additive_anim_type\": %d, \"ref_pose_type\": %d, \"ref_frame_index\": %d, "
+                                "\"is_valid_additive\": %s, \"length_s\": %.4f, \"frames\": %d}"),
+                           Sequence->IsValidAdditive() ? TEXT("true") : TEXT("false"), int32(Sequence->AdditiveAnimType),
+                           int32(Sequence->RefPoseType), Sequence->RefFrameIndex,
+                           Sequence->IsValidAdditive() ? TEXT("true") : TEXT("false"), Sequence->GetPlayLength(),
+                           Sequence->GetNumberOfSampledKeys());
+}
+
+bool UHoverAuthoring::IsValidAdditive(UAnimSequence *Sequence)
+{
+    return Sequence && Sequence->IsValidAdditive();
+}
+
+FString UHoverAuthoring::MeasureFrameLuminance(const FString &Filename, float CentralFraction)
+{
+    FImage Image;
+    if (!FImageUtils::LoadImage(*Filename, Image) || Image.GetWidth() <= 0 || Image.GetHeight() <= 0)
+        return FString::Printf(TEXT("{\"ok\": false, \"error\": \"load failed\", \"file\": \"%s\"}"), *Filename);
+    // The capture is written from the back buffer as 8-bit BGRA; measure on those stored values (the viewer sees
+    // them), not linear light, so a saturated pixel is one the screen shows as white.
+    FImage Pixels;
+    Image.CopyTo(Pixels, ERawImageFormat::BGRA8, EGammaSpace::sRGB);
+    const int32 W = Pixels.GetWidth(), H = Pixels.GetHeight();
+    const float Frac = FMath::Clamp(CentralFraction, .05f, 1.f);
+    const int32 X0 = FMath::RoundToInt(W * (1 - Frac) * .5f), X1 = W - X0;
+    const int32 Y0 = FMath::RoundToInt(H * (1 - Frac) * .5f), Y1 = H - Y0;
+    const TArrayView64<FColor> Colors = Pixels.AsBGRA8();
+    double Sum = 0;
+    int64 Count = 0, Saturated = 0;
+    for (int32 Y = Y0; Y < Y1; ++Y)
+        for (int32 X = X0; X < X1; ++X)
+        {
+            const FColor &C = Colors[int64(Y) * W + X];
+            Sum += .2126 * C.R + .7152 * C.G + .0722 * C.B;
+            Saturated += (C.R > 245 && C.G > 245 && C.B > 245) ? 1 : 0;
+            ++Count;
+        }
+    return FString::Printf(TEXT("{\"ok\": true, \"width\": %d, \"height\": %d, \"central_fraction\": %.2f, "
+                                "\"mean_luma\": %.3f, \"saturated_fraction\": %.5f, \"pixels\": %lld}"),
+                           W, H, Frac, Count ? Sum / Count : 0.0, Count ? double(Saturated) / Count : 0.0, Count);
+}
+
+bool UHoverAuthoring::SetSupportHandOverride(AHoverPilot *Pilot, bool bEnabled, FRotator GunSpaceDelta, float Curl)
+{
+#if WITH_EDITOR
+    if (!Pilot)
+        return false;
+    Pilot->bSupportHandOverride = bEnabled;
+    Pilot->SupportHandOverrideRotation = GunSpaceDelta.Quaternion();
+    Pilot->SupportHandOverrideCurl = FMath::Clamp(Curl, 0.f, 1.6f);
+    return true;
+#else
+    return false;
+#endif
 }
 
 void UHoverAuthoring::CaptureWorldFrame(const FString &Filename)

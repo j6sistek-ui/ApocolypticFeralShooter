@@ -1,13 +1,17 @@
 #include "HoverPilot.h"
 #include "HoverCyberCity.h"
+#include "HoverNYCSurvival.h"
 #include "HoverCombatBridge.h"
 #include "HoverLocomotionBridge.h"
 #include "HoverTestController.h"
 #include "HoverAnimInstance.h"
 #include "HoverZombie.h"
 #include "HoverShotVisual.h"
+#include "HoverGunFeel.h"
+#include "HoverEffects.h"
 #include "HoverMotion.h"
 #include "HoverMovementComponent.h"
+#include "HLRawMovementComponent.h"
 #include "Settings/ZE_PlayerSettings.h"
 #include "Inventory/ZE_WeaponDefinition.h"
 #include "Weapons/ZE_Projectile.h"
@@ -19,6 +23,8 @@
 #include "Misc/ConfigCacheIni.h"
 #include "Survival/ZE_SurvivalComponent.h"
 #include "Survival/ZE_WaveGameModeSettings.h"
+#include "Zombies/ZE_ZombieCharacter.h"
+#include "Zombies/ZE_ZombieSettings.h"
 #include "Perception/AISense_Hearing.h"
 #include "EngineUtils.h"
 
@@ -31,6 +37,10 @@
 #include "Components/PoseableMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/PointLightComponent.h"
+#include "GameFramework/ForceFeedbackEffect.h"
+#include "Sound/SoundBase.h"
+#include "Components/AudioComponent.h"
 #include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
 #include "NiagaraFunctionLibrary.h"
@@ -40,6 +50,7 @@
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/SkeletalMeshSocket.h"
 #include "Engine/World.h"
 #include "Engine/PostProcessVolume.h"
 #include "Engine/DirectionalLight.h"
@@ -74,6 +85,61 @@ FHitResult TraceWeaponRay(UWorld *World, const FVector &Start, const FVector &En
         Hit = FHitResult();
     }
     return Hit;
+}
+
+// Component-space reference-pose transform of a socket (or, failing that, a bone) on a skeletal mesh.
+// Walks the reference skeleton directly so the offsets can be derived at BeginPlay, before the gun
+// component has ticked a pose.
+bool ResolveGunSocket(const USkeletalMesh *Mesh, FName Name, FTransform &Out)
+{
+    if (!Mesh || Name.IsNone())
+        return false;
+    const FReferenceSkeleton &Ref = Mesh->GetRefSkeleton();
+    const auto ComponentSpace = [&Ref](int32 Bone) {
+        FTransform Result = FTransform::Identity;
+        for (; Bone != INDEX_NONE; Bone = Ref.GetParentIndex(Bone))
+            Result = Result * Ref.GetRefBonePose()[Bone];
+        return Result;
+    };
+    if (const USkeletalMeshSocket *Socket = Mesh->FindSocket(Name))
+    {
+        const int32 Bone = Ref.FindBoneIndex(Socket->BoneName);
+        if (Bone == INDEX_NONE)
+            return false;
+        Out = Socket->GetSocketLocalTransform() * ComponentSpace(Bone);
+        return true;
+    }
+    const int32 Bone = Ref.FindBoneIndex(Name);
+    if (Bone == INDEX_NONE)
+        return false;
+    Out = ComponentSpace(Bone);
+    return true;
+}
+
+bool IsGunFeelZombie(const AActor *Actor)
+{
+    return Cast<AHoverZombie>(Actor) || Cast<AZE_ZombieCharacter>(Actor);
+}
+
+bool IsGunFeelCorpse(const AActor *Actor)
+{
+    if (const auto *Simple = Cast<AHoverZombie>(Actor))
+        return Simple->IsDead();
+    const auto *Zombie = Cast<AZE_ZombieCharacter>(Actor);
+    if (!Zombie)
+        return false;
+    // The vendor death flag is protected; read the reflected property instead of patching the plugin.
+    if (const auto *Dead = FindFProperty<FBoolProperty>(AZE_ZombieCharacter::StaticClass(), TEXT("bIsDead")))
+        return Dead->GetPropertyValue_InContainer(Zombie);
+    return Zombie->SurvivalComponent && Zombie->SurvivalComponent->GetHealth() <= 0;
+}
+
+bool IsGunFeelHeadshot(const AActor *Actor, const FHitResult &Hit)
+{
+    if (Cast<AHoverZombie>(Actor))
+        return Hit.BoneName.ToString().Contains(TEXT("head")); // Same rule as AHoverZombie::TakeDamage.
+    const auto *Zombie = Cast<AZE_ZombieCharacter>(Actor);
+    return Zombie && Zombie->ZombieData && Hit.BoneName == Zombie->ZombieData->Stats.HeadBoneName;
 }
 } // namespace
 
@@ -127,6 +193,20 @@ AHoverPilot::AHoverPilot(const FObjectInitializer &ObjectInitializer)
     // The hand supplies position; its animated rotation must not rotate the aim twice.
     WorldGun->SetupAttachment(GetRootComponent());
     WorldGun->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    // Rigged rifle pair: same rules as the static pair, hidden until ApplyGunRig gives it a mesh
+    // so the Ballista path renders nothing from it.
+    ViewGunSkel = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("FPSGunRig"));
+    ViewGunSkel->SetupAttachment(FirstPersonCamera);
+    ViewGunSkel->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    ViewGunSkel->SetGenerateOverlapEvents(false);
+    ViewGunSkel->CastShadow = false;
+    ViewGunSkel->SetOnlyOwnerSee(true);
+    ViewGunSkel->SetVisibility(false, true);
+    WorldGunSkel = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("HeldGunRig"));
+    WorldGunSkel->SetupAttachment(GetRootComponent());
+    WorldGunSkel->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    WorldGunSkel->SetGenerateOverlapEvents(false);
+    WorldGunSkel->SetVisibility(false, true);
 }
 
 void AHoverPilot::BeginPlay()
@@ -135,15 +215,53 @@ void AHoverPilot::BeginPlay()
     GetMesh()->AddTickPrerequisiteActor(this);
     SetCanBeDamaged(true); // Hit reactions remain active while invincible.
     GConfig->GetBool(TEXT("AFS.Graphics"), TEXT("Invincible"), bInvincible, GGameUserSettingsIni);
+    const auto *Policy = IHoverTestLevelPolicy::Get(GetWorld());
+    if (Policy && Policy->ForcesMortal())
+    {
+        bMortalLocked = true;
+        bInvincible = false;
+    }
+    bSurvivalRules = Policy && Policy->UsesSurvivalRules();
+    bSandboxResetAllowed = !Policy || Policy->AllowsSandboxReset();
     StartLocation = GetActorLocation();
     StartRotation = GetActorRotation();
     BodyYaw = StartRotation.Yaw;
     Assets = LoadObject<UHoverPilotAssets>(nullptr, TEXT("/Game/HoverPrototype/DA_HoverPilot.DA_HoverPilot"));
+    if (Assets)
+    {
+        // DA values first; ApplyGunRig overwrites them from the rig's sockets when asked to.
+        GunMuzzle = Assets->GunMuzzle;
+        GunForward = Assets->GunForward;
+        GunGrip = Assets->GunGrip;
+        GunSupportGrip = Assets->GunSupportGrip;
+        GunSight = Assets->GunSight;
+    }
     if (!Assets || !Assets->Glider || Assets->BodyParts.IsEmpty())
     {
         StatusMessage = TEXT("Prototype assets missing - run the asset setup script.");
         UE_LOG(LogTemp, Error, TEXT("HOVER: required prototype assets missing"));
         return;
+    }
+    // Section 5 gun feel is opt-in; without it every mode keeps the existing presentation.
+    bool EnhancedFeel = false;
+    GConfig->GetBool(TEXT("AFS.Gunplay"), TEXT("EnhancedFeel"), EnhancedFeel, GGameUserSettingsIni);
+    bEnhancedGunFeel = bEnhancedGunFeel || EnhancedFeel || FParse::Param(FCommandLine::Get(), TEXT("AFSGunFeel")) ||
+                       (Policy && Policy->EnablesEnhancedGunFeel());
+    if (bEnhancedGunFeel)
+    {
+        float ShakePercent = 100, RecoilPercent = 100, RumblePercent = 100;
+        GConfig->GetFloat(TEXT("AFS.Gunplay"), TEXT("ShakeScale"), ShakePercent, GGameUserSettingsIni);
+        GConfig->GetFloat(TEXT("AFS.Gunplay"), TEXT("RecoilScale"), RecoilPercent, GGameUserSettingsIni);
+        GConfig->GetFloat(TEXT("AFS.Gunplay"), TEXT("RumbleScale"), RumblePercent, GGameUserSettingsIni);
+        ShakeSetting = FMath::Clamp(ShakePercent, 0.f, 100.f) / 100.f;
+        RecoilSetting = FMath::Clamp(RecoilPercent, 0.f, 100.f) / 100.f;
+        if (auto *PC = Cast<APlayerController>(GetController()))
+            // From the class default, so a respawned pilot never compounds the scale.
+            PC->ForceFeedbackScale = GetDefault<APlayerController>(PC->GetClass())->ForceFeedbackScale *
+                                     FMath::Clamp(RumblePercent, 0.f, 100.f) / 100.f;
+        EnsureMuzzleLight();
+        UE_LOG(LogTemp, Display, TEXT("HOVER_GUNFEEL enabled shake=%.2f recoil=%.2f rumble=%.2f feel=%s"), ShakeSetting,
+               RecoilSetting, RumblePercent / 100.f, *GetNameSafe(GetGunFeel()));
     }
     for (int32 Index = 0; Index < Assets->BodyParts.Num(); ++Index)
     {
@@ -177,7 +295,6 @@ void AHoverPilot::BeginPlay()
             Component->SetMorphTarget(Morph.Key, Morph.Value);
         Parts.Add(Component);
     }
-    ViewGun->SetStaticMesh(Assets->Gun);
     ViewArms->SetSkeletalMesh(LoadObject<USkeletalMesh>(
         nullptr, TEXT("/Game/HoverPrototype/Weapons/FirstPerson/SK_Vexa_FPSArms.SK_Vexa_FPSArms")));
     ViewArms->SetAnimInstanceClass(UHoverViewAnimInstance::StaticClass());
@@ -185,24 +302,32 @@ void AHoverPilot::BeginPlay()
     ViewArms->SetDisablePostProcessBlueprint(true);
     ViewPoseHandle = ViewArms->RegisterOnBoneTransformsFinalizedDelegate(
         FOnBoneTransformsFinalizedMultiCast::FDelegate::CreateUObject(this, &AHoverPilot::FinalizeViewPose));
-    ViewGun->SetRelativeLocation(FVector(35, 18, -20));
-    ViewGun->SetRelativeRotation(FRotator(0, -90, 0));
-    WorldGun->SetStaticMesh(Assets->Gun);
-    if (Assets->GunOptic)
-        for (auto *Gun : {ViewGun.Get(), WorldGun.Get()})
-        {
-            auto *Optic = NewObject<UStaticMeshComponent>(this);
-            Optic->SetupAttachment(Gun);
-            Optic->SetStaticMesh(Assets->GunOptic);
-            // The small reflex lens is translucent; Nanite cannot render it.
-            Optic->SetForceDisableNanite(true);
-            Optic->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-            Optic->SetOnlyOwnerSee(Gun == ViewGun);
-            Optic->CastShadow = Gun != ViewGun;
-            Optic->RegisterComponent();
-        }
-    WorldGun->SetRelativeLocation(FVector(4, 2, 0));
-    WorldGun->SetRelativeRotation(FRotator(0, 90, -90));
+    GunPoseHandles[0] = ViewGunSkel->RegisterOnBoneTransformsFinalizedDelegate(
+        FOnBoneTransformsFinalizedMultiCast::FDelegate::CreateUObject(this, &AHoverPilot::FinalizeGunPose,
+                                                                        ViewGunSkel.Get()));
+    GunPoseHandles[1] = WorldGunSkel->RegisterOnBoneTransformsFinalizedDelegate(
+        FOnBoneTransformsFinalizedMultiCast::FDelegate::CreateUObject(this, &AHoverPilot::FinalizeGunPose,
+                                                                        WorldGunSkel.Get()));
+    if (Assets->RiggedGun)
+    {
+        // The loose Weapon|Rigged fields are the default rig: every definition GunRigs has no key for.
+        DefaultGunRig = NewObject<UHoverGunRig>(this, TEXT("DefaultGunRig"), RF_Transient);
+        DefaultGunRig->Mesh = Assets->RiggedGun;
+        DefaultGunRig->Idle = Assets->GunIdle;
+        DefaultGunRig->Fire = Assets->GunFire;
+        DefaultGunRig->DryFire = Assets->GunDryFire;
+        DefaultGunRig->Reload = Assets->GunReload;
+        DefaultGunRig->Chamber = Assets->GunChamber;
+        DefaultGunRig->MuzzleSocket = Assets->GunMuzzleSocket;
+        DefaultGunRig->EjectSocket = Assets->GunEjectSocket;
+        DefaultGunRig->SightSocket = Assets->GunSightSocket;
+        DefaultGunRig->GripSocket = Assets->GunGripSocket;
+        DefaultGunRig->SupportSocket = Assets->GunSupportSocket;
+        DefaultGunRig->bSocketsDriveOffsets = Assets->bRiggedGunSocketsDriveOffsets;
+        DefaultGunRig->Description = TEXT("DA_HoverPilot Weapon|Rigged fields");
+    }
+    // Null keeps the static Ballista. The rifle's OnEquipped re-applies per held definition.
+    ApplyGunRig(DefaultGunRig);
     BoardActor = GetWorld()->SpawnActor<AActor>();
     BoardActor->SetOwner(this);
     BoardBody = NewObject<UBoxComponent>(BoardActor, TEXT("HoverCollision"));
@@ -285,6 +410,53 @@ void AHoverPilot::BeginPlay()
         Combat = NewObject<UHoverCombatBridge>(this, TEXT("CyberCitySystems"));
         Combat->RegisterComponent();
     }
+    // Life Engine rides along only under NYC Survival rules (owner 2026-10-31: "load Life Engine, but ONLY in the
+    // survival mode in NYC, so I can switch out and recheck the locomotion in the other version"). The solver never
+    // polls input itself here: UpdateLifeEngine feeds the pilot's sampled sticks and keys and the resolved walk /
+    // sprint speed every tick, and it ticks after this actor so the feed is fresh.
+    if (bSurvivalRules)
+    {
+        LifeMovement = NewObject<UHLRawMovementComponent>(this, TEXT("LifeEngine"));
+        LifeMovement->bAutoActivate = false;
+        LifeMovement->PrimaryComponentTick.bStartWithTickEnabled = false;
+        LifeMovement->bAutoLoadMovementSettings = false;
+        LifeMovement->RegisterComponent();
+        LifeMovement->SetUpdatedComponent(GetCapsuleComponent());
+        LifeMovement->bEnableKeyboardMovement = false;
+        LifeMovement->bEnableJumpInput = false;
+        LifeMovement->bEnableMouseLook = false;
+        LifeMovement->bEnableCrouch = false;
+        LifeMovement->bEnableDebugDraw = false;
+        LifeMovement->bEnableStepUp = true;
+        LifeMovement->StepHeight = LifeMovement->MaxStepUpDelta = GetCharacterMovement()->MaxStepHeight;
+        // Step over anything that is not walkable floor, as the character movement does; the solver's default only
+        // steps near-vertical faces (normal z < 0.15) and sloped rubble between that and 46 deg trapped her.
+        LifeMovement->StepWallNormalZLimit = 0.68f;
+        LifeMovement->AddTickPrerequisiteActor(this);
+        GetMesh()->AddTickPrerequisiteComponent(LifeMovement);
+        LifeMovement->OnLanded.AddDynamic(this, &AHoverPilot::OnLifeEngineLanded);
+        bLifeEngine = true;
+        UE_LOG(LogTemp, Display, TEXT("LIFE_ENGINE created for NYC Survival (preset %d), on by default"),
+               int32(LifeMovement->MovementPreset));
+    }
+    if (Policy && Policy->ForcesThirdPerson())
+    {
+        bReview = true;
+        bForcedThirdPerson = true;
+        // Section 2 Â§4 OTS camera: 300 / 210 cm arm, (0, 58, 42) offset, 88 / 68 FOV. Owner 2026-10-31: "the
+        // camera needs to stay at a fixed distance, except zooming or maybe sprinting", so the positional lag
+        // (up to 60 cm of trailing) is off; the arm only changes for the aim zoom and a sprint stretch.
+        // bDoCollisionTest stays on: zombie capsules and meshes ignore ECC_Camera.
+        ReviewArm->TargetArmLength = Assets->SurvivalArmLength;
+        ReviewArm->SocketOffset = Assets->SurvivalSocketOffset;
+        ReviewArm->bEnableCameraLag = false;
+        ReviewArm->bEnableCameraRotationLag = false;
+        ReviewCamera->SetFieldOfView(Assets->SurvivalHipFOV);
+        // Spring-arm collision can pin the camera against Vexa; UpdateCameraBodyHide then hides her
+        // from her own view (bOwnerNoSee), and her ground shadow must stay while she is hidden.
+        for (USkeletalMeshComponent *Part : Parts)
+            Part->SetCastHiddenShadow(true);
+    }
     SetView();
     WeaponPoseHandle = GetMesh()->RegisterOnBoneTransformsFinalizedDelegate(
         FOnBoneTransformsFinalizedMultiCast::FDelegate::CreateUObject(this, &AHoverPilot::UpdateGunTransform));
@@ -303,6 +475,10 @@ void AHoverPilot::EndPlay(const EEndPlayReason::Type Reason)
 {
     GetMesh()->UnregisterOnBoneTransformsFinalizedDelegate(WeaponPoseHandle);
     ViewArms->UnregisterOnBoneTransformsFinalizedDelegate(ViewPoseHandle);
+    ViewGunSkel->UnregisterOnBoneTransformsFinalizedDelegate(GunPoseHandles[0]);
+    WorldGunSkel->UnregisterOnBoneTransformsFinalizedDelegate(GunPoseHandles[1]);
+    GetWorldTimerManager().ClearTimer(GunClipTimer);
+    GetWorldTimerManager().ClearTimer(GunReloadEjectTimer);
     if (bKnockedDown && KnockdownController.IsValid())
         KnockdownController->SetIgnoreMoveInput(false);
     if (DefeatedController.IsValid())
@@ -515,7 +691,12 @@ void AHoverPilot::HoverMount()
 
 void AHoverPilot::HoverView()
 {
+    // Survival only forces the DEFAULT view (BeginPlay sets bReview with the OTS arm); the design keeps
+    // F5 / Menu as a toggle to first person (NYC_ZOMBIE_SURVIVAL_DESIGN "F5/Menu toggles to first person").
+    // The old early return here left the key dead in game, so the editor viewport ate it instead
+    // (owner 2026-10-30: "it was supposed to toggle first person and 3rd person").
     bReview = !bReview;
+    StatusMessage = bReview ? TEXT("Third person") : TEXT("First person");
     SetView();
 }
 
@@ -528,13 +709,63 @@ void AHoverPilot::SetView()
     FirstPersonCamera->SetActive(FirstPerson);
     ReviewCamera->SetActive(!FirstPerson);
     const bool Swinging = bMeleeEquipped || (MeleeWeapon && MeleeWeapon->IsSwinging());
-    ViewGun->SetVisibility(!Swinging && FirstPerson, true);
+    ActiveGunPrimitive(false)->SetVisibility(!Swinging && FirstPerson, true);
     ViewArms->SetVisibility(FirstPerson);
-    WorldGun->SetVisibility(!Swinging && !FirstPerson && (bAiming || GunRaisedTime > 0), true);
+    ActiveGunPrimitive(true)->SetVisibility(!Swinging && !FirstPerson && (bAiming || GunRaisedTime > 0), true);
     // The full-body riding pose crosses the eye camera during pitch and recoil.
     // Keep it for the external view; the FPS camera renders its own rifle.
+    // A third-person camera pinned inside her (UpdateCameraBodyHide) keeps the body hidden.
+    if (FirstPerson && bCameraHidesBody)
+        ApplyCameraBodyHide(false);
     for (USkeletalMeshComponent *Part : Parts)
-        Part->SetOwnerNoSee(FirstPerson);
+        Part->SetOwnerNoSee(FirstPerson || bCameraHidesBody);
+}
+
+void AHoverPilot::ApplyCameraBodyHide(bool bHide)
+{
+    bCameraHidesBody = bHide;
+    for (USkeletalMeshComponent *Part : Parts)
+    {
+        // Forced third person keeps hidden shadows on permanently (BeginPlay); other review modes
+        // keep the shadow only while hidden, so their first-person view is unchanged.
+        if (!bForcedThirdPerson)
+            Part->SetCastHiddenShadow(bHide);
+        Part->SetOwnerNoSee(bHide || !bReview);
+    }
+    // The rifle and its optic sit in the same frame. Owner-only: its SetVisibility logic is untouched.
+    UPrimitiveComponent *HeldGun = ActiveGunPrimitive(true);
+    HeldGun->SetOwnerNoSee(bHide);
+    for (USceneComponent *Child : HeldGun->GetAttachChildren())
+        if (auto *Primitive = Cast<UPrimitiveComponent>(Child))
+            Primitive->SetOwnerNoSee(bHide);
+}
+
+void AHoverPilot::UpdateCameraBodyHide()
+{
+    if (!bReview || !Assets)
+    {
+        if (bCameraHidesBody)
+            ApplyCameraBodyHide(false);
+        return;
+    }
+    // Camera-to-capsule-centre distance: the spring arm's collision probe (bDoCollisionTest) can
+    // collapse the 300 cm arm to near zero when zombies push her into the truck, filling the frame
+    // with her own mesh. Hysteresis keeps a jostled camera from flickering her in and out.
+    const float CamDist = FVector::Dist(ReviewCamera->GetComponentLocation(), GetActorLocation());
+    const float HideDistance = Assets->SurvivalMeshHideDistance;
+    const bool bHide = CamDist < (bCameraHidesBody ? HideDistance + 15.f : HideDistance);
+    if (bHide == bCameraHidesBody)
+        return;
+    ApplyCameraBodyHide(bHide);
+    ++CameraBodyHideCount;
+    const float Now = GetWorld()->GetTimeSeconds();
+    if (Now - LastCameraHideLog >= .5f)
+    {
+        LastCameraHideLog = Now;
+        UE_LOG(LogTemp, Display, TEXT("HOVER_CAM_HIDE %s dist=%.0f threshold=%.0f arm=%.0f count=%d"),
+               bHide ? TEXT("hide") : TEXT("show"), CamDist, HideDistance, ReviewArm->TargetArmLength,
+               CameraBodyHideCount);
+    }
 }
 
 void AHoverPilot::OnStartCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust)
@@ -575,12 +806,14 @@ void AHoverPilot::HoverReset()
     if (DefeatedController.IsValid())
         DefeatedController->SetIgnoreMoveInput(false);
     DefeatedController.Reset();
-    SandboxHealth = 100.f;
+    SandboxHealth = GetMaxHealth();
     if (Combat && Combat->Survival)
-        Combat->Survival->SetHealth(100.f);
+        Combat->Survival->SetHealth(SandboxHealth);
     RespawnGraceUntil = GetWorld()->GetTimeSeconds() + 2.f;
     if (LocomotionBridge)
         LocomotionBridge->CancelAction();
+    if (LifeMovement)
+        LifeMovement->SetHLVelocity(FVector::ZeroVector);
     if (!BoardActor)
         return;
     BoardActor->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
@@ -612,8 +845,87 @@ void AHoverPilot::HoverReset()
 
 void AHoverPilot::HoverStatus()
 {
-    UE_LOG(LogTemp, Display, TEXT("HOVER_STATE mounted=%d aim=%d pos=%s velocity=%s targetZ=%.1f"), bMounted, bAiming,
-           *GetActorLocation().ToString(), *GetVelocity().ToString(), TargetAltitude);
+    UE_LOG(LogTemp, Display, TEXT("HOVER_STATE mounted=%d aim=%d pos=%s velocity=%s targetZ=%.1f lifeEngine=%d/%d"),
+           bMounted, bAiming, *GetActorLocation().ToString(), *GetVelocity().ToString(), TargetAltitude, bLifeEngine,
+           bLifeEngineActive);
+}
+
+void AHoverPilot::LifeEngine(int32 Mode)
+{
+    if (!LifeMovement)
+    {
+        if (GEngine)
+            GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Orange, TEXT("Life Engine lives only in NYC Survival"));
+        return;
+    }
+    bLifeEngine = Mode < 0 ? !bLifeEngine : Mode != 0;
+    UpdateLifeEngine(0.f);
+    if (GEngine)
+        GEngine->AddOnScreenDebugMessage(-1, 4.f, bLifeEngine ? FColor::Green : FColor::Yellow,
+                                         bLifeEngine ? TEXT("Life Engine ON (Source-style movement)")
+                                                     : TEXT("Life Engine OFF (character movement)"));
+    UE_LOG(LogTemp, Display, TEXT("LIFE_ENGINE %s"), bLifeEngine ? TEXT("on") : TEXT("off"));
+}
+
+void AHoverPilot::UpdateLifeEngine(float DT)
+{
+    if (!LifeMovement)
+        return;
+    auto *Move = GetCharacterMovement();
+    // AFS 2026-10-31: the NYC pawn is the parkour template, so it cannot be excluded outright (the first proof
+    // never activated). The template takes over only when it changes the movement mode (vault, wall run) or
+    // plays a root-motion montage; the solver steps aside for that and resumes once she is back on the ground.
+    const auto *Anim = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+    const bool RootMotion = Anim && Anim->GetRootMotionMontageInstance() != nullptr;
+    if (bLifeEngineActive && (Move->MovementMode != MOVE_None || RootMotion))
+        bLifeEngineTemplateOverride = true;
+    else if (bLifeEngineTemplateOverride && Move->IsMovingOnGround() && !RootMotion)
+        bLifeEngineTemplateOverride = false;
+    const bool Want = bLifeEngine && !bMounted && !bLifeEngineTemplateOverride && !bDefeated && !bKnockedDown &&
+                      TransitionTime <= 0;
+    if (Want != bLifeEngineActive)
+    {
+        bLifeEngineActive = Want;
+        if (Want)
+        {
+            LifeMovement->SetHLVelocity(Move->Velocity);
+            Move->StopMovementImmediately();
+            Move->SetMovementMode(MOVE_None);
+            LifeMovement->Activate(true);
+        }
+        else
+        {
+            LifeMovement->Deactivate();
+            // Leave a mode the template already chose alone; otherwise hand back walking or falling.
+            if (Move->MovementMode == MOVE_None)
+                Move->SetMovementMode(LifeMovement->bGrounded ? MOVE_Walking : MOVE_Falling);
+            Move->Velocity = LifeMovement->GetHLVelocity();
+        }
+        UE_LOG(LogTemp, Display, TEXT("LIFE_ENGINE %s%s"), Want ? TEXT("active") : TEXT("suspended"),
+               bLifeEngineTemplateOverride ? TEXT(" (parkour template)") : TEXT(""));
+    }
+    if (!bLifeEngineActive)
+        return;
+    // The pilot's own sampled input (sticks and keys alike) drives the solver; the speed target follows the
+    // walk / sprint / crouch value UpdateInput already resolved on the character movement, the solver keeps its
+    // own acceleration, friction, gravity and jump. Velocity is mirrored from the solver's last tick (it ticks
+    // after this actor) so GetVelocity() stays truthful for the animation, aim and camera code.
+    LifeMovement->InputForward = ForwardInput;
+    LifeMovement->InputRight = SideInput;
+    const auto *PC = Cast<APlayerController>(GetController());
+    LifeMovement->bJumpHeld =
+        PC && (PC->IsInputKeyDown(EKeys::Gamepad_FaceButton_Bottom) || PC->IsInputKeyDown(EKeys::SpaceBar));
+    LifeMovement->MaxGroundSpeed = bIsCrouched ? Move->MaxWalkSpeedCrouched : Move->MaxWalkSpeed;
+    Move->Velocity = LifeMovement->GetHLVelocity();
+}
+
+void AHoverPilot::OnLifeEngineLanded()
+{
+    // Same landing feel as the character movement path; the mirrored velocity still holds the fall speed.
+    FHitResult Hit;
+    Hit.ImpactNormal = LifeMovement ? LifeMovement->GroundNormal : FVector::UpVector;
+    Hit.ImpactPoint = GetActorLocation() - FVector(0, 0, GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+    Landed(Hit);
 }
 
 void AHoverPilot::UpdateInput(float DT)
@@ -678,12 +990,25 @@ void AHoverPilot::UpdateInput(float DT)
                                   (TemplateOnFoot ? 0.f : MouseY * .12f),
                               -75.f, 75.f);
     Look.Roll = 0;
+    if (RecoilPitchDebt > 0)
+    {
+        // Pulling down against the climb pays the debt, so auto-recovery never over-corrects.
+        const float UserPitch = Look.Pitch - FRotator::NormalizeAxis(PC->GetControlRotation().Pitch);
+        if (UserPitch < 0)
+            RecoilPitchDebt = FMath::Max(0.f, RecoilPitchDebt + UserPitch);
+    }
     PC->SetControlRotation(Look);
+    RecoilTrackedPitch = Look.Pitch;
     bBoostHeld = Down(EKeys::Gamepad_LeftThumbstick) || Down(EKeys::LeftShift);
     if (!bMounted)
     {
         auto *Move = GetCharacterMovement();
         const bool Sprint = Down(EKeys::Gamepad_LeftThumbstick);
+        // Promoted for the survival sprint-fire gate: a sprint is the held run with real stick input.
+        const bool Sprinting = Sprint && !bIsCrouched && FVector2D(ForwardInput, SideInput).Size() > .6f;
+        if (bSprinting && !Sprinting)
+            SprintEndTime = GetWorld()->GetTimeSeconds();
+        bSprinting = Sprinting;
         const auto *CyberMode = Cast<AHoverCyberCityGameMode>(GetWorld()->GetAuthGameMode());
         const float PowerUpSpeed = CyberMode ? CyberMode->GetSpeedBonus() : 1.f;
         const float RunSpeed = LiveSettings ? LiveSettings->SprintSpeed : 900.f;
@@ -694,7 +1019,11 @@ void AHoverPilot::UpdateInput(float DT)
         Move->MinAnalogWalkSpeed =
             Sprint && !bIsCrouched && FVector2D(ForwardInput, SideInput).Size() > .6f ? RunSpeed * PowerUpSpeed : 0.f;
     }
-    const bool Hold = Down(EKeys::Gamepad_FaceButton_Left) || Down(EKeys::X);
+    // NYC Survival keeps the glider (owner 2026-10-29: a future quick-escape / travel feature, maybe
+    // timed or fuelled, outdoors only). There the ride moves to a held Y / G so a long press on the
+    // reload button never mounts it mid-fight; every other level keeps hold-X mount, tap-X reload.
+    const bool Hold = bSurvivalRules ? (Down(EKeys::Gamepad_FaceButton_Top) || Down(EKeys::G))
+                                     : (Down(EKeys::Gamepad_FaceButton_Left) || Down(EKeys::X));
     const bool HasInteractable = Combat && !Combat->GetPrompt().IsEmpty();
     if (Hold && !bHoldConsumed && !HasInteractable)
     {
@@ -707,10 +1036,23 @@ void AHoverPilot::UpdateInput(float DT)
     }
     if (!Hold)
     {
-        if (Combat && HoldTime > 0 && HoldTime < .65f && !bHoldConsumed && !HasInteractable)
+        if (!bSurvivalRules && Combat && HoldTime > 0 && HoldTime < .65f && !bHoldConsumed && !HasInteractable)
             Combat->Reload();
+        // NYC Survival (owner 2026-10-31: "Y to switch weapons, have the pistol on hand"): a tap of Y / G cycles
+        // to the next weapon on the quickbar; the hold still mounts the board.
+        else if (bSurvivalRules && Combat && HoldTime > 0 && HoldTime < .65f && !bHoldConsumed && !HasInteractable &&
+                 IsOnFoot())
+            Combat->CycleWeapon();
         HoldTime = 0;
         bHoldConsumed = false;
+    }
+    if (bSurvivalRules)
+    {
+        // X / square is reload only here: any press length reloads on release.
+        const bool ReloadKey = Down(EKeys::Gamepad_FaceButton_Left) || Down(EKeys::X);
+        if (!ReloadKey && bWasReloadKey && Combat && !HasInteractable && IsOnFoot())
+            Combat->Reload();
+        bWasReloadKey = ReloadKey;
     }
     const bool JumpPressed = Down(EKeys::Gamepad_FaceButton_Bottom) || Down(EKeys::SpaceBar);
     if (JumpPressed && !bWasJump && TransitionTime <= 0)
@@ -737,7 +1079,8 @@ void AHoverPilot::UpdateInput(float DT)
         HoverView();
     bWasView = View;
     const bool Reset = Down(EKeys::Home) || (!Combat && Down(EKeys::R));
-    if (Reset && !bWasReset)
+    // Survival has no teleport-and-heal: 0 HP is game over there (IHoverTestLevelPolicy::AllowsSandboxReset).
+    if (Reset && !bWasReset && bSandboxResetAllowed)
         HoverReset();
     bWasReset = Reset;
     const bool Aim = !bMeleeEquipped && (PC->GetInputAnalogKeyState(EKeys::Gamepad_LeftTriggerAxis) > .2f ||
@@ -764,7 +1107,10 @@ void AHoverPilot::UpdateInput(float DT)
     const bool TriggerHeld = FirePressed || Down(EKeys::LeftMouseButton);
     if (!TriggerHeld)
         bSuppressFireUntilRelease = false;
-    const bool CanFire = TriggerHeld && !bSuppressFireUntilRelease && TransitionTime <= 0;
+    // Section 5 sprint-fire gate (survival rules only): no shot while sprinting or within 0.15 s after.
+    const bool SprintBlocked =
+        bSurvivalRules && IsOnFoot() && (bSprinting || GetWorld()->GetTimeSeconds() - SprintEndTime < .15f);
+    const bool CanFire = TriggerHeld && !bSuppressFireUntilRelease && TransitionTime <= 0 && !SprintBlocked;
     if (bMeleeEquipped && IsOnFoot())
     {
         if (Combat)
@@ -1068,8 +1414,17 @@ void AHoverPilot::UpdateAppearance(float DT)
     }
     FirstPersonCamera->SetFieldOfView(FMath::FInterpTo(FirstPersonCamera->FieldOfView,
                                                        bAiming ? 65.f : (bBoost && bMounted ? 105.f : 95.f), DT, 10.f));
-    ReviewCamera->SetFieldOfView(FMath::FInterpTo(ReviewCamera->FieldOfView, bAiming ? 72.f : 90.f, DT, 10.f));
+    // The forced third-person (NYC Survival) OTS values; the 90 / 72 review camera everywhere else.
+    const float ReviewFOV =
+        bForcedThirdPerson ? (bAiming ? Assets->SurvivalAimFOV : Assets->SurvivalHipFOV) : (bAiming ? 72.f : 90.f);
+    ReviewCamera->SetFieldOfView(FMath::FInterpTo(ReviewCamera->FieldOfView, ReviewFOV, DT, 10.f));
+    if (bForcedThirdPerson)
+        ReviewArm->TargetArmLength = FMath::FInterpTo(
+            ReviewArm->TargetArmLength,
+            bAiming ? Assets->SurvivalAimArmLength : Assets->SurvivalArmLength + (bSprinting ? 40.f : 0.f), DT, 6.f);
     UpdateCameraPosture(DT);
+    // Before the board early-out: the body hide must run every third-person frame.
+    UpdateCameraBodyHide();
     WeaponAimAlpha = FMath::FInterpTo(WeaponAimAlpha, bAiming ? 1.f : 0.f, DT, 12.f);
     const float LockTarget = bMounted && !bSteppingOn ? 1.f : 0.f;
     // Substep the pad spring without discarding elapsed time on slow frames.
@@ -1125,7 +1480,9 @@ void AHoverPilot::UpdateAppearance(float DT)
     {
         Instance->FootLock = bMounted ? 1.f : 0.f;
         Instance->bProne = bProne;
-        Instance->bSupportedProne = UsesSupportedProne() && GetCharacterMovement()->IsMovingOnGround();
+        const bool OnGround = bLifeEngineActive ? LifeMovement->bGrounded : GetCharacterMovement()->IsMovingOnGround();
+        const bool InAir = bLifeEngineActive ? !LifeMovement->bGrounded : GetCharacterMovement()->IsFalling();
+        Instance->bSupportedProne = UsesSupportedProne() && OnGround;
         GroundContactTime =
             IsOnFoot() && (bProne || GroundSlideTime > 0) ? .4f : FMath::Max(0.f, GroundContactTime - DT);
         Instance->bGroundContacts = false;
@@ -1167,7 +1524,7 @@ void AHoverPilot::UpdateAppearance(float DT)
         Instance->Locomotion = Assets->Locomotion;
         Instance->LocomotionInput = FVector(GroundDirection, Speed, 0);
         const bool Turning = !bMounted && Speed < 12.f && FMath::Abs(GroundYawRate) > 8.f;
-        Instance->bGroundLocomotion = !bMounted && !GetCharacterMovement()->IsFalling() && !Turning;
+        Instance->bGroundLocomotion = !bMounted && !InAir && !Turning;
         Instance->SequenceRate = Turning ? FMath::Clamp(FMath::Abs(GroundYawRate) / 95.f, .25f, 1.4f) : 1.f;
         Instance->RideBlend = Assets->RideBlend;
         Instance->RideAssets = Assets;
@@ -1184,15 +1541,42 @@ void AHoverPilot::UpdateAppearance(float DT)
             FMath::Clamp(FMath::FindDeltaAngleDegrees(GetActorRotation().Yaw, GetControlRotation().Yaw) / 90.f, -1.f,
                          1.f),
             FMath::Clamp((FRotator::NormalizeAxis(GetControlRotation().Pitch) - BoardPitch) / 60.f, -1.f, 1.f), 0);
-        Instance->RifleAim = bMounted && Assets->RideGunPose ? Assets->RideGunPose : Assets->RifleAim;
+        // Stance pose per rig (a pistol is held two-handed on one grip, not shouldered like a rifle).
+        Instance->RifleAim = bMounted && Assets->RideGunPose ? Assets->RideGunPose.Get() : GetStanceAimPose();
         Instance->RifleFire = bMounted ? Assets->Fire.Get() : nullptr;
         Instance->ShotSerial = ShotsFired;
+        // Through a rigged reload no body action plays (AHoverCyberRifle::Reload) and PlayGunReload holds
+        // GunRaisedTime, so this stays true and the support IK keeps its full weight on the moving target.
         Instance->bAiming =
             (bAiming || GunRaisedTime > 0) && !(LocomotionBridge && LocomotionBridge->IsActionPlaying());
-        Instance->SupportGripOffset = Assets->GunSupportGrip - Assets->GunGrip;
+        // The aim layer's settle clock for the hand-rest cache (UpdateGunTransform): UpperBody blends in at 10/s,
+        // so .5 s is within 1 % of the stance pose and hand_r reads as the pose holds it, not mid-blend.
+        AimLayerUpTime = Instance->bAiming && !bMounted && Instance->RifleAim ? AimLayerUpTime + DT : 0.f;
+        // Live: the rig's hand_l_target bone as the current Reload clip has placed it, else the static grip_l.
+        Instance->SupportGripOffset = SupportGripOffset(WorldGunSkel);
+        // The IK offset is measured from where the gun is seated (UpdateGunTransform): palm or wrist.
+        Instance->bGripAtPalm = bRiggedGun && GunRig && GunRig->bGripAtPalm;
+        // Including the rig's grip rotation (GripRotationOffset): the IK node's gun frame must be the drawn gun's.
         Instance->WeaponRotation =
             GetMesh()->GetComponentQuat().Inverse() * GetControlRotation().Quaternion() *
-            FQuat::FindBetweenNormals(Assets->GunForward.GetSafeNormal(), FVector::ForwardVector);
+            FQuat::FindBetweenNormals(GunForward.GetSafeNormal(), FVector::ForwardVector) * GunGripRotation();
+        // Design B1: the same bone's rotation delta and local scale X are the hand's turn and finger curl.
+        SupportHandPose(WorldGunSkel, Instance->SupportHandRotation, Instance->SupportHandCurl);
+#if WITH_EDITOR
+        if (bSupportHandOverride)
+        {
+            Instance->SupportHandRotation = SupportHandOverrideRotation;
+            Instance->SupportHandCurl = SupportHandOverrideCurl;
+        }
+#endif
+        // Design A2: the rigged gun is drawn at the right hand (same rule as the held gun's visibility below, minus
+        // the aim-exit tail); the support IK then runs at full weight through hit reacts and actions that drop
+        // bAiming, so the left hand stays on the gun the right hand carries. Never while mounted (the glider poses
+        // place both hands themselves).
+        const bool MeleeNow = bMeleeEquipped || (MeleeWeapon && MeleeWeapon->IsSwinging());
+        Instance->bRiggedGunUp = bRiggedGun && !bMounted && !MeleeNow && (bAiming || GunRaisedTime > 0);
+        // Design A1: the stance fire additive (restarted per shot in the proxy) replaces the driver montage.
+        Instance->StanceFireAdd = GetStanceFireAdditive(Instance->StanceRecoilScale);
         Instance->RiderLean = bMounted ? RiderLean : 0;
         FVector Feet[2];
         for (int32 I = 0; I < 2; ++I)
@@ -1212,8 +1596,9 @@ void AHoverPilot::UpdateAppearance(float DT)
         Instance->RightFoot = Feet[1];
     }
     const bool Swinging = bMeleeEquipped || (MeleeWeapon && MeleeWeapon->IsSwinging());
-    WorldGun->SetVisibility(!Swinging && bReview && (bAiming || GunRaisedTime > 0 || AimExitTime > 0), true);
-    ViewGun->SetVisibility(!Swinging && !bReview, true);
+    ActiveGunPrimitive(true)->SetVisibility(!Swinging && bReview && (bAiming || GunRaisedTime > 0 || AimExitTime > 0),
+                                            true);
+    ActiveGunPrimitive(false)->SetVisibility(!Swinging && !bReview, true);
     ViewArms->SetVisibility(!bReview);
     UpdateGunTransform();
     const bool Powered = bMounted && TransitionTime <= 0 && !bSteppingOn;
@@ -1322,40 +1707,107 @@ void AHoverPilot::UpdateGunTransform()
     const float AimDepth = Hit.bBlockingHit ? FVector::DotProduct(Hit.ImpactPoint - Eye, AimForward) : 50000.f;
     const float MinimumDepth = FMath::Max(180.f, FVector::DotProduct(GetMuzzlePosition() - Eye, AimForward) + 180.f);
     const FVector Target = Eye + AimForward * FMath::Max(AimDepth, MinimumDepth);
-    const FQuat Basis = FQuat::FindBetweenNormals(Assets->GunForward.GetSafeNormal(), FVector::ForwardVector);
-    const FVector Hand = GetMesh()->GetSocketLocation(TEXT("hand_r"));
+    const FQuat Basis = FQuat::FindBetweenNormals(GunForward.GetSafeNormal(), FVector::ForwardVector);
+    // The gun hand is the anchor: the grip rides it and the gun takes its rotation from the aim ray, never
+    // from the hand, so the right hand holds still through a reload while the body keeps its aim pose.
+    // A rig that asks for it (bGripAtPalm) seats grip_r at the palm centre, where the fingers close, rather
+    // than at the wrist joint about 5 cm behind it; this is the same midpoint FHoverSupportHandNode gives
+    // the left hand and the first-person arms already use (HandPose below). The Ballista keeps its wrist offset.
+    FVector Hand = GetMesh()->GetSocketLocation(TEXT("hand_r"));
+    if (bRiggedGun && GunRig && GunRig->bGripAtPalm && GetMesh()->DoesSocketExist(TEXT("middle_01_r")))
+        Hand = FMath::Lerp(Hand, GetMesh()->GetSocketLocation(TEXT("middle_01_r")), .5f);
+    // The palm goes on the rig's SEAT (grip_r + GripSeatOffset: the grip's middle, not its top; 2026-10-31 "fist at
+    // the bottom of the receiver, grip hanging empty"), and the gun turns by the rig's GripRotationOffset about that
+    // seat so the grip axis runs through the fist. The convergence below keeps aiming the aim-ray frame; the offset's
+    // pitch/yaw part is what the drawn barrel then deviates from the ray by (the rig keeps it under 6 deg).
+    const FVector Seat = GunSeatPoint();
+    const FQuat GripQ = GunGripRotation();
     FQuat WorldRotation = GetControlRotation().Quaternion() * Basis;
     for (int32 I = 0; I < 3; ++I)
     {
-        const FVector Origin = Hand - WorldRotation.RotateVector(Assets->GunGrip);
-        const FVector Muzzle = Origin + WorldRotation.RotateVector(Assets->GunMuzzle);
+        const FVector Origin = Hand - (WorldRotation * GripQ).RotateVector(Seat);
+        const FVector Muzzle = Origin + (WorldRotation * GripQ).RotateVector(GunMuzzle);
         WorldRotation = (Target - Muzzle).Rotation().Quaternion() * Basis;
     }
     const float RecoilStrength = GunRecoil * FMath::Lerp(1.f, .55f, WeaponAimAlpha);
     const FQuat Kick = FRotator(Assets->GunRecoilPitch * RecoilStrength, 0, 0).Quaternion();
     // Pitch around the grip in third person so the rifle stays in her hand.
     WorldRotation = WorldRotation * Basis.Inverse() * Kick * Basis;
-    WorldGun->SetWorldLocationAndRotation(Hand - WorldRotation.RotateVector(Assets->GunGrip), WorldRotation);
+    GunAimWorldRotation = WorldRotation;
+    GunHandKick = FQuat::Identity;
+    GunHandKickDeg = 0.f;
+    if (bRiggedGun)
+    {
+        // The gun rides the right hand's kick (2026-10-30 23:30, "her hand is not on the grip"). The stance fire
+        // additive turns hand_r; the grip already tracks the palm's POSITION, so only the rotation (and the fingers,
+        // held in FHoverStanceFireNode) peeled the hand off the grip. The rest is hand_r in the settled aim pose,
+        // re-read on every quiet frame (so the aim loop's own sway never accumulates) and frozen from the shot on,
+        // so what reaches the gun is exactly the additive's deviation; dropped when the layer goes down (hit reacts,
+        // parkour, the lowered gun) or the stance pose changes, since hand_r then moves for other reasons. Pitch
+        // aiming never enters: the arms hold the pose whatever the control pitch (no aim-offset layer).
+        const float Now = GetWorld()->GetTimeSeconds();
+        if (ShotsFired != GunHandShotSerial)
+        {
+            GunHandShotSerial = ShotsFired;
+            LastShotWorldTime = Now;
+        }
+        float AddScale;
+        const UAnimSequence *Add = GetStanceFireAdditive(AddScale);
+        const bool Quiet = !Add || Now - LastShotWorldTime > Add->GetPlayLength() + .1f;
+        const bool Reloading = Combat && Combat->GetWeapon() && Combat->GetWeapon()->IsReloading();
+        UAnimSequence *Stance = GetStanceAimPose();
+        const FQuat HandNow = GetMesh()->GetSocketTransform(TEXT("hand_r"), RTS_Component).GetRotation();
+        if (bMounted || Stance != GunHandRestStance || AimLayerUpTime <= 0.f)
+        {
+            bGunHandRestValid = false;
+            GunHandRestStance = Stance;
+        }
+        if (!bMounted && Quiet && !Reloading && AimLayerUpTime > .5f)
+        {
+            GunHandRestRotation = HandNow;
+            bGunHandRestValid = true;
+        }
+        if (bGunHandRestValid)
+        {
+            // Component-space delta, clamped as a safety, then the same turn about the same axes in world: a hand
+            // pitching up kicks the muzzle up. The IK node applies the identical delta to its gun frame.
+            GunHandKick = HoverClampRotation(HandNow * GunHandRestRotation.Inverse(), GunHandKickMaxDeg);
+            GunHandKickDeg = FMath::RadiansToDegrees(GunHandKick.GetAngle());
+            const FQuat MeshRotation = GetMesh()->GetComponentQuat();
+            WorldRotation = (MeshRotation * GunHandKick * MeshRotation.Inverse() * WorldRotation).GetNormalized();
+        }
+        if (auto *Instance = Cast<UHoverAnimInstance>(GetMesh()->GetAnimInstance()))
+        {
+            Instance->GripHandRestRotation = GunHandRestRotation;
+            Instance->bGripHandRestValid = bGunHandRestValid;
+        }
+    }
+    else
+        bGunHandRestValid = false;
+    const FQuat GunRotation = WorldRotation * GripQ;
+    ActiveGunPrimitive(true)->SetWorldLocationAndRotation(Hand - GunRotation.RotateVector(Seat), GunRotation);
     // Keep the sight centred while the barrel converges on the same aim point.
     // The tracer then travels along that barrel axis with no steering in flight.
     // Derive a fresh rest pose: reading the already-kicked component here would
     // accumulate sight drift when a shot and the appearance tick both update it.
-    const FVector SightAligned = FVector(20, 0, 0) - Basis.RotateVector(Assets->GunSight);
+    const FVector SightAligned = FVector(20, 0, 0) - Basis.RotateVector(GunSight);
     const FVector RestLocation = FMath::Lerp(FVector(35, 18, -20), SightAligned, WeaponAimAlpha);
     const FVector SightAnchor = FirstPersonCamera->GetComponentTransform().TransformPosition(
-        RestLocation + Basis.RotateVector(Assets->GunSight));
+        RestLocation + Basis.RotateVector(GunSight));
     FQuat ViewRotation = FirstPersonCamera->GetComponentQuat() * Basis;
     for (int32 I = 0; I < 3; ++I)
     {
-        const FVector Origin = SightAnchor - ViewRotation.RotateVector(Assets->GunSight);
-        const FVector Muzzle = Origin + ViewRotation.RotateVector(Assets->GunMuzzle);
+        const FVector Origin = SightAnchor - (ViewRotation * GripQ).RotateVector(GunSight);
+        const FVector Muzzle = Origin + (ViewRotation * GripQ).RotateVector(GunMuzzle);
         ViewRotation = (Target - Muzzle).Rotation().Quaternion() * Basis;
     }
-    const FVector ViewGrip = SightAnchor + ViewRotation.RotateVector(Assets->GunGrip - Assets->GunSight);
+    // ViewGrip is the SEAT's world point (the palm goes there); the sight stays on its anchor whatever the grip
+    // rotation, which pivots the view gun about the sight here and about the seat once the hand places it below.
+    const FVector ViewGrip = SightAnchor + (ViewRotation * GripQ).RotateVector(Seat - GunSight);
     const FVector KickBack = FirstPersonCamera->GetForwardVector() * Assets->GunRecoilDistance * RecoilStrength;
     ViewRotation = ViewRotation * Basis.Inverse() * Kick * Basis;
-    ViewGun->SetWorldLocationAndRotation(ViewGrip - KickBack - ViewRotation.RotateVector(Assets->GunGrip),
-                                         ViewRotation);
+    ActiveGunPrimitive(false)->SetWorldLocationAndRotation(
+        ViewGrip - KickBack - (ViewRotation * GripQ).RotateVector(Seat), ViewRotation * GripQ);
     if (ViewArms->GetSkeletalMeshAsset())
     {
         FTransform HandPose = ViewArms->GetSocketTransform(TEXT("hand_r"), RTS_Component);
@@ -1370,17 +1822,19 @@ void AHoverPilot::UpdateGunTransform()
                                                   ArmsRotation);
             const FQuat Delta = ArmsRotation * HandPose.GetRotation() * ViewReferenceHand.GetRotation().Inverse() *
                                 ArmsRotation.Inverse();
-            const FQuat AnimatedRotation = Delta * ViewRotation;
+            const FQuat AnimatedRotation = Delta * ViewRotation * GripQ;
             const FVector AnimatedGrip = ViewArms->GetComponentTransform().TransformPosition(HandPose.GetLocation());
-            ViewGun->SetWorldLocationAndRotation(AnimatedGrip - AnimatedRotation.RotateVector(Assets->GunGrip),
-                                                 AnimatedRotation);
+            ActiveGunPrimitive(false)->SetWorldLocationAndRotation(
+                AnimatedGrip - AnimatedRotation.RotateVector(Seat), AnimatedRotation);
             if (auto *View = Cast<UHoverViewAnimInstance>(ViewArms->GetAnimInstance()))
             {
                 // ADS moves the complete view model to its sight anchor. Keeping
                 // the same hand reference prevents an extra animation sight drift.
                 View->AimAlpha = 0.f;
-                View->SupportGripOffset = Assets->GunSupportGrip - Assets->GunGrip;
+                View->SupportGripOffset = SupportGripOffset(ViewGunSkel);
                 View->WeaponRotation = ArmsRotation.Inverse() * AnimatedRotation;
+                // Design B3: the first-person arms share the node type, so the same bone drives them.
+                SupportHandPose(ViewGunSkel, View->SupportHandRotation, View->SupportHandCurl);
             }
         }
     }
@@ -1397,26 +1851,49 @@ void AHoverPilot::FireShot(float Damage, float Spread, float Range, AZE_WeaponBa
     Params.bReturnPhysicalMaterial = true;
     Params.AddIgnoredActor(BoardActor);
     Params.AddIgnoredActor(SourceWeapon);
-    const UStaticMeshComponent *Gun = bReview ? WorldGun.Get() : ViewGun.Get();
+    UPrimitiveComponent *ActiveGun = ActiveGunPrimitive(bReview);
+    const UPrimitiveComponent *Gun = ActiveGun;
     const FVector Muzzle = GetMuzzlePosition();
     if (Combat)
         UAISense_Hearing::ReportNoiseEvent(this, Muzzle, 1.f, this, 3000.f, TEXT("Gunshot"));
     const FVector BarrelDirection =
-        Gun->GetComponentTransform().TransformVectorNoScale(Assets->GunForward).GetSafeNormal();
+        Gun->GetComponentTransform().TransformVectorNoScale(GunForward).GetSafeNormal();
     const FVector ShotDirection = FMath::VRandCone(BarrelDirection, FMath::DegreesToRadians(Spread));
     const FVector Target = Muzzle + ShotDirection * Range;
     const auto *Definition = SourceWeapon ? SourceWeapon->GetWeaponDefinition() : nullptr;
-    auto *MuzzleSystem = Definition && Definition->MuzzleFlashFX.EffectType == EZE_EffectType::Niagara
-                             ? Definition->MuzzleFlashFX.NiagaraFX.LoadSynchronous()
-                             : Cast<UNiagaraSystem>(Assets->MuzzleEffect);
+    // Gate off: Legacy() reproduces the presentation values that shipped before the gun feel.
+    const bool Enhanced = bEnhancedGunFeel;
+    auto *Rifle = Cast<AHoverCyberRifle>(SourceWeapon);
+    const FHoverGunFeelTier &Tier = !Enhanced ? FHoverGunFeelTier::Legacy()
+                                    : Rifle   ? Rifle->GetFeelTier()
+                                              : GetGunFeel()->Default;
+    // The held rig's own flash wins over the definition's (the Ballista's blue NS_BallistaMuzzle is what every
+    // rigged gun fired until 2026-10-31); null falls through to the definition, then the DA's loose MuzzleEffect.
+    const UHoverGunRig *HeldRig = bRiggedGun ? GunRig.Get() : nullptr;
+    UNiagaraSystem *MuzzleSystem =
+        HeldRig && HeldRig->MuzzleFlashOverride ? HeldRig->MuzzleFlashOverride.Get()
+        : Definition && Definition->MuzzleFlashFX.EffectType == EZE_EffectType::Niagara
+            ? Definition->MuzzleFlashFX.NiagaraFX.LoadSynchronous()
+            : Cast<UNiagaraSystem>(Assets->MuzzleEffect);
     if (auto *System = MuzzleSystem)
     {
         auto *Flash = UNiagaraFunctionLibrary::SpawnSystemAttached(
-            System, bReview ? WorldGun : ViewGun, NAME_None, Assets->GunMuzzle,
-            FRotationMatrix::MakeFromZ(Assets->GunForward).Rotator(), EAttachLocation::KeepRelativeOffset, true);
+            System, ActiveGun, MuzzleAttachSocket(), MuzzleAttachOffset(),
+            FRotationMatrix::MakeFromZ(GunForward).Rotator(), EAttachLocation::KeepRelativeOffset, true);
         if (Flash)
         {
-            Flash->SetRelativeScale3D(FVector(Definition ? Definition->MuzzleFlashFX.Scale : 1.f));
+            // Design C1: the held rig scales the definition's flash (an SMG or a revolver is not an AR). When the
+            // rig REPLACES the system (MuzzleFlashOverride) its scale is absolute: the definition's scale belongs
+            // to the definition's own asset (DA_Weapon_Pistol_001 carries 300 for its flash, which would spawn
+            // NS_GunFire at 450x on the revolver in real play; the capture never saw it because apply_gun_rig keeps
+            // the Ballista definition at 1.0).
+            const bool OverrideFlash = HeldRig && HeldRig->MuzzleFlashOverride;
+            const FVector FlashScale((OverrideFlash || !Definition ? 1.f : Definition->MuzzleFlashFX.Scale) *
+                                     (bRiggedGun && GunRig ? GunRig->MuzzleFlashScale : 1.f));
+            if (bRiggedGun)
+                Flash->SetWorldScale3D(FlashScale); // Not the rig socket's x100 root-bone import scale.
+            else
+                Flash->SetRelativeScale3D(FlashScale);
             TWeakObjectPtr<UNiagaraComponent> WeakFlash(Flash);
             FTimerHandle Timer;
             GetWorld()->GetTimerManager().SetTimer(
@@ -1425,11 +1902,36 @@ void AHoverPilot::FireShot(float Damage, float Spread, float Range, AZE_WeaponBa
                     if (WeakFlash.IsValid())
                         WeakFlash->DestroyComponent();
                 },
-                .09f, false);
+                Tier.MuzzleFlashSeconds, false);
         }
     }
+    if (Enhanced && Tier.MuzzleLightIntensity > 0)
+    {
+        EnsureMuzzleLight();
+        AttachMuzzleLight();
+        // Warm per-rig light (orange by default) over the tier's colour; the Ballista keeps the tier's.
+        MuzzleLight->SetLightColor(HeldRig && HeldRig->bOverrideMuzzleLightColor ? HeldRig->MuzzleLightColorOverride
+                                                                                 : Tier.MuzzleLightColor);
+        // The rig's own reach (150 cm on the four rigs since 2026-10-31: the light is the whiteout) over the tier's.
+        MuzzleLight->SetAttenuationRadius(HeldRig && HeldRig->MuzzleLightRadiusOverride > 0.f
+                                              ? HeldRig->MuzzleLightRadiusOverride
+                                              : Tier.MuzzleLightRadius);
+        // Design C1: per-rig light scale on the tier's candelas (the Ballista keeps the tier value).
+        MuzzleLight->SetIntensity(Tier.MuzzleLightIntensity * (bRiggedGun && GunRig ? GunRig->MuzzleLightScale : 1.f));
+        // A point light with no source radius is inverse-square down to zero: the hands and a chrome gun 10-20 cm
+        // from the muzzle still blew to white at 3 cd (2026-10-31 flash sheet) while the torso read lit. A 20 cm
+        // source radius caps the near field without dimming the room.
+        MuzzleLight->SetSourceRadius(bRiggedGun ? 20.f : 0.f);
+        GetWorldTimerManager().SetTimer(MuzzleLightTimer,
+                                        FTimerDelegate::CreateWeakLambda(this,
+                                                                         [this]() {
+                                                                             if (MuzzleLight)
+                                                                                 MuzzleLight->SetIntensity(0.f);
+                                                                         }),
+                                        FMath::Max(.01f, Tier.MuzzleLightSeconds), false);
+    }
     // Catch enemies/walls intersecting the barrel instead of starting beyond them.
-    const FVector Breech = Gun->GetComponentTransform().TransformPosition(Assets->GunGrip);
+    const FVector Breech = Gun->GetComponentTransform().TransformPosition(GunGrip);
     FHitResult Hit = TraceWeaponRay(GetWorld(), Breech, Muzzle, Params);
     const bool ProjectileShot =
         Definition && Definition->CombatStats.bUseProjectiles && Definition->CombatStats.ProjectileClass;
@@ -1465,52 +1967,131 @@ void AHoverPilot::FireShot(float Damage, float Spread, float Range, AZE_WeaponBa
             ProjectileLaunched = true;
         }
     }
-    if (!Hit.bBlockingHit && !ProjectileLaunched)
-        Hit = TraceWeaponRay(GetWorld(), Muzzle, Target + ShotDirection * 3.f, Params);
-    if (!ProjectileLaunched &&
-        (!Hit.bBlockingHit || FVector::DotProduct(Hit.ImpactPoint - Muzzle, ShotDirection) > 2.f))
-        if (auto *Tracer = GetWorld()->SpawnActor<AHoverShotVisual>())
-            Tracer->Launch(Muzzle, Hit.bBlockingHit ? Hit.ImpactPoint : Target);
     AActor *DamageSource = SourceWeapon ? static_cast<AActor *>(SourceWeapon) : this;
-    if (Hit.bBlockingHit)
+    AActor *FirstHitActor = nullptr;
+    if (!Enhanced)
     {
-        if (SourceWeapon)
-            SourceWeapon->ProcessHit(Hit);
-        else if (Hit.GetActor())
-            UGameplayStatics::ApplyPointDamage(Hit.GetActor(), Damage, ShotDirection, Hit, GetController(),
-                                               DamageSource, nullptr);
-        // Zombie damage owns blood. World materials use the purchased weapon's
-        // impact map; the local dust remains a fallback for unassigned surfaces.
-        if (!Cast<AHoverZombie>(Hit.GetActor()) && !Cast<AHoverCyberZombie>(Hit.GetActor()))
+        if (!Hit.bBlockingHit && !ProjectileLaunched)
+            Hit = TraceWeaponRay(GetWorld(), Muzzle, Target + ShotDirection * 3.f, Params);
+        if (!ProjectileLaunched &&
+            (!Hit.bBlockingHit || FVector::DotProduct(Hit.ImpactPoint - Muzzle, ShotDirection) > 2.f))
+            if (auto *Tracer = GetWorld()->SpawnActor<AHoverShotVisual>())
+                Tracer->Launch(Muzzle, Hit.bBlockingHit ? Hit.ImpactPoint : Target);
+        if (Hit.bBlockingHit)
         {
-            bool HasImpactFX = false;
-            if (Definition)
-            {
-                const FZE_SurfaceImpactData *Impact = &Definition->DefaultImpactEffects;
-                const FString Surface = GetNameSafe(Hit.PhysMaterial.Get());
-                for (const auto &Candidate : Definition->ImpactEffectsMap)
-                    if (!Candidate.SurfaceTag.IsNone() && Surface.Contains(Candidate.SurfaceTag.ToString()))
-                    {
-                        Impact = &Candidate;
-                        break;
-                    }
-                HasImpactFX = Impact->ImpactFX.EffectType == EZE_EffectType::Niagara
-                                  ? !Impact->ImpactFX.NiagaraFX.IsNull()
-                                  : !Impact->ImpactFX.CascadeFX.IsNull();
-                SourceWeapon->SpawnImpactEffects(Hit);
-            }
-            if (!HasImpactFX && Assets->SurfaceImpact)
-                ImpactPulse(Hit.ImpactPoint + Hit.ImpactNormal * 2, Hit.ImpactNormal, 1.f, 0, .9f,
-                            Assets->SurfaceImpact);
+            if (SourceWeapon)
+                SourceWeapon->ProcessHit(Hit);
+            else if (Hit.GetActor())
+                UGameplayStatics::ApplyPointDamage(Hit.GetActor(), Damage, ShotDirection, Hit, GetController(),
+                                                   DamageSource, nullptr);
+            // Zombie damage owns blood.
+            if (!Cast<AHoverZombie>(Hit.GetActor()) && !Cast<AHoverCyberZombie>(Hit.GetActor()))
+                SpawnSurfaceImpact(Hit, SourceWeapon, Definition);
         }
+        FirstHitActor = Hit.GetActor();
     }
-    if (auto *Rifle = Cast<AHoverCyberRifle>(SourceWeapon))
-        Rifle->EjectShellAt(FTransform(Gun->GetComponentQuat(), Breech));
-    auto *ShotSound = Definition ? Definition->FireSound.LoadSynchronous() : Assets->ShotSound.Get();
-    if (ShotSound)
+    else if (!ProjectileLaunched)
+    {
+        // Bounded penetration: corpses are free, each live body uses one pierce, a wall stops the round.
+        FVector End = Target, Start = Muzzle;
+        int32 PiercesLeft = Tier.Pierce;
+        float Scale = 1.f;
+        for (int32 Guard = 0; Guard < Tier.Pierce + 8; ++Guard)
+        {
+            if (Guard > 0 || !Hit.bBlockingHit) // Iteration 0 reuses the breech hit.
+                Hit = TraceWeaponRay(GetWorld(), Start, Target + ShotDirection * 3.f, Params);
+            if (!Hit.bBlockingHit)
+                break;
+            End = Hit.ImpactPoint;
+            AActor *Victim = Hit.GetActor();
+            if (!FirstHitActor)
+                FirstHitActor = Victim;
+            // The weapon path matches vendor ProcessHit (impact normal); PostApo keeps the shot direction.
+            const FVector HitDirection = SourceWeapon ? FVector(Hit.ImpactNormal) : ShotDirection;
+            if (IsGunFeelZombie(Victim))
+            {
+                const bool WasCorpse = IsGunFeelCorpse(Victim); // Sampled before damage.
+                Params.AddIgnoredActor(Victim);
+                Start = Hit.ImpactPoint + ShotDirection * 5.f;
+                if (WasCorpse)
+                    continue;
+                const float Applied = UGameplayStatics::ApplyPointDamage(Victim, Damage * Scale, HitDirection, Hit,
+                                                                         GetController(), DamageSource, nullptr);
+                if (Applied > 0)
+                {
+                    const bool Kill = IsGunFeelCorpse(Victim);
+                    NotifyHitConfirmed(IsGunFeelHeadshot(Victim, Hit), Kill, DamageSource);
+                    if (Kill)
+                    {
+                        FTimerHandle HitStopTimer; // Per victim: a shared handle would cancel a pierced kill's restore.
+                        HoverEffects::HitStop(Victim, Tier.KillTimeDilation, Tier.KillHitStopSeconds, HitStopTimer);
+                    }
+                }
+                if (PiercesLeft-- <= 0)
+                    break;
+                Scale *= Tier.PierceScale;
+                continue;
+            }
+            if (Victim)
+                UGameplayStatics::ApplyPointDamage(Victim, Damage * Scale, HitDirection, Hit, GetController(),
+                                                   DamageSource, nullptr);
+            SpawnSurfaceImpact(Hit, SourceWeapon, Definition);
+            break;
+        }
+        if (FVector::DotProduct(End - Muzzle, ShotDirection) > 2.f)
+            if (auto *Tracer = GetWorld()->SpawnActor<AHoverShotVisual>())
+            {
+                if (HeldRig && HeldRig->TracerOverride)
+                {
+                    // Tracer trial: the rig's trail system over the tier's, coloured like the tier's tracer and cut
+                    // to the rig's lifetime; a copy, so the tier table itself never changes.
+                    FHoverGunFeelTier RigTier = Tier;
+                    RigTier.Tracer = HeldRig->TracerOverride.Get();
+                    RigTier.bTracerColor = HeldRig->bTracerOverrideTierColor;
+                    RigTier.bTracerColorAB = false;
+                    if (HeldRig->TracerOverrideLifetime > 0.f)
+                        RigTier.TracerLifetime = HeldRig->TracerOverrideLifetime;
+                    Tracer->Launch(Muzzle, End, RigTier);
+                }
+                else
+                    Tracer->Launch(Muzzle, End, Tier);
+            }
+    }
+    if (Rifle)
+        EjectShellForShot(Rifle); // The rig's eject socket and timing; the Ballista ejects at its breech.
+    else
+        PlayGunFire(); // Mounted/direct shots have no rifle actor; the rifle path cycles from PlayFireAnimation.
+    // A tier pool replaces the definition's single FireSound; Legacy() keeps the pool empty.
+    USoundBase *ShotSound = Enhanced ? Tier.PickFireSound(LastFireSoundIndex) : nullptr;
+    if (!ShotSound)
+        ShotSound = Definition ? Definition->FireSound.LoadSynchronous() : Assets->ShotSound.Get();
+    if (ShotSound && !Enhanced)
         UGameplayStatics::PlaySoundAtLocation(this, ShotSound, Muzzle, .60f, FMath::FRandRange(.96f, 1.04f));
+    else if (ShotSound)
+    {
+        // Rig sockets carry the root bone's x100 import scale; the sounds keep world scale 1.
+        const auto Unscaled = [this](USceneComponent *Sound) {
+            if (Sound && bRiggedGun)
+                Sound->SetWorldScale3D(FVector::OneVector);
+        };
+        Unscaled(UGameplayStatics::SpawnSoundAttached(
+            ShotSound, ActiveGun, MuzzleAttachSocket(), MuzzleAttachOffset(), EAttachLocation::KeepRelativeOffset,
+            false, Tier.SoundVolume,
+            Tier.SoundPitch * FMath::FRandRange(1.f - Tier.SoundPitchJitter, 1.f + Tier.SoundPitchJitter)));
+        if (Tier.TailEveryN > 0 && ShotsFired % Tier.TailEveryN == 0)
+            if (auto *Tail = Tier.PickTailSound(LastTailSoundIndex))
+                Unscaled(UGameplayStatics::SpawnSoundAttached(Tail, ActiveGun, MuzzleAttachSocket(),
+                                                              MuzzleAttachOffset(), EAttachLocation::KeepRelativeOffset,
+                                                              false, .5f, Tier.SoundPitch));
+    }
     if (auto *PC = Cast<APlayerController>(GetController()))
-        PC->PlayDynamicForceFeedback(.18f, .06f, false, true, false, true);
+    {
+        if (!Enhanced)
+            PC->PlayDynamicForceFeedback(.18f, .06f, false, true, false, true);
+        else if (!PlayRumble(Definition ? Definition->GetFName() : FName(TEXT("HoverFire_Default")), Tier.FireRumble,
+                             false))
+            PC->PlayDynamicForceFeedback(.55f, .07f, true, true, false, true);
+    }
     if (bMounted && bAiming && Assets->Fire)
     {
         CurrentAnimation = nullptr;
@@ -1520,14 +2101,779 @@ void AHoverPilot::FireShot(float Damage, float Spread, float Range, AZE_WeaponBa
     // currently recoiling barrel; flashes remain attached to that same muzzle.
     GunRecoil = FMath::Min(1.5f, GunRecoil + 1.f);
     GunRecoilVelocity = 0;
+    if (Enhanced)
+    {
+        // View recoil: the weapon-model spring above stays as the visual layer.
+        const FVector2D Kick = Tier.bOverrideRecoil ? Tier.RecoilKick
+                               : Definition         ? Definition->CombatStats.RecoilKick
+                                                    : FVector2D(.35f, .15f);
+        const float PitchKick = float(Kick.X) * FMath::FRandRange(1.f - Tier.RecoilJitter, 1.f + Tier.RecoilJitter) *
+                                (bAiming ? Tier.AimRecoilScale : 1.f) * RecoilSetting;
+        const float YawKick = FMath::FRandRange(-float(Kick.Y), float(Kick.Y)) * RecoilSetting;
+        ApplyViewRecoil(PitchKick, YawKick);
+        // The rifle shakes from PlayFireAnimation; only the no-bridge (PostApo) path shakes here.
+        if (!SourceWeapon)
+            PlayFireShake(Tier, nullptr);
+    }
     UpdateGunTransform();
-    UE_LOG(LogTemp, Verbose, TEXT("HOVER_SHOT hit=%s"), *GetNameSafe(Hit.GetActor()));
+    UE_LOG(LogTemp, Verbose, TEXT("HOVER_SHOT hit=%s"), *GetNameSafe(FirstHitActor));
+}
+
+void AHoverPilot::SpawnSurfaceImpact(const FHitResult &Hit, AZE_WeaponBase *SourceWeapon,
+                                     const UZE_WeaponDefinition *Definition)
+{
+    // World materials use the purchased weapon's impact map; the local dust
+    // remains a fallback for unassigned surfaces.
+    bool HasImpactFX = false;
+    if (Definition)
+    {
+        const FZE_SurfaceImpactData *Impact = &Definition->DefaultImpactEffects;
+        const FString Surface = GetNameSafe(Hit.PhysMaterial.Get());
+        for (const auto &Candidate : Definition->ImpactEffectsMap)
+            if (!Candidate.SurfaceTag.IsNone() && Surface.Contains(Candidate.SurfaceTag.ToString()))
+            {
+                Impact = &Candidate;
+                break;
+            }
+        HasImpactFX = Impact->ImpactFX.EffectType == EZE_EffectType::Niagara ? !Impact->ImpactFX.NiagaraFX.IsNull()
+                                                                             : !Impact->ImpactFX.CascadeFX.IsNull();
+        SourceWeapon->SpawnImpactEffects(Hit);
+    }
+    if (!HasImpactFX && Assets->SurfaceImpact)
+        ImpactPulse(Hit.ImpactPoint + Hit.ImpactNormal * 2, Hit.ImpactNormal, 1.f, 0, .9f, Assets->SurfaceImpact);
+}
+
+const UHoverGunFeel *AHoverPilot::GetGunFeel() const
+{
+    return Assets && Assets->GunFeel ? Assets->GunFeel.Get() : UHoverGunFeel::BuiltIn();
+}
+
+const FHoverGunFeelTier &AHoverPilot::GetActiveFeelTier() const
+{
+    if (!bEnhancedGunFeel)
+        return FHoverGunFeelTier::Legacy();
+    if (const auto *Rifle = Combat ? Cast<AHoverCyberRifle>(Combat->GetWeapon()) : nullptr)
+        return Rifle->GetFeelTier();
+    return GetGunFeel()->Default;
+}
+
+void AHoverPilot::EnsureMuzzleLight()
+{
+    if (MuzzleLight)
+        return;
+    MuzzleLight = NewObject<UPointLightComponent>(this, TEXT("GunFeelMuzzleLight"));
+    MuzzleLight->SetupAttachment(ActiveGunPrimitive(bReview), MuzzleAttachSocket());
+    MuzzleLight->SetRelativeLocation(Assets ? MuzzleAttachOffset() : FVector::ZeroVector);
+    MuzzleLight->SetIntensityUnits(ELightUnits::Candelas);
+    MuzzleLight->SetIntensity(0.f);
+    MuzzleLight->SetCastShadows(false);
+    const FHoverGunFeelTier &Tier = GetGunFeel()->Default;
+    MuzzleLight->SetAttenuationRadius(Tier.MuzzleLightRadius);
+    MuzzleLight->SetLightColor(Tier.MuzzleLightColor);
+    MuzzleLight->RegisterComponent();
+}
+
+void AHoverPilot::ApplyViewRecoil(float PitchKick, float YawKick)
+{
+    auto *PC = Cast<APlayerController>(GetController());
+    if (!PC)
+        return;
+    // Write the control rotation directly; AddControllerPitchInput would apply the legacy input scale.
+    FRotator View = PC->GetControlRotation();
+    const float Before = FRotator::NormalizeAxis(View.Pitch);
+    View.Pitch = FMath::Clamp(Before + PitchKick, -75.f, 75.f); // Same clamp as UpdateInput.
+    View.Yaw += YawKick;
+    View.Roll = 0;
+    PC->SetControlRotation(View);
+    const FHoverGunFeelTier &Tier = GetActiveFeelTier();
+    RecoilPitchDebt = FMath::Clamp(RecoilPitchDebt + float(View.Pitch - Before) * Tier.RecoilAutoRecoverFraction, 0.f,
+                                   Tier.RecoilDebtCap);
+    RecoilTrackedPitch = View.Pitch;
+    LastRecoilTime = GetWorld()->GetTimeSeconds();
+}
+
+void AHoverPilot::UpdateViewRecoil(float DT)
+{
+    if (!bEnhancedGunFeel || RecoilPitchDebt <= 0)
+        return;
+    auto *PC = Cast<APlayerController>(GetController());
+    if (!PC)
+    {
+        RecoilPitchDebt = 0;
+        return;
+    }
+    FRotator View = PC->GetControlRotation();
+    const float Pitch = FRotator::NormalizeAxis(View.Pitch);
+    // Look input applied outside UpdateInput (the Parkour template's mouse path) also pays the debt.
+    if (Pitch < RecoilTrackedPitch)
+        RecoilPitchDebt = FMath::Max(0.f, RecoilPitchDebt - (RecoilTrackedPitch - Pitch));
+    RecoilTrackedPitch = Pitch;
+    const auto *Weapon = Combat ? Combat->GetWeapon() : nullptr;
+    const auto *Definition = Weapon ? Weapon->GetWeaponDefinition() : nullptr;
+    const FHoverGunFeelTier &Tier = GetActiveFeelTier();
+    const float FireRate = Definition && Definition->FireRate > 0 ? Definition->FireRate : 8.f;
+    const float Quiet = FMath::Max(.2f, 1.5f / FireRate);
+    if (RecoilPitchDebt <= 0 || (Weapon && Weapon->IsFiring()) || GetWorld()->GetTimeSeconds() - LastRecoilTime < Quiet)
+        return;
+    const float Rate = Tier.bOverrideRecoil ? Tier.RecoilRecovery
+                       : Definition         ? Definition->CombatStats.RecoilRecovery
+                                            : 10.f;
+    const float Step = FMath::Min(RecoilPitchDebt, FMath::Max(0.f, Rate) * DT);
+    View.Pitch = FMath::Clamp(Pitch - Step, -75.f, 75.f);
+    PC->SetControlRotation(View);
+    RecoilPitchDebt -= Step;
+    RecoilTrackedPitch = View.Pitch;
+}
+
+void AHoverPilot::PlayFireShake(const FHoverGunFeelTier &Tier, const UZE_WeaponDefinition *Definition)
+{
+    auto *PC = Cast<APlayerController>(GetController());
+    if (!PC || !PC->IsLocalController())
+        return;
+    TSubclassOf<UCameraShakeBase> Shake = Tier.FireShake;
+    if (!Shake && Definition)
+        Shake = Definition->FireCameraShake;
+    if (!Shake)
+    {
+        static TWeakObjectPtr<UClass> FallbackShake;
+        static bool bFallbackMissing = false;
+        if (!FallbackShake.IsValid() && !bFallbackMissing)
+        {
+            FallbackShake = LoadClass<UCameraShakeBase>(
+                nullptr, TEXT("/Game/ZESP/ZE/FX/CameraShake/BP_M16_FireShake.BP_M16_FireShake_C"));
+            bFallbackMissing = !FallbackShake.IsValid();
+        }
+        Shake = FallbackShake.Get();
+    }
+    if (!Shake)
+        Shake = UHoverFireShake::StaticClass();
+    const UHoverGunFeel *Feel = GetGunFeel();
+    const float ViewScale = bAiming   ? Feel->AimingShakeScale
+                            : bReview ? Feel->ThirdPersonShakeScale
+                                      : Feel->FirstPersonShakeScale;
+    const float Scale = Tier.ShakeScale * ViewScale * ShakeSetting;
+    if (Scale <= 0)
+        return;
+    // View only: the camera manager's POV moves, the aim traces do not.
+    PC->ClientStartCameraShake(Shake, Scale);
+    ++FireShakeCount;
+}
+
+bool AHoverPilot::PlayRumble(FName Key, const FHoverRumbleCurve &Curve, bool bIgnoreTimeDilation, FName Tag)
+{
+    auto *PC = Cast<APlayerController>(GetController());
+    if (!PC || !PC->IsLocalController())
+        return false;
+    UForceFeedbackEffect *Effect = Curve.Override.IsNull() ? nullptr : Curve.Override.LoadSynchronous();
+    if (!Effect)
+    {
+        if (const TObjectPtr<UForceFeedbackEffect> *Cached = RumbleCache.Find(Key))
+            Effect = *Cached;
+        else if ((Effect = HoverHaptics::Build(this, Curve)) != nullptr)
+            RumbleCache.Add(Key, Effect);
+    }
+    if (!Effect)
+        return false;
+    FForceFeedbackParameters Parameters;
+    Parameters.Tag = Tag;
+    Parameters.bIgnoreTimeDilation = bIgnoreTimeDilation;
+    PC->ClientPlayForceFeedback(Effect, Parameters);
+    ++RumbleRequestCount;
+    return true;
+}
+
+void AHoverPilot::NotifyHitConfirmed(bool Headshot, bool Kill, const AActor *Causer)
+{
+    if (!Assets || !bEnhancedGunFeel) // BeginPlay may have returned early without assets.
+        return;
+    const UHoverGunFeel *Feel = GetGunFeel();
+    const float Now = GetWorld()->GetTimeSeconds();
+    // A multi-kill (pierce, same frame) keeps the kill marker but plays one sting.
+    const bool Merged = Kill && Now - LastKillStingTime < Feel->KillStingMinInterval;
+    LastHitMarkTime = Now;
+    bLastHitHeadshot = Headshot;
+    bLastHitKill = Kill;
+    ++HitMarkCount;
+    if (Merged)
+        return;
+    const auto *Rifle = Cast<AHoverCyberRifle>(Causer);
+    const FHoverGunFeelTier &Tier = Rifle ? Rifle->GetFeelTier() : Feel->Default;
+    if (Kill)
+    {
+        LastKillStingTime = Now;
+        ++KillStingCount;
+        if (Tier.bKillFlash)
+            KillFlashTime = Now;
+    }
+    // Null-safe until the hit-confirm audio is imported.
+    const TSoftObjectPtr<USoundBase> &Cue = Kill       ? Feel->KillSound
+                                            : Headshot ? Feel->HeadshotSound
+                                                       : Feel->HitConfirmSound;
+    if (USoundBase *Sound = Cue.IsNull() ? nullptr : Cue.LoadSynchronous())
+        UGameplayStatics::PlaySound2D(this, Sound, Kill ? 1.f : .8f);
+    const bool Melee = Cast<AHoverMeleeWeapon>(Causer) != nullptr; // Katana contact reuses the body-hit curve.
+    // Metal-wound impact layer on every confirmed gun hit; the katana plays its own cut (audio pass 2026-10-31).
+    if (Melee)
+    {
+        if (USoundBase *Cut = Feel->PickMeleeHitSound(LastMeleeHitSoundIndex))
+            UGameplayStatics::PlaySound2D(this, Cut, Feel->MeleeHitVolume, Kill ? .92f : 1.f);
+    }
+    else if (USoundBase *Impact = Feel->PickHitConfirmSound(LastHitSoundIndex))
+        UGameplayStatics::PlaySound2D(this, Impact, Feel->HitConfirmPoolVolume,
+                                      Kill       ? Feel->KillPoolPitch
+                                      : Headshot ? Feel->HeadshotPoolPitch
+                                                 : 1.f);
+    if (Kill)
+        PlayRumble(Headshot ? FName(TEXT("HoverHit_KillHeadshot")) : FName(TEXT("HoverHit_Kill")),
+                   Headshot ? Feel->KillHeadshotRumble : Feel->KillRumble, true, TEXT("Hit"));
+    else if (Headshot && !Melee)
+        PlayRumble(TEXT("HoverHit_Headshot"), Feel->HeadshotRumble, true, TEXT("Hit"));
+    else
+        PlayRumble(TEXT("HoverHit_Body"), Feel->HitRumble, true, TEXT("Hit"));
+}
+
+void AHoverPilot::PlayMeleeSwingSound()
+{
+    if (USoundBase *Whoosh = GetGunFeel()->PickMeleeSwingSound(LastMeleeSwingSoundIndex))
+    {
+        UGameplayStatics::PlaySoundAtLocation(this, Whoosh, GetActorLocation() + FVector(0, 0, 60),
+                                              GetGunFeel()->MeleeSwingVolume, FMath::FRandRange(.95f, 1.05f));
+        UE_LOG(LogTemp, Verbose, TEXT("HOVER_MELEE_SWING_SOUND %s"), *Whoosh->GetName());
+    }
+}
+
+void AHoverPilot::UpdateFootsteps(float DT)
+{
+    // Audio pass 2026-10-31: no clip carries footstep notifies, so the feet are read live. A step plants when a
+    // ball bone drops back under PlantHeight after rising past LiftHeight; a cadence clock covers clips whose
+    // swing stays lower than that. Only on foot, grounded and actually travelling.
+    if (!GetWorld() || !GetMesh())
+        return;
+    const UHoverGunFeel *Feel = GetGunFeel();
+    const bool Grounded =
+        IsOnFoot() && !bDefeated && !bKnockedDown &&
+        (bLifeEngineActive ? LifeMovement->bGrounded : GetCharacterMovement()->IsMovingOnGround());
+    const float Speed = GetVelocity().Size2D();
+    const float Now = GetWorld()->GetTimeSeconds();
+    const float Bottom = GetActorLocation().Z - GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+    static const FName Feet[2] = {TEXT("ball_l"), TEXT("ball_r")};
+    bool Planted = false;
+    for (int32 Foot = 0; Foot < 2; ++Foot)
+    {
+        const FVector At = GetMesh()->GetSocketLocation(Feet[Foot]);
+        const float Height = At.Z - Bottom;
+        if (Height > Feel->FootstepLiftHeight)
+            bFootWasUp[Foot] = true;
+        else if (bFootWasUp[Foot] && Height < Feel->FootstepPlantHeight)
+        {
+            bFootWasUp[Foot] = false;
+            if (Grounded && Speed > 40.f && Now - LastFootstepTime[Foot] > .18f && Now - LastAnyFootstepTime > .1f)
+            {
+                LastFootstepTime[Foot] = Now;
+                PlayFootstep(At, Speed);
+                Planted = true;
+            }
+        }
+    }
+    if (!Planted && Grounded && Speed > 80.f)
+    {
+        const float Stride = Speed > Feel->FootstepRunSpeed ? Feel->FootstepRunStride : Feel->FootstepWalkStride;
+        if (Now - LastAnyFootstepTime > 1.6f * Stride / Speed)
+            PlayFootstep(GetMesh()->GetSocketLocation(Feet[GFrameCounter & 1]), Speed);
+    }
+}
+
+void AHoverPilot::PlayFootstep(const FVector &At, float Speed)
+{
+    const UHoverGunFeel *Feel = GetGunFeel();
+    LastAnyFootstepTime = GetWorld()->GetTimeSeconds();
+    // Surface from the physical material or the floor material's name: dirt-like words, water-like words,
+    // everything else concrete (NYC is asphalt and pavement).
+    int32 Surface = 0;
+    FHitResult Hit;
+    FCollisionQueryParams Query(SCENE_QUERY_STAT(HoverFootstep), false, this);
+    Query.bReturnPhysicalMaterial = true;
+    Query.AddIgnoredActor(BoardActor);
+    if (GetWorld()->LineTraceSingleByChannel(Hit, At + FVector(0, 0, 25), At - FVector(0, 0, 60), ECC_Visibility,
+                                             Query))
+    {
+        FString Name = GetNameSafe(Hit.PhysMaterial.Get());
+        if (const UPrimitiveComponent *Floor = Hit.GetComponent())
+            if (const UMaterialInterface *Material = Floor->GetMaterial(0))
+                Name += TEXT(" ") + Material->GetName();
+        Name = Name.ToLower();
+        if (Name.Contains(TEXT("water")) || Name.Contains(TEXT("puddle")) || Name.Contains(TEXT("wet")))
+            Surface = 2;
+        else if (Name.Contains(TEXT("dirt")) || Name.Contains(TEXT("grass")) || Name.Contains(TEXT("mud")) ||
+                 Name.Contains(TEXT("soil")) || Name.Contains(TEXT("sand")) || Name.Contains(TEXT("gravel")) ||
+                 Name.Contains(TEXT("ground")))
+            Surface = 1;
+    }
+    const bool Run = Speed > Feel->FootstepRunSpeed;
+    if (USoundBase *Step = Feel->PickFootstep(Run, Surface, LastFootstepSoundIndex))
+    {
+        UGameplayStatics::PlaySoundAtLocation(this, Step, At, Feel->FootstepVolume * (bIsCrouched ? .55f : 1.f),
+                                              FMath::FRandRange(.94f, 1.06f));
+        UE_LOG(LogTemp, Verbose, TEXT("HOVER_FOOTSTEP %s run=%d surface=%d speed=%.0f"), *Step->GetName(), Run, Surface,
+               Speed);
+    }
+}
+
+float AHoverPilot::GetHitMarkerAge() const
+{
+    return GetWorld() ? GetWorld()->GetTimeSeconds() - LastHitMarkTime : 1e6f;
+}
+
+float AHoverPilot::GetKillFlashAge() const
+{
+    return GetWorld() ? GetWorld()->GetTimeSeconds() - KillFlashTime : 1e6f;
 }
 
 FVector AHoverPilot::GetMuzzlePosition() const
 {
-    const UStaticMeshComponent *Gun = bReview ? WorldGun.Get() : ViewGun.Get();
-    return Gun->GetComponentTransform().TransformPosition(Assets ? Assets->GunMuzzle : FVector(0, 46.f, 2.f));
+    // A rig's muzzle socket is read live, so the trace starts where the Fire clip's body kick put the barrel.
+    // GunMuzzle starts at the DA header default, so a missing DA reads the same (0, 46, 2) as before.
+    const UPrimitiveComponent *Gun = ActiveGunPrimitive(bReview);
+    const FName Socket = MuzzleAttachSocket();
+    return Socket.IsNone() ? Gun->GetComponentTransform().TransformPosition(GunMuzzle) : Gun->GetSocketLocation(Socket);
+}
+
+UPrimitiveComponent *AHoverPilot::ActiveGunPrimitive(bool bReviewView) const
+{
+    if (bRiggedGun)
+        return bReviewView ? static_cast<UPrimitiveComponent *>(WorldGunSkel.Get()) : ViewGunSkel.Get();
+    return bReviewView ? static_cast<UPrimitiveComponent *>(WorldGun.Get()) : ViewGun.Get();
+}
+
+FName AHoverPilot::MuzzleAttachSocket() const
+{
+    // Riding the socket keeps flash, light and sound on the barrel through any body recoil baked
+    // into the Fire clip; the static Ballista has no sockets and uses the GunMuzzle offset.
+    return bRiggedGun && !GunRig->MuzzleSocket.IsNone() && WorldGunSkel->DoesSocketExist(GunRig->MuzzleSocket)
+               ? GunRig->MuzzleSocket
+               : NAME_None;
+}
+
+FVector AHoverPilot::MuzzleAttachOffset() const
+{
+    return MuzzleAttachSocket().IsNone() ? GunMuzzle : FVector::ZeroVector;
+}
+
+bool UHoverPilotAssets::FindGunRig(FName DefinitionName, const UHoverGunRig *&OutRig) const
+{
+    const TObjectPtr<UHoverGunRig> *Found = GunRigs.Find(DefinitionName);
+    if (!Found)
+        Found = GunRigs.Find(UHoverGunRig::NormalizeWeaponKey(DefinitionName));
+    OutRig = Found ? Found->Get() : nullptr;
+    return Found != nullptr;
+}
+
+const UHoverGunRig *AHoverPilot::FindGunRig(const UZE_WeaponDefinition *Definition) const
+{
+    const UHoverGunRig *Rig = nullptr;
+    if (Assets && Definition && Assets->FindGunRig(Definition->GetFName(), Rig))
+        return Rig; // A key mapped to None pins that definition to the static Ballista.
+    return DefaultGunRig;
+}
+
+void AHoverPilot::SetupStaticGun()
+{
+    bStaticGunReady = true;
+    ViewGun->SetStaticMesh(Assets->Gun);
+    ViewGun->SetRelativeLocation(FVector(35, 18, -20));
+    ViewGun->SetRelativeRotation(FRotator(0, -90, 0));
+    WorldGun->SetStaticMesh(Assets->Gun);
+    if (Assets->GunOptic)
+        for (auto *Gun : {ViewGun.Get(), WorldGun.Get()})
+        {
+            auto *Optic = NewObject<UStaticMeshComponent>(this);
+            Optic->SetupAttachment(Gun);
+            Optic->SetStaticMesh(Assets->GunOptic);
+            // The small reflex lens is translucent; Nanite cannot render it.
+            Optic->SetForceDisableNanite(true);
+            Optic->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+            Optic->SetOnlyOwnerSee(Gun == ViewGun);
+            Optic->CastShadow = Gun != ViewGun;
+            Optic->RegisterComponent();
+        }
+    WorldGun->SetRelativeLocation(FVector(4, 2, 0));
+    WorldGun->SetRelativeRotation(FRotator(0, 90, -90));
+}
+
+void AHoverPilot::SetMuzzleFlashOverride(UNiagaraSystem *System)
+{
+    // GunRig is held const because the pilot only reads it; this one in-memory write is the gallery's and is
+    // never saved (no Modify / MarkPackageDirty), so the DA on disk keeps what AuthorGunRigs.py authored.
+    if (!GunRig)
+        return;
+    const_cast<UHoverGunRig *>(GunRig.Get())->MuzzleFlashOverride = System;
+    UE_LOG(LogTemp, Log, TEXT("HOVER_GUN muzzle flash override %s on %s"), System ? *System->GetName() : TEXT("cleared"),
+           *GunRig->GetName());
+}
+
+void AHoverPilot::ApplyGunRig(const UHoverGunRig *Rig)
+{
+    if (!Assets)
+        return;
+    if (Rig && !Rig->Mesh)
+        Rig = nullptr;
+    if (Rig == GunRig && (Rig ? bRiggedGun : bStaticGunReady))
+        return;
+    // The camera body hide marks the held gun it found; hand that state over to the new held gun.
+    const bool HideHeld = bCameraHidesBody;
+    if (HideHeld)
+        ApplyCameraBodyHide(false);
+    GetWorldTimerManager().ClearTimer(GunClipTimer);
+    GetWorldTimerManager().ClearTimer(GunReloadEjectTimer);
+    // Before any SetSkeletalMesh: the old skeleton's sequence must not stay on the single-node instance.
+    for (auto *Gun : {ViewGunSkel.Get(), WorldGunSkel.Get()})
+        if (Gun->GetSingleNodeInstance())
+        {
+            Gun->Stop();
+            Gun->SetAnimation(nullptr);
+        }
+    CurrentGunClip = nullptr;
+    GunRig = Rig;
+    bRiggedGun = Rig != nullptr;
+    bGunEmpty = false;
+    GunCylinderAngle = 0.f;
+    GunClipRate = 1.f;
+    if (Rig)
+    {
+        // Every rig is X forward from grip_r; its own fallbacks, never the Y-forward Ballista DA vectors.
+        GunForward = FVector::ForwardVector;
+        GunMuzzle = Rig->FallbackMuzzle;
+        GunGrip = Rig->FallbackGrip;
+        GunSupportGrip = Rig->FallbackSupportGrip;
+        GunSight = Rig->FallbackSight;
+        for (auto *Gun : {ViewGunSkel.Get(), WorldGunSkel.Get()})
+        {
+            Gun->SetSkeletalMesh(Rig->Mesh);
+            Gun->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+            // Clips keep time while a pair member is hidden (view toggle, camera body hide) so a view
+            // switch mid-reload shows the magazine where the other view left it.
+            Gun->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+        }
+        // Rest poses before the first UpdateGunTransform; the rig is X forward so no yaw is needed.
+        ViewGunSkel->SetRelativeLocation(FVector(35, 18, -20));
+        WorldGunSkel->SetRelativeLocation(FVector(4, 2, 0));
+        // The static Ballista pair stays hidden while rigged (a rigged start never gives it a mesh).
+        ViewGun->SetVisibility(false, true);
+        WorldGun->SetVisibility(false, true);
+        if (Rig->bSocketsDriveOffsets)
+        {
+            // Locations only: the root bone's x100 import scale is in the transform, not in the positions.
+            const TPair<FName, FVector *> Sockets[] = {{Rig->MuzzleSocket, &GunMuzzle},
+                                                       {Rig->GripSocket, &GunGrip},
+                                                       {Rig->SupportSocket, &GunSupportGrip},
+                                                       {Rig->SightSocket, &GunSight}};
+            for (const auto &Socket : Sockets)
+            {
+                FTransform Transform;
+                if (ResolveGunSocket(Rig->Mesh, Socket.Key, Transform))
+                    *Socket.Value = Transform.GetLocation();
+                else
+                    UE_LOG(LogTemp, Warning, TEXT("HOVER_GUN socket %s missing on %s; keeping the rig fallback %s"),
+                           *Socket.Key.ToString(), *GetNameSafe(Rig->Mesh), *Socket.Value->ToString());
+            }
+        }
+        if (MuzzleAttachSocket().IsNone())
+            UE_LOG(LogTemp, Warning, TEXT("HOVER_GUN muzzle socket %s missing on %s; flash, light and sound use %s"),
+                   *Rig->MuzzleSocket.ToString(), *GetNameSafe(Rig->Mesh), *GunMuzzle.ToString());
+        PlayGunIdle();
+    }
+    else
+    {
+        // DA values, as at BeginPlay: the Ballista's own Y-forward frame.
+        GunMuzzle = Assets->GunMuzzle;
+        GunForward = Assets->GunForward;
+        GunGrip = Assets->GunGrip;
+        GunSupportGrip = Assets->GunSupportGrip;
+        GunSight = Assets->GunSight;
+        if (!bStaticGunReady)
+            SetupStaticGun();
+        for (auto *Gun : {ViewGunSkel.Get(), WorldGunSkel.Get()})
+            Gun->SetVisibility(false, true);
+    }
+    // EnsureMuzzleLight may have attached the light to the pair that is now hidden.
+    if (MuzzleLight)
+        AttachMuzzleLight();
+    // OwnerNoSee is set only on a hide transition; re-apply the current state to the new held gun.
+    if (HideHeld)
+        ApplyCameraBodyHide(true);
+    UE_LOG(LogTemp, Display, TEXT("HOVER_GUN rigged=%d mesh=%s muzzle=%s grip=%s support=%s rig=%s"), bRiggedGun,
+           Rig ? *GetNameSafe(Rig->Mesh) : *GetNameSafe(Assets->Gun), *GunMuzzle.ToString(), *GunGrip.ToString(),
+           *GunSupportGrip.ToString(), *GetNameSafe(Rig));
+}
+
+FTransform AHoverPilot::GunEjectTransform() const
+{
+    // Live, not bind pose: a revolver's ejection_port lines up with the swung-out cylinder only mid-Reload.
+    const UPrimitiveComponent *Gun = ActiveGunPrimitive(bReview);
+    // Rotation and location only: rig sockets carry the root bone's x100 import scale, and the vendor
+    // shell code sets the rifle actor's transform from this one.
+    if (bRiggedGun && !GunRig->EjectSocket.IsNone() && Gun->DoesSocketExist(GunRig->EjectSocket))
+        return FTransform(Gun->GetSocketQuaternion(GunRig->EjectSocket), Gun->GetSocketLocation(GunRig->EjectSocket));
+    const FVector Breech = Gun->GetComponentTransform().TransformPosition(GunGrip);
+    // A rig without the socket ejects at its grip with the socket convention's X to the gun's right.
+    if (bRiggedGun)
+        return FTransform(Gun->GetComponentQuat() * FRotator(0, 90, 0).Quaternion(), Breech);
+    // The static Ballista has no socket and keeps its visible breech at the grip.
+    return FTransform(Gun->GetComponentQuat(), Breech);
+}
+
+void AHoverPilot::EjectGunShell(AHoverCyberRifle *Rifle) const
+{
+    if (bRiggedGun)
+        Rifle->EjectRigShellAt(GunEjectTransform(), GunRig->EjectDirection, GunRig->EjectImpulse);
+    else
+        Rifle->EjectShellAt(GunEjectTransform());
+}
+
+void AHoverPilot::AttachMuzzleLight()
+{
+    UPrimitiveComponent *ActiveGun = ActiveGunPrimitive(bReview);
+    if (MuzzleLight->GetAttachParent() != ActiveGun || MuzzleLight->GetAttachSocketName() != MuzzleAttachSocket())
+        MuzzleLight->AttachToComponent(ActiveGun, FAttachmentTransformRules::KeepRelativeTransform,
+                                       MuzzleAttachSocket());
+    MuzzleLight->SetRelativeLocation(MuzzleAttachOffset());
+    // Rig sockets carry the root bone's x100 import scale; the light keeps world scale 1.
+    if (bRiggedGun)
+        MuzzleLight->SetWorldScale3D(FVector::OneVector);
+    else
+        MuzzleLight->SetRelativeScale3D(FVector::OneVector);
+}
+
+void AHoverPilot::SetGunEmpty(bool bEmpty)
+{
+    bGunEmpty = bEmpty;
+}
+
+void AHoverPilot::EjectShellForShot(AHoverCyberRifle *Rifle)
+{
+    if (!bRiggedGun || (GunRig->bEjectsPerShot && GunRig->EjectDelay <= 0))
+        EjectGunShell(Rifle);
+    else if (GunRig->bEjectsPerShot)
+        // Pump, lever and bolt: the casing leaves on the stroke, which plays at the Fire clip's rate.
+        ScheduleGunEject(Rifle, GunRig->EjectDelay / FMath::Max(GunClipRate, .01f), 1);
+}
+
+void AHoverPilot::ScheduleGunEject(AHoverCyberRifle *Rifle, float Delay, int32 Count, FTimerHandle *Handle)
+{
+    FTimerHandle Stroke; // Per round: a shared handle would cancel the previous round's casing.
+    const TWeakObjectPtr<AHoverCyberRifle> WeakRifle(Rifle);
+    const UHoverGunRig *Rig = GunRig;
+    const auto Eject = [this, WeakRifle, Rig, Count]() {
+        // A rig swap before the casing falls drops it with the old gun.
+        if (!WeakRifle.IsValid() || GunRig != Rig)
+            return;
+        for (int32 I = 0; I < Count; ++I)
+            EjectGunShell(WeakRifle.Get());
+    };
+    GetWorldTimerManager().SetTimer(Handle ? *Handle : Stroke, FTimerDelegate::CreateWeakLambda(this, Eject),
+                                    FMath::Max(Delay, .01f), false);
+}
+
+void AHoverPilot::ScheduleReloadEject(AHoverCyberRifle *Rifle, float Duration, int32 Spent)
+{
+    if (!Rifle || !bRiggedGun || GunRig->bEjectsPerShot || GunRig->EjectDelay <= 0 || Spent <= 0)
+        return;
+    // EjectDelay is clip time; PlayGunReload stretches the clip to Duration, so the empties keep the beat.
+    // Called right after PlayGunReload, so CurrentGunClip is the reload clip (empty or tactical) now playing.
+    const bool Reloading =
+        CurrentGunClip && (CurrentGunClip == GunRig->Reload || CurrentGunClip == GunRig->ReloadTactical);
+    const float Length = Reloading ? FMath::Max(CurrentGunClip->GetPlayLength(), .01f) : 0.f;
+    const float Scale = Length > 0 && Duration > 0 ? Duration / Length : 1.f;
+    ScheduleGunEject(Rifle, GunRig->EjectDelay * Scale, FMath::Min(Spent, 8), &GunReloadEjectTimer);
+}
+
+void AHoverPilot::AdvanceGunCylinder()
+{
+    if (bRiggedGun && !GunRig->CylinderBone.IsNone())
+        GunCylinderAngle = FRotator::ClampAxis(GunCylinderAngle + GunRig->IndexDegrees);
+}
+
+float AHoverPilot::GunCylinderApplied() const
+{
+    if (!bRiggedGun || !GunRig || GunRig->CylinderBone.IsNone())
+        return 0.f;
+    // AdvanceGunCylinder runs as the indexing clip starts, so while that clip plays the bone only gets the
+    // angle from before this shot; the clip itself supplies the rest and lands exactly on GunCylinderAngle.
+    const bool Indexing = CurrentGunClip && (CurrentGunClip == GunRig->Fire || CurrentGunClip == GunRig->FireLast ||
+                                             CurrentGunClip == GunRig->DryFire || CurrentGunClip == GunRig->Chamber);
+    return FRotator::NormalizeAxis(GunCylinderAngle - (Indexing ? GunRig->IndexDegrees : 0.f));
+}
+
+void AHoverPilot::FinalizeGunPose(USkeletalMeshComponent *Gun)
+{
+    const float Applied = GunCylinderApplied();
+    if (!Gun || FMath::IsNearlyZero(Applied, .01f) || !Gun->GetSkeletalMeshAsset())
+        return;
+    const int32 Bone = Gun->GetBoneIndex(GunRig->CylinderBone);
+    // The finalized read buffer is what SendRenderDynamicData and GetSocketTransform use for this frame;
+    // the next evaluation rewrites it from the clip, so nothing accumulates. Single-node playback has no
+    // graph to put a ModifyBone node in, hence the in-place edit.
+    auto &Pose = const_cast<TArray<FTransform> &>(Gun->GetComponentSpaceTransforms());
+    if (Bone == INDEX_NONE || !Pose.IsValidIndex(Bone))
+        return;
+    const FTransform Pivot = Pose[Bone];
+    // Spin about the cylinder bone's own X axis (every rig bone is identity-oriented in component space, so
+    // this is the same axis the clips turn it about), through the bone's origin.
+    const FQuat Spin = Pivot.GetRotation() * FQuat(FVector::ForwardVector, FMath::DegreesToRadians(Applied)) *
+                       Pivot.GetRotation().Inverse();
+    const FTransform Delta = FTransform(-Pivot.GetLocation()) * FTransform(Spin) * FTransform(Pivot.GetLocation());
+    const FReferenceSkeleton &Ref = Gun->GetSkeletalMeshAsset()->GetRefSkeleton();
+    for (int32 I = Bone; I < Pose.Num(); ++I)
+        if (I == Bone || Ref.BoneIsChildOf(I, Bone))
+            Pose[I] = Pose[I] * Delta;
+}
+
+void AHoverPilot::PlayGunClip(UAnimSequence *Clip, float DurationOrZero, bool bLoop)
+{
+    if (!bRiggedGun)
+        return;
+    GetWorldTimerManager().ClearTimer(GunClipTimer);
+    CurrentGunClip = Clip;
+    GunClipStartTime = GetWorld()->GetTimeSeconds();
+    if (!Clip)
+    {
+        for (auto *Gun : {ViewGunSkel.Get(), WorldGunSkel.Get()})
+            Gun->Stop();
+        return;
+    }
+    const float Length = FMath::Max(Clip->GetPlayLength(), .01f);
+    const float Rate = DurationOrZero > 0 ? Length / FMath::Max(DurationOrZero, .01f) : 1.f;
+    GunClipRate = Rate;
+    for (auto *Gun : {ViewGunSkel.Get(), WorldGunSkel.Get()})
+    {
+        Gun->PlayAnimation(Clip, bLoop);
+        Gun->SetPlayRate(Rate);
+        Gun->SetPosition(0.f, false); // A re-triggered Fire clip restarts the bolt from home.
+    }
+    if (!bLoop)
+        GetWorldTimerManager().SetTimer(GunClipTimer, this, &AHoverPilot::PlayGunIdle, Length / Rate, false);
+}
+
+void AHoverPilot::PlayGunIdle()
+{
+    // Locked back after the last round until a reload; a rig without IdleEmpty idles bolt home.
+    UAnimSequence *Clip = GunRig && bGunEmpty && GunRig->IdleEmpty ? GunRig->IdleEmpty.Get()
+                          : GunRig                                 ? GunRig->Idle.Get()
+                                                                   : nullptr;
+    PlayGunClip(Clip, 0.f, true);
+}
+
+void AHoverPilot::PlayGunFire(float MaxSeconds, bool bLastRound)
+{
+    if (!bRiggedGun)
+        return;
+    UAnimSequence *Clip = bLastRound && GunRig->FireLast ? GunRig->FireLast.Get() : GunRig->Fire.Get();
+    if (!Clip)
+        return;
+    bGunEmpty = bGunEmpty || bLastRound; // Its finish timer hands over to IdleEmpty.
+    // A semi press faster than the clip lets the running cycle finish rather than snapping the bolt home;
+    // past 60 % it restarts. The last round always plays, so the bolt locks back. No cylinder index for a
+    // press the clip swallows: the additive would jump a chamber under the still-running clip.
+    if (!bLastRound && CurrentGunClip == GunRig->Fire && CurrentGunClip->GetPlayLength() > 0 &&
+        (GetWorld()->GetTimeSeconds() - GunClipStartTime) * GunClipRate < .6f * CurrentGunClip->GetPlayLength())
+        return;
+    AdvanceGunCylinder();
+    const float Length = Clip->GetPlayLength();
+    PlayGunClip(Clip, MaxSeconds > 0 && Length > MaxSeconds ? MaxSeconds : 0.f);
+}
+
+void AHoverPilot::PlayGunDryFire()
+{
+    if (!bRiggedGun || !GunRig->DryFire)
+        return;
+    AdvanceGunCylinder();
+    PlayGunClip(GunRig->DryFire, 0.f);
+}
+
+void AHoverPilot::PlayGunReload(float Duration, bool bTactical)
+{
+    if (!bRiggedGun)
+        return;
+    // The empty Reload starts locked back and releases the bolt; the tactical one keeps it home.
+    UAnimSequence *Clip = bTactical && GunRig->ReloadTactical ? GunRig->ReloadTactical.Get() : GunRig->Reload.Get();
+    bGunEmpty = false; // A cancelled reload re-sets it from the magazine (AHoverCyberRifle::CancelReload).
+    // The body plays no reload of its own: it keeps the aim pose for the whole clip (plus a beat to settle
+    // the left hand back on grip_l) and only the support IK moves, following the clip's hand_l_target.
+    // UpdateAppearance also tops GunRaisedTime up to .5 s on every reloading tick; this covers the whole
+    // duration up front so a cancelled reload still lowers the gun on the same schedule.
+    GunRaisedTime = FMath::Max(GunRaisedTime, Duration + .3f);
+    if (Clip)
+        PlayGunClip(Clip, Duration);
+}
+
+UAnimSequence *AHoverPilot::GetStanceAimPose() const
+{
+    if (!Assets)
+        return nullptr;
+    if (bRiggedGun && GunRig && GunRig->Stance == EHoverGunStance::Pistol && Assets->PistolAim)
+        return Assets->PistolAim;
+    return Assets->RifleAim;
+}
+
+FVector AHoverPilot::SupportGripOffset(const USkeletalMeshComponent *Gun) const
+{
+    // Component space of a rig is gun space (X forward, origin at grip_r); the root bone's x100 import scale
+    // sits on the socket transform, not in its location, so the location reads in cm as the other offsets do.
+    // Read from the component's current pose, not the reference skeleton: the Reload clips move this bone
+    // to the magazine, the belt and back, and the hand is meant to follow it frame by frame.
+    // Measured from the SEAT (grip_r + GripSeatOffset), the point UpdateGunTransform puts at the right palm: the IK
+    // node adds this to the right palm in the gun's frame, so anything else would misplace the left hand by the seat.
+    if (bRiggedGun && GunRig && Gun && !GunRig->HandTargetSocket.IsNone() &&
+        Gun->DoesSocketExist(GunRig->HandTargetSocket))
+        return Gun->GetSocketTransform(GunRig->HandTargetSocket, RTS_Component).GetLocation() - GunSeatPoint();
+    return GunSupportGrip - GunSeatPoint();
+}
+
+void AHoverPilot::SupportHandPose(const USkeletalMeshComponent *Gun, FQuat &OutRotation, float &OutCurl) const
+{
+    OutRotation = FQuat::Identity;
+    OutCurl = 1.f;
+    if (!bRiggedGun || !GunRig || !Gun || GunRig->HandTargetSocket.IsNone() ||
+        !Gun->DoesSocketExist(GunRig->HandTargetSocket))
+        return;
+    // Rotation: component (gun) space, which every rig bone rests at identity in (ValidateGunClips.py), so the
+    // bone's current rotation IS the authored delta; the socket transform's scale (root x100) never touches it.
+    OutRotation = Gun->GetSocketTransform(GunRig->HandTargetSocket, RTS_Component).GetRotation().GetNormalized();
+    // Curl: the bone's own parent-relative scale X. The component-space scale would be 100 x the key.
+    const int32 Bone = Gun->GetBoneIndex(GunRig->HandTargetSocket);
+    const TArrayView<const FTransform> Local = const_cast<USkeletalMeshComponent *>(Gun)->GetBoneSpaceTransformsView();
+    if (Bone != INDEX_NONE && Local.IsValidIndex(Bone))
+    {
+        const float Curl = float(Local[Bone].GetScale3D().X);
+        if (FMath::IsFinite(Curl) && Curl > KINDA_SMALL_NUMBER)
+            OutCurl = FMath::Clamp(Curl, 0.f, 1.6f);
+    }
+}
+
+UAnimSequence *AHoverPilot::GetStanceFireAdditive(float &OutScale) const
+{
+    OutScale = 1.f;
+    if (!Assets || !bRiggedGun || !GunRig || bMounted)
+        return nullptr;
+    const bool Pistol = GunRig->Stance == EHoverGunStance::Pistol;
+    UAnimSequence *Add = Pistol ? Assets->PistolFireAdd.Get() : Assets->RifleFireAdd.Get();
+    OutScale = Pistol ? Assets->PistolRecoilScale : Assets->RifleRecoilScale;
+    // A non-additive sequence accumulated as one would add a whole pose on top of the aim pose.
+    return Add && Add->IsValidAdditive() ? Add : nullptr;
+}
+
+void AHoverPilot::PlayGunChamber()
+{
+    if (!bRiggedGun || !GunRig->Chamber)
+        return;
+    AdvanceGunCylinder();
+    PlayGunClip(GunRig->Chamber, 0.f);
+}
+
+void AHoverPilot::StopGunClip()
+{
+    GetWorldTimerManager().ClearTimer(GunReloadEjectTimer); // A cancelled reload drops no empties.
+    PlayGunIdle();
 }
 
 void AHoverPilot::ImpactPulse(const FVector &Location, const FVector &Normal, float Scale, float Rumble, float Duration,
@@ -1631,6 +2977,17 @@ float AHoverPilot::GetHealth() const
     return Combat && Combat->Survival ? Combat->Survival->GetHealth() : SandboxHealth;
 }
 
+float AHoverPilot::GetMaxHealth() const
+{
+    return Combat && Combat->Survival ? Combat->Survival->GetMaxHealth() : 100.f;
+}
+
+bool AHoverPilot::UsesAimFacing() const
+{
+    // Out of line so the complete bridge type is visible for the reload term (NYC Section 2 Â§4).
+    return bMeleeEquipped || bAiming || GunRaisedTime > 0 || !bReview || (Combat && Combat->IsReloading());
+}
+
 float AHoverPilot::TakeDamage(float Damage, const FDamageEvent &Event, AController *EventInstigator, AActor *Causer)
 {
     if (bDefeated || Damage <= 0 || GetWorld()->GetTimeSeconds() < RespawnGraceUntil)
@@ -1652,12 +3009,7 @@ float AHoverPilot::TakeDamage(float Damage, const FDamageEvent &Event, AControll
     // still sends base damage. Apply it per hit, never to the shared zombie data.
     if (Cast<AHoverCyberZombie>(Causer))
         if (const auto *Mode = GetWorld()->GetAuthGameMode<AHoverCyberCityGameMode>(); Mode && Mode->GetWaveSettings())
-        {
-            float HealthScale = 1.f, DamageScale = 1.f, SpeedScale = 1.f;
-            Mode->GetWaveSettings()->GetDifficultyMultipliers(Mode->GetCurrentWave(), HealthScale, DamageScale,
-                                                              SpeedScale);
-            Damage *= FMath::Max(0.f, DamageScale);
-        }
+            Damage *= FMath::Max(0.f, Mode->GetRoundDamageScale(Mode->GetCurrentWave()));
     const float Applied =
         FMath::Min(GetHealth(), FMath::Max(0.f, Super::TakeDamage(Damage, Event, EventInstigator, Causer)));
     SandboxHealth = FMath::Max(0.f, GetHealth() - Applied);
@@ -1692,6 +3044,13 @@ float AHoverPilot::TakeDamage(float Damage, const FDamageEvent &Event, AControll
                     nullptr,
                     TEXT("/Game/CLS/Example/SetupYourHeroExample/Anims/Death/MM_Death_Back_01.MM_Death_Back_01")),
                 3.f, false);
+        if (bMortalLocked)
+        {
+            // NYC Survival (Section 2 Â§5): no 3 s reset, no teleport, no heal. The mode owns game over.
+            DefeatedUntil = BIG_NUMBER;
+            if (auto *Mode = GetWorld()->GetAuthGameMode<AHoverNYCSurvivalGameMode>())
+                Mode->BeginGameOver();
+        }
     }
     return Applied;
 }
@@ -1773,8 +3132,10 @@ void AHoverPilot::Tick(float DT)
     FireCooldown = FMath::Max(0.f, FireCooldown - DT);
     StatusTime = FMath::Max(0.f, StatusTime - DT);
     HoverMotion::Spring(GunRecoil, GunRecoilVelocity, 0.f, DT, Assets->GunRecoilRecovery);
+    UpdateViewRecoil(DT);
     UpdateInput(DT);
     UpdateGroundPosture(DT);
+    UpdateLifeEngine(DT);
     if (LocomotionBridge && LocomotionBridge->bEnabled && !bMounted && GetCharacterMovement()->IsMovingOnGround() &&
         GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight() >= 70)
     {
@@ -1786,6 +3147,7 @@ void AHoverPilot::Tick(float DT)
     GetMesh()->SetRelativeLocation(
         FVector(0, 0, bMounted ? -97.f : -GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight()));
     UpdateAppearance(DT);
+    UpdateFootsteps(DT);
     if (GetActorLocation().Z < -10000)
         HoverReset();
 }
@@ -1793,7 +3155,7 @@ void AHoverPilot::Tick(float DT)
 FString AHoverPilot::GetPrompt() const
 {
     if (bDefeated)
-        return TEXT("Defeated - resetting at the start...");
+        return bMortalLocked ? TEXT("Vexa is down - game over") : TEXT("Defeated - resetting at the start...");
     if (Combat && !Combat->GetPrompt().IsEmpty())
         return Combat->GetPrompt();
     if (StatusTime > 0)
@@ -1807,8 +3169,16 @@ FString AHoverPilot::GetPrompt() const
         if (const auto *PC = Cast<AHoverTestController>(GetController()); PC && PC->IsNearBike())
             return TEXT("Hold X to ride the hoverbike");
     if (bMounted)
+    {
+        if (bSurvivalRules)
+            return CanDismount() ? TEXT("Hold Y / G: get off   |   Hold L1 / Q: stronger bank while steering")
+                                 : TEXT("Descend and slow down to get off   |   Hold L1 / Q: stronger bank");
         return CanDismount() ? TEXT("Hold X: get off   |   Hold L1 / Q: stronger bank while steering")
                              : TEXT("Descend and slow down to get off   |   Hold L1 / Q: stronger bank");
+    }
+    if (bSurvivalRules)
+        return HasBoardNearby() ? TEXT("Hold Y / G: glider (quick escape)   |   X: reload")
+                                : TEXT("Glider: hold Y / G next to it   |   X: reload");
     return HasBoardNearby() ? TEXT("Hold X to step on and lock the pads")
                             : (Combat ? TEXT("Walk to the glider   |   Home: reset test")
                                       : TEXT("Walk to the glider   |   R: reset test"));
@@ -1822,8 +3192,8 @@ void AHoverHUD::DrawHUD()
         return;
     DrawText(TEXT("D-pad Up / F6: test settings + level"), FLinearColor(.7f, .85f, 1.f), 24, 16);
     const FString HealthLabel =
-        Pilot ? FString::Printf(TEXT("%s | HP %.0f/100"), Pilot->IsInvincible() ? TEXT("INVINCIBLE") : TEXT("NORMAL"),
-                                Pilot->GetHealth())
+        Pilot ? FString::Printf(TEXT("%s | HP %.0f/%.0f"), Pilot->IsInvincible() ? TEXT("INVINCIBLE") : TEXT("NORMAL"),
+                                Pilot->GetHealth(), Pilot->GetMaxHealth())
               : TEXT("VEHICLE");
     if (auto *Waves = GetWorld()->GetAuthGameMode<AHoverCyberCityGameMode>())
         DrawText(FString::Printf(TEXT("%s | Kills: %d | Gold: %d%s"), *HealthLabel, Waves->GetTotalZombiesKilled(),
@@ -1858,6 +3228,30 @@ void AHoverHUD::DrawHUD()
     {
         DrawLine(X - 5, Y, X + 5, Y, FLinearColor::White);
         DrawLine(X, Y - 5, X, Y + 5, FLinearColor::White);
+    }
+    if (Pilot->bEnhancedGunFeel)
+    {
+        const UHoverGunFeel *Feel = Pilot->GetGunFeel();
+        const float Age = Pilot->GetHitMarkerAge();
+        if (Feel->HitMarkerSeconds > 0 && Age >= 0 && Age < Feel->HitMarkerSeconds)
+        {
+            const bool Kill = Pilot->WasLastHitKill();
+            FLinearColor Color = Kill                          ? Feel->KillMarkerColor
+                                 : Pilot->WasLastHitHeadshot() ? Feel->HeadMarkerColor
+                                                               : Feel->BodyMarkerColor;
+            Color.A = 1.f - Age / Feel->HitMarkerSeconds;
+            // Spread-driven gap (P0-5): 4 px plus 6 px per degree of the rifle's effective spread.
+            const auto *Rifle = Pilot->Combat ? Cast<AHoverCyberRifle>(Pilot->Combat->GetWeapon()) : nullptr;
+            const float Gap = 4.f + (Rifle ? Rifle->GetEffectiveSpreadDegrees() * 6.f : 0.f);
+            const float Size = Kill ? Feel->KillMarkerScale : 1.f;
+            const float Signs[4][2] = {{1, 1}, {-1, 1}, {1, -1}, {-1, -1}};
+            for (const auto &Sign : Signs)
+                DrawLine(X + Sign[0] * (Gap + 2) * Size, Y + Sign[1] * (Gap + 2) * Size,
+                         X + Sign[0] * (Gap + 10) * Size, Y + Sign[1] * (Gap + 10) * Size, Color, 2.f);
+        }
+        const float Flash = Pilot->GetKillFlashAge();
+        if (Flash >= 0 && Flash < .06f)
+            DrawRect(FLinearColor(1, 1, 1, .12f * (1.f - Flash / .06f)), 0, 0, Canvas->ClipX, Canvas->ClipY);
     }
     DrawRect(FLinearColor(0, 0, 0, .65f), 18, Canvas->ClipY - 108, FMath::Min(Canvas->ClipX - 36, 850.f), 90);
     DrawText(Pilot->GetPrompt(), FLinearColor::White, 32, Canvas->ClipY - 96, nullptr, 1.1f);

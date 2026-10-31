@@ -29,6 +29,11 @@ class HOVERFLIGHT_API UHoverGraphicsMenu : public UUserWidget
     {
         return PendingLevel;
     }
+    // Owner 2026-10-31: the Life Engine toggle lives here, not in the console. -1 when the pawn has no solver.
+    int32 GetSelectedLifeEngine() const
+    {
+        return PendingLifeEngine;
+    }
 
   protected:
     virtual void NativeOnInitialized() override;
@@ -44,6 +49,9 @@ class HOVERFLIGHT_API UHoverGraphicsMenu : public UUserWidget
     UPROPERTY() TObjectPtr<UTextBlock> HelpText;
     UPROPERTY() TObjectPtr<UTextBlock> DetailText;
     UPROPERTY() TObjectPtr<UTextBlock> ImageHelpText;
+    UPROPERTY() TObjectPtr<UTextBlock> MovementText;
+    int32 PendingLifeEngine = -1;
+    int32 GetRowCount() const;
     FHoverZombieTuning PendingZombies;
     bool bZombiePage = false;
     FHoverGraphicsOptions Pending;

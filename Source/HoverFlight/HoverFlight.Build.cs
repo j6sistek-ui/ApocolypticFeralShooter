@@ -4,8 +4,8 @@ public class HoverFlight : ModuleRules
     public HoverFlight(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
-        PublicDependencyModuleNames.AddRange(new[] { "Core", "CoreUObject", "Engine", "InputCore", "AnimGraphRuntime", "EnhancedInput", "ChaosVehicles", "UMG", "Niagara", "IKRig", "PoseSearch", "GameplayTags", "ZombieEngineStudio", "AIModule", "NavigationSystem" });
-        PrivateDependencyModuleNames.AddRange(new[] { "SlateCore", "Slate", "ApplicationCore", "DLSSBlueprint", "StreamlineBlueprint", "StreamlineDLSSGBlueprint", "StreamlineReflexBlueprint" });
+        PublicDependencyModuleNames.AddRange(new[] { "Core", "CoreUObject", "Engine", "InputCore", "AnimGraphRuntime", "EnhancedInput", "ChaosVehicles", "UMG", "Niagara", "IKRig", "PoseSearch", "GameplayTags", "ZombieEngineStudio", "AIModule", "NavigationSystem", "ImageCore", "HLMovementSystem" });
+        PrivateDependencyModuleNames.AddRange(new[] { "SlateCore", "Slate", "ApplicationCore", "Json", "DLSSBlueprint", "StreamlineBlueprint", "StreamlineDLSSGBlueprint", "StreamlineReflexBlueprint" });
         if (Target.bBuildEditor)
             PrivateDependencyModuleNames.AddRange(new[] { "UnrealEd", "VirtualTexturingEditor", "BlueprintGraph", "KismetCompiler", "AnimGraph", "PhysicsUtilities", "NiagaraEditor" });
     }

@@ -16,6 +16,77 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Pawn.h"
 #include "AnimNodes/AnimNode_RetargetPoseFromMesh.h"
+#include "Animation/AnimationPoseData.h"
+#include "AnimationRuntime.h"
+
+// Design A1 additive with the right fingers held (2026-10-30 23:30, "her hand is not on the grip"): the CLS fire
+// clip retargeted onto Vexa splays the right fingers while it kicks hand_r, and the gun, seated at the palm, is
+// left with an open hand beside its grip. Here the base (the stance aim pose) is evaluated once, every bone UNDER
+// hand_r keeps its aim-pose local transform through the additive, and hand_r itself keeps the kick: that is what
+// the gun now follows (AHoverPilot::UpdateGunTransform). No cached pose and no second evaluation of the shared aim
+// player: this node owns both links like the engine node it extends and only re-does its Evaluate.
+struct FHoverStanceFireNode final : FAnimNode_ApplyAdditive
+{
+    FBoneReference Hand;
+    TArray<FCompactPoseBoneIndex> Held;
+    // Evidence for the headless verify: the largest finger-local rotation the additive would have applied this
+    // evaluation before the hold put the aim pose back (0 while the additive is off). Written on the anim thread,
+    // read in PostUpdate; a frame of lag or a torn read is harmless for a peak.
+    float LastSplayDeg = 0.f;
+    FHoverStanceFireNode()
+    {
+        Hand.BoneName = TEXT("hand_r");
+    }
+    virtual void CacheBones_AnyThread(const FAnimationCacheBonesContext &Context) override
+    {
+        FAnimNode_ApplyAdditive::CacheBones_AnyThread(Context);
+        const FBoneContainer &Bones = Context.AnimInstanceProxy->GetRequiredBones();
+        Hand.Initialize(Bones);
+        Held.Reset();
+        if (!Hand.IsValidToEvaluate(Bones))
+            return;
+        const FCompactPoseBoneIndex HandIndex = Hand.GetCompactPoseIndex(Bones);
+        // Every descendant (thumb/index/middle/ring/pinky *_01/_02/_03_r and Vexa's *_metacarpal_r), parent-first
+        // since compact indices are parent-first; the hand itself is not held.
+        for (int32 I = 0; I < Bones.GetCompactPoseNumBones(); ++I)
+        {
+            const FCompactPoseBoneIndex Index(I);
+            for (FCompactPoseBoneIndex Parent = Bones.GetParentBoneIndex(Index); Parent.IsValid();
+                 Parent = Bones.GetParentBoneIndex(Parent))
+                if (Parent == HandIndex)
+                {
+                    Held.Add(Index);
+                    break;
+                }
+        }
+    }
+    virtual void Evaluate_AnyThread(FPoseContext &Output) override
+    {
+        if (!FAnimWeight::IsRelevant(ActualAlpha) || !IsLODEnabled(Output.AnimInstanceProxy) || Held.IsEmpty())
+        {
+            LastSplayDeg = 0.f;
+            FAnimNode_ApplyAdditive::Evaluate_AnyThread(Output);
+            return;
+        }
+        FPoseContext AdditiveContext(Output, true);
+        Base.Evaluate(Output);
+        TArray<FTransform, TInlineAllocator<32>> Grip;
+        for (const FCompactPoseBoneIndex &Index : Held)
+            Grip.Add(Output.Pose[Index]);
+        Additive.Evaluate(AdditiveContext);
+        FAnimationPoseData BasePose(Output);
+        const FAnimationPoseData AdditivePose(AdditiveContext);
+        FAnimationRuntime::AccumulateAdditivePose(BasePose, AdditivePose, ActualAlpha, AAT_LocalSpaceBase);
+        Output.Pose.NormalizeRotations();
+        float Splay = 0.f;
+        for (int32 I = 0; I < Held.Num(); ++I)
+        {
+            Splay = FMath::Max(Splay, float(Output.Pose[Held[I]].GetRotation().AngularDistance(Grip[I].GetRotation())));
+            Output.Pose[Held[I]] = Grip[I];
+        }
+        LastSplayDeg = FMath::RadiansToDegrees(Splay);
+    }
+};
 
 // Keep the current pose within both legs' reach before solving foot IK.
 // A fixed pelvis offset alone cannot cover the pack's taller dive/aim poses.
@@ -69,12 +140,33 @@ struct FHoverPelvisNode final : FAnimNode_ModifyBone
 };
 
 // Solve from this evaluation's right hand, avoiding a frame of weapon/hand lag.
+// Design B2 (2026-10-30): the rig's hand_l_target also carries a gun-space rotation delta (HandRotation) and a finger
+// curl (Curl). The PALM, not the wrist, lands on the target after the turn; after the IK the hand's component-space
+// rotation becomes D * (input rotation) with D = GunRotation * HandRotation * GunRotation^-1, and the 15 finger
+// bones get local rotation Ref * Pow(Ref^-1 * Aim, Curl): 1 = the aim pose's fingers, 0 = the open reference pose,
+// 1.6 = a tighter extrapolated grip. Everything blends with the node's Alpha like the IK itself.
 struct FHoverSupportHandNode final : FAnimNode_TwoBoneIK
 {
     FBoneReference GripHand, GripPalm, Palm, Shoulder;
+    FBoneReference Fingers[15];
     bool bGripAtPalm = false;
     FVector GripOffset = FVector::ZeroVector;
     FQuat GunRotation = FQuat::Identity;
+    FQuat HandRotation = FQuat::Identity;
+    float Curl = 1.f;
+    // The gun rides the right hand's kick: with a cached rest the gun frame used for the target and the turn is
+    // (hand_r now) * rest^-1 (clamped like the gun placement) over GunRotation, read from THIS evaluation's hand_r.
+    FQuat GripHandRest = FQuat::Identity;
+    bool bGripHandRest = false;
+    static const TCHAR *FingerName(int32 I)
+    {
+        static const TCHAR *Names[15] = {TEXT("thumb_01_l"),  TEXT("thumb_02_l"),  TEXT("thumb_03_l"),
+                                         TEXT("index_01_l"),  TEXT("index_02_l"),  TEXT("index_03_l"),
+                                         TEXT("middle_01_l"), TEXT("middle_02_l"), TEXT("middle_03_l"),
+                                         TEXT("ring_01_l"),   TEXT("ring_02_l"),   TEXT("ring_03_l"),
+                                         TEXT("pinky_01_l"),  TEXT("pinky_02_l"),  TEXT("pinky_03_l")};
+        return Names[I];
+    }
     FHoverSupportHandNode()
     {
         IKBone.BoneName = TEXT("hand_l");
@@ -95,6 +187,25 @@ struct FHoverSupportHandNode final : FAnimNode_TwoBoneIK
         GripPalm.Initialize(Bones);
         Palm.Initialize(Bones);
         Shoulder.Initialize(Bones);
+        for (int32 I = 0; I < 15; ++I)
+        {
+            Fingers[I].BoneName = FingerName(I);
+            Fingers[I].Initialize(Bones);
+        }
+    }
+    // Ref * Pow(Ref^-1 * Aim, Curl) through axis-angle scaling: an exact slerp inside [0, 1] and a clean
+    // extrapolation past 1 (the delta's angle grows, its axis stays), with the shortest arc always taken.
+    static FQuat CurlRotation(const FQuat &Ref, const FQuat &Aim, float Alpha)
+    {
+        FQuat Delta = (Ref.Inverse() * Aim).GetNormalized();
+        if (Delta.W < 0)
+            Delta = -Delta;
+        FVector Axis;
+        float Angle;
+        Delta.ToAxisAndAngle(Axis, Angle);
+        if (Angle < KINDA_SMALL_NUMBER || !Axis.Normalize())
+            return Ref;
+        return (Ref * FQuat(Axis, Angle * Alpha)).GetNormalized();
     }
     virtual void EvaluateSkeletalControl_AnyThread(FComponentSpacePoseContext &Output,
                                                    TArray<FBoneTransform> &Transforms) override
@@ -102,18 +213,109 @@ struct FHoverSupportHandNode final : FAnimNode_TwoBoneIK
         const auto &Bones = Output.Pose.GetPose().GetBoneContainer();
         if (!GripHand.IsValidToEvaluate(Bones) || !Palm.IsValidToEvaluate(Bones) || !Shoulder.IsValidToEvaluate(Bones))
             return;
-        const FVector Hand = Output.Pose.GetComponentSpaceTransform(IKBone.GetCompactPoseIndex(Bones)).GetLocation();
+        const FCompactPoseBoneIndex HandIndex = IKBone.GetCompactPoseIndex(Bones);
+        const FTransform HandInput = Output.Pose.GetComponentSpaceTransform(HandIndex);
+        const FVector Hand = HandInput.GetLocation();
         const FVector PalmOffset =
             (Output.Pose.GetComponentSpaceTransform(Palm.GetCompactPoseIndex(Bones)).GetLocation() - Hand) * .5f;
-        FVector Grip = Output.Pose.GetComponentSpaceTransform(GripHand.GetCompactPoseIndex(Bones)).GetLocation();
+        const FTransform GripHandNow = Output.Pose.GetComponentSpaceTransform(GripHand.GetCompactPoseIndex(Bones));
+        FVector Grip = GripHandNow.GetLocation();
         if (bGripAtPalm && GripPalm.IsValidToEvaluate(Bones))
             Grip = FMath::Lerp(
                 Grip, Output.Pose.GetComponentSpaceTransform(GripPalm.GetCompactPoseIndex(Bones)).GetLocation(), .5f);
-        EffectorLocation = Grip + GunRotation.RotateVector(GripOffset) - PalmOffset;
-        JointTargetLocation =
-            Output.Pose.GetComponentSpaceTransform(Shoulder.GetCompactPoseIndex(Bones)).GetLocation() +
-            FVector(30, 0, -35);
+        // The same kick AHoverPilot::UpdateGunTransform gives the gun, from the same pose (this evaluation's hand_r,
+        // which the pilot reads once it is finalized), so the support target sits where the kicked gun will be.
+        const FQuat GunRot =
+            bGripHandRest
+                ? (HoverClampRotation(GripHandNow.GetRotation() * GripHandRest.Inverse(), 25.f) * GunRotation)
+                      .GetNormalized()
+                : GunRotation;
+        // The hand turns about its wrist by D; the palm (half a hand along the fingers) then sits at
+        // wrist + D(PalmOffset), so the wrist effector backs off by the TURNED offset to put the palm on target.
+        const FQuat D = (GunRot * HandRotation * GunRot.Inverse()).GetNormalized();
+        const bool bTurn = !D.Equals(FQuat::Identity, 1e-4f);
+        const bool bCurl = !FMath::IsNearlyEqual(Curl, 1.f, 1e-3f);
+        EffectorLocation = Grip + GunRot.RotateVector(GripOffset) - D.RotateVector(PalmOffset);
+        // The fingers' input (aim pose) local rotations, read before the IK touches the pose; the reference pose
+        // from the bone container. Parent-first order is the array order (each _02 follows its _01).
+        FTransform FingerLocal[15];
+        bool bFinger[15] = {};
+        if (bCurl)
+            for (int32 I = 0; I < 15; ++I)
+            {
+                if (!Fingers[I].IsValidToEvaluate(Bones))
+                    continue;
+                const FCompactPoseBoneIndex Index = Fingers[I].GetCompactPoseIndex(Bones);
+                const FCompactPoseBoneIndex Parent = Bones.GetParentBoneIndex(Index);
+                if (!Parent.IsValid())
+                    continue;
+                FTransform Local = Output.Pose.GetComponentSpaceTransform(Index).GetRelativeTransform(
+                    Output.Pose.GetComponentSpaceTransform(Parent));
+                Local.SetRotation(CurlRotation(Bones.GetRefPoseTransform(Index).GetRotation(), Local.GetRotation(),
+                                               FMath::Clamp(Curl, 0.f, 1.6f)));
+                FingerLocal[I] = Local;
+                bFinger[I] = true;
+            }
+        // Elbow pole. Component space here is the mannequin's: +Y forward, +X her left. At the support grip
+        // the pole sits out-left of and below the shoulder, as before. A reload clip's hand_l_target takes
+        // the hand down to the belt (40-50 cm under the shoulder); the pole then follows it lower, further
+        // left and a little back, so the elbow hangs under and outside the hand instead of flipping forward
+        // through the receiver. A 15 cm dead band keeps the aim pose's own small hand height changes inert.
+        const FVector ShoulderLocation =
+            Output.Pose.GetComponentSpaceTransform(Shoulder.GetCompactPoseIndex(Bones)).GetLocation();
+        const float Drop = FMath::Clamp(float(ShoulderLocation.Z - EffectorLocation.Z) - 15.f, 0.f, 60.f);
+        JointTargetLocation = ShoulderLocation + FVector(30 + Drop * .25f, -Drop * .35f, -35 - Drop * .5f);
         FAnimNode_TwoBoneIK::EvaluateSkeletalControl_AnyThread(Output, Transforms);
+        if (!bTurn && !bCurl)
+            return;
+        // The IK leaves the hand's input rotation (bTakeRotationFromEffectorSpace and bMaintainEffectorRelRot are
+        // both off); its entry is the hand's. Children are set from this turned hand below, so they follow.
+        FBoneTransform *HandEntry = Transforms.FindByPredicate(
+            [&](const FBoneTransform &T) { return T.BoneIndex.GetInt() == HandIndex.GetInt(); });
+        if (!HandEntry)
+            return;
+        if (bTurn)
+            HandEntry->Transform.SetRotation((D * HandEntry->Transform.GetRotation()).GetNormalized());
+        if (!bCurl)
+            return;
+        // Component-space finger transforms from the new hand, appended in parent-before-child order (the array
+        // order), then the whole list sorted by bone index as LocalBlendCSBoneTransforms requires.
+        // Vexa's hands are UE5-style: index/middle/ring/pinky_01_l hang off a *_metacarpal_l bone, not off hand_l
+        // (only the thumb does). Output.Pose is still the INPUT pose here, so a parent that is not in Solved must be
+        // re-rooted on the moved hand through its own input local transform, or the finger lands where the aim pose
+        // left the metacarpal and the palm (midpoint hand_l / middle_01_l) lags the wrist by half its travel
+        // (verify run 2026-10-30 21:14: 20 cm off the target mid-reload). Every re-rooted ancestor is appended too.
+        TArray<TPair<int32, FTransform>, TInlineAllocator<24>> Solved;
+        Solved.Emplace(HandIndex.GetInt(), HandEntry->Transform);
+        auto FindSolved = [&](const FCompactPoseBoneIndex &Index) -> const TPair<int32, FTransform> * {
+            return Solved.FindByPredicate([&](const TPair<int32, FTransform> &P) { return P.Key == Index.GetInt(); });
+        };
+        // The new component-space transform of any bone under the hand: input local chain on the solved parent.
+        auto NewCS = [&](const FCompactPoseBoneIndex &Index, auto &Self) -> FTransform {
+            if (const TPair<int32, FTransform> *Known = FindSolved(Index))
+                return Known->Value;
+            const FCompactPoseBoneIndex Parent = Bones.GetParentBoneIndex(Index);
+            if (!Parent.IsValid() || Index.IsRootBone())
+                return Output.Pose.GetComponentSpaceTransform(Index);
+            const FTransform Local = Output.Pose.GetComponentSpaceTransform(Index).GetRelativeTransform(
+                Output.Pose.GetComponentSpaceTransform(Parent));
+            const FTransform CS = Local * Self(Parent, Self);
+            Solved.Emplace(Index.GetInt(), CS);
+            Transforms.Add(FBoneTransform(Index, CS));
+            return CS;
+        };
+        for (int32 I = 0; I < 15; ++I)
+        {
+            if (!bFinger[I])
+                continue;
+            const FCompactPoseBoneIndex Index = Fingers[I].GetCompactPoseIndex(Bones);
+            const FCompactPoseBoneIndex Parent = Bones.GetParentBoneIndex(Index);
+            const FTransform CS = FingerLocal[I] * NewCS(Parent, NewCS);
+            Solved.Emplace(Index.GetInt(), CS);
+            Transforms.Add(FBoneTransform(Index, CS));
+        }
+        Transforms.Sort(
+            [](const FBoneTransform &A, const FBoneTransform &B) { return A.BoneIndex.GetInt() < B.BoneIndex.GetInt(); });
     }
 };
 
@@ -259,6 +461,13 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
     FAnimNode_TwoWayBlend RideActionBlend, ClimbBlend, DiveBlend, AimActionBlend, WeaponPose;
     FAnimNode_BlendSpacePlayer_Standalone GliderAim;
     FAnimNode_ApplyAdditive ShotAdditive;
+    // Design A1: the on-foot stance fire reaction, a local-space additive over the stance aim pose (Rifle), on the
+    // aim path before the layered blend and the support IK; restarted from 0 on every shot, full weight while it
+    // runs, faded over its last 0.1 s, scaled by the DA's *RecoilScale.
+    FAnimNode_SequencePlayer_Standalone StanceFire;
+    FHoverStanceFireNode StanceAdditive;
+    UAnimSequence *DesiredStanceFire = nullptr, *LastStanceFire = nullptr;
+    float StanceRecoilTime = 0, StanceRecoilScale = 1;
     UAnimSequence *DesiredAction = nullptr, *DesiredAimAction = nullptr;
     float ActionTime = 0, ActionDuration = 0, AimTime = 0, AimDuration = 0;
     int32 ActionSerial = 0, EvaluatedActionSerial = 0, AimSerial = 0, EvaluatedAimSerial = 0;
@@ -308,7 +517,11 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
         AimActionBlend.B.SetLinkNode(&AimAction);
         ShotAdditive.Base.SetLinkNode(&AimActionBlend);
         ShotAdditive.Additive.SetLinkNode(&GunShot);
-        WeaponPose.A.SetLinkNode(&Rifle);
+        StanceAdditive.Base.SetLinkNode(&Rifle);
+        StanceAdditive.Additive.SetLinkNode(&StanceFire);
+        StanceAdditive.Alpha = 0;
+        StanceFire.SetLoopAnimation(false);
+        WeaponPose.A.SetLinkNode(&StanceAdditive);
         WeaponPose.B.SetLinkNode(&ShotAdditive);
         ReloadPose.RetargetFrom = ERetargetSourceMode::CustomSkeletalMeshComponent;
         ReloadPose.IKRetargeterAsset = MotionPose.IKRetargeterAsset;
@@ -439,7 +652,7 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
         Nodes.Add(&ProneArms[0]);
         Nodes.Add(&ProneArms[1]);
         Nodes.Append({&RideAction, &Climb, &Dive, &AimAction, &GunShot, &RideActionBlend, &ClimbBlend, &DiveBlend,
-                      &AimActionBlend, &WeaponPose, &GliderAim, &ShotAdditive});
+                      &AimActionBlend, &WeaponPose, &GliderAim, &ShotAdditive, &StanceFire, &StanceAdditive});
     }
     virtual void PreUpdate(UAnimInstance *Instance, float DT) override
     {
@@ -505,6 +718,16 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
         ShotSerial = State->ShotSerial;
         if (State->bRiding && State->RifleFire && ShotSerial != LastShotSerial)
             RecoilTime = State->RifleFire->GetPlayLength();
+        // Design A1: the stance additive clock. Its player is (re)started in UpdateAnimationNode on the same serial
+        // change; a clip that goes away (rig swap, mount) just lets the alpha run out.
+        StanceRecoilTime = FMath::Max(0.f, StanceRecoilTime - DT);
+        DesiredStanceFire = State->StanceFireAdd.Get();
+        StanceRecoilScale = State->StanceRecoilScale;
+        if (DesiredStanceFire && ShotSerial != LastShotSerial)
+            StanceRecoilTime = DesiredStanceFire->GetPlayLength();
+        StanceAdditive.Alpha = DesiredStanceFire && DesiredStanceFire == LastStanceFire && StanceRecoilTime > 0
+                                   ? FMath::Clamp(StanceRecoilTime / .1f, 0.f, 1.f) * StanceRecoilScale
+                                   : 0.f;
         if (const auto *Assets = State->RideAssets.Get())
         {
             Climb.SetSequence(Assets->RideClimbPose);
@@ -592,9 +815,21 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
                                                          : 0.f,
                                                      DT, 10.f);
         Left.Alpha = Right.Alpha = State->FootLock;
-        SupportHand.Alpha = UpperBody.BlendWeights[0] * (1.f - ReloadBlend.Alpha);
+        // Design A2: with a rigged gun drawn the left hand is locked to it at weight 1 on every tick, through fire
+        // additives, hit reacts and anything else that lowers the aim layer; only a reload (its clip's
+        // hand_l_target) or the mounted reload pose takes it off.
+        SupportHand.Alpha =
+            FMath::Max(UpperBody.BlendWeights[0], State->bRiggedGunUp ? 1.f : 0.f) * (1.f - ReloadBlend.Alpha);
         SupportHand.GripOffset = State->SupportGripOffset;
         SupportHand.GunRotation = State->WeaponRotation;
+        // Same anchor as AHoverPilot::UpdateGunTransform: the palm midpoint for a rig that seats there.
+        SupportHand.bGripAtPalm = State->bGripAtPalm;
+        // Design B1/B2: the rig bone's rotation delta (gun space) and finger curl.
+        SupportHand.HandRotation = State->SupportHandRotation;
+        SupportHand.Curl = State->SupportHandCurl;
+        // The gun rides hand_r's kick: the pilot's cached rest lets the IK target ride it too, without a frame of lag.
+        SupportHand.GripHandRest = State->GripHandRestRotation;
+        SupportHand.bGripHandRest = State->bGripHandRestValid;
         Pelvis.Alpha = State->FootLock;
         Pelvis.Translation = FVector(-State->RideInput.X * 6.f, 0, -39.f);
         Pelvis.Targets[0] = State->LeftFoot;
@@ -607,6 +842,7 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
     {
         FAnimInstanceProxy::PostUpdate(Instance);
         auto *State = CastChecked<UHoverAnimInstance>(Instance);
+        State->StanceFireFingerSplayDeg = StanceAdditive.LastSplayDeg;
         State->SecondaryOffsets.Reset();
         State->SecondaryBonesEvaluated.Reset();
         for (const auto &Spring : Springs)
@@ -641,6 +877,18 @@ struct FHoverAnimProxy final : FAnimInstanceProxy
             GunShot.Initialize_AnyThread(FAnimationInitializeContext(this, Context.SharedContext));
             GunShot.SetAccumulatedTime(0);
         }
+        // Design A1: the stance additive restarts from frame 0 (its own base frame, so it starts at zero delta) on
+        // every shot; a changed clip is bound here so the alpha only opens once the player holds it.
+        if (DesiredStanceFire && (ShotSerial != LastShotSerial || DesiredStanceFire != LastStanceFire))
+        {
+            StanceFire.SetSequence(DesiredStanceFire);
+            StanceFire.SetLoopAnimation(false);
+            StanceFire.Initialize_AnyThread(FAnimationInitializeContext(this, Context.SharedContext));
+            StanceFire.SetAccumulatedTime(0);
+            LastStanceFire = DesiredStanceFire;
+        }
+        else if (!DesiredStanceFire)
+            LastStanceFire = nullptr;
         if (DesiredRifle && DesiredRifle != LastRifle)
         {
             Rifle.SetSequence(DesiredRifle);
@@ -728,6 +976,8 @@ struct FHoverViewProxy final : FAnimInstanceProxy
         MeleeBlend.Alpha = State->bMelee ? 1.f : 0.f;
         Support.GripOffset = State->SupportGripOffset;
         Support.GunRotation = State->WeaponRotation;
+        Support.HandRotation = State->SupportHandRotation;
+        Support.Curl = State->SupportHandCurl;
         // Let the authored reload hand leave the foregrip.
         Support.Alpha =
             State->bMelee ? 0.f : FMath::FInterpTo(Support.Alpha, State->IsAnyMontagePlaying() ? 0.f : 1.f, DT, 16.f);

@@ -2,6 +2,7 @@
 #include "HoverLocomotionBridge.h"
 #include "HoverPilot.h"
 #include "HoverCombatBridge.h"
+#include "HoverTestLevelPolicy.h"
 #include "HoverAnimInstance.h"
 #include "InputModifiers.h"
 #include "Animation/AnimInstance.h"
@@ -77,16 +78,16 @@ void AHoverTestController::CloseGraphicsMenu(bool bApply)
     if (!GraphicsMenu)
         return;
     const int32 Level = GraphicsMenu->GetSelectedLevel();
-    const FString CurrentMap = UGameplayStatics::GetCurrentLevelName(this);
-    const int32 CurrentLevel = CurrentMap.Contains(TEXT("L_NYC_Explore"))                                           ? 3
-                               : CurrentMap.Contains(TEXT("L_Showcase")) || CurrentMap.Contains(TEXT("L_Lakeside")) ? 2
-                               : CurrentMap.Contains(TEXT("Cyber"))                                                 ? 1
-                                                                                                                    : 0;
+    const int32 CurrentLevel = GetTestLevelIndex(UGameplayStatics::GetCurrentLevelName(this));
     const bool ChangeLevel = bApply && Level != CurrentLevel;
     if (bApply)
     {
         GraphicsSettings->Apply(GraphicsMenu->GetSelection());
         GraphicsMenu->ApplyZombieSettings();
+        // Owner 2026-10-31: the Life Engine switch is a menu row, applied in place without a reload.
+        if (const int32 Life = GraphicsMenu->GetSelectedLifeEngine(); Life >= 0)
+            if (auto *LifePilot = Cast<AHoverPilot>(GetPawn()); LifePilot && LifePilot->IsLifeEngineEnabled() != (Life == 1))
+                LifePilot->LifeEngine(Life);
     }
     GraphicsMenu->RemoveFromParent();
     GraphicsMenu = nullptr;
@@ -101,9 +102,30 @@ void AHoverTestController::CloseGraphicsMenu(bool bApply)
         HoverLoadLevel(Level);
 }
 
+int32 AHoverTestController::GetTestLevelIndex(const FString &MapName)
+{
+    // L_NYC_Survival first: it must never fall through to PostApo or to the exploration entry.
+    return MapName.Contains(TEXT("L_NYC_Survival"))                                    ? 4
+           : MapName.Contains(TEXT("L_NYC_Explore"))                                   ? 3
+           : MapName.Contains(TEXT("L_Showcase")) || MapName.Contains(TEXT("L_Lakeside")) ? 2
+           : MapName.Contains(TEXT("Cyber"))                                           ? 1
+                                                                                       : 0;
+}
+
+const TCHAR *AHoverTestController::GetTestLevelLabel(int32 Level)
+{
+    return Level == 4   ? TEXT("NYC - Survival")
+           : Level == 3 ? TEXT("NYC - Exploration")
+           : Level == 2 ? TEXT("Chinese Lakeside Town")
+           : Level == 1 ? TEXT("Cyber City")
+                        : TEXT("Post-apocalypse");
+}
+
 void AHoverTestController::HoverLoadLevel(int32 Level)
 {
-    const FName Map(Level == 3   ? TEXT("/Game/HoverPrototype/Maps/L_NYC_Explore")
+    // Level 4 shows "not installed yet" until the editor pass creates L_NYC_Survival.
+    const FName Map(Level == 4   ? TEXT("/Game/HoverPrototype/Maps/L_NYC_Survival")
+                    : Level == 3 ? TEXT("/Game/HoverPrototype/Maps/L_NYC_Explore")
                     : Level == 2 ? TEXT("/Game/Chinese_Lakeside_Town/Levels/L_Showcase")
                     : Level == 1 ? TEXT("/Game/HoverPrototype/Maps/L_CyberCity")
                                  : TEXT("/Game/JustBStudios/PostApo/Levels/PostApo"));
@@ -113,7 +135,8 @@ void AHoverTestController::HoverLoadLevel(int32 Level)
         return;
     }
     UGameplayStatics::OpenLevel(this, Map, true,
-                                Level == 3 ? TEXT("game=/Script/HoverFlight.HoverExplorationGameMode")
+                                Level == 4   ? TEXT("game=/Script/HoverFlight.HoverNYCSurvivalGameMode")
+                                : Level == 3 ? TEXT("game=/Script/HoverFlight.HoverExplorationGameMode")
                                 : Level != 0
                                     ? TEXT("game=/Game/HoverPrototype/ZombieEngine/BP_CyberWaves.BP_CyberWaves_C")
                                     : TEXT("game=/Script/HoverFlight.HoverGameMode"));
@@ -311,6 +334,9 @@ void AHoverTestController::UpdateBikeMappings()
 
 bool AHoverTestController::IsNearTruck() const
 {
+    // NYC Survival parks the truck as set dressing; this also blocks TryEnterBike and the prompt.
+    if (const auto *Policy = IHoverTestLevelPolicy::Get(GetWorld()); Policy && !Policy->AllowsTruckMount())
+        return false;
     return Truck && Pilot && !Pilot->IsMounted() &&
            FMath::Abs(Pilot->GetActorLocation().Z - Truck->GetActorLocation().Z) < 220.f &&
            FVector::Dist2D(Pilot->GetActorLocation(), Truck->GetActorLocation()) < 420.f;
@@ -569,9 +595,11 @@ void AHoverTestController::PlayerTick(float DT)
             return Starts.IsEmpty() ? FTransform(Pilot->GetActorRotation(), Pilot->GetActorLocation() + Offset)
                                     : Starts[0]->GetActorTransform();
         };
+        // The AHoverGameMode flag keeps PostApo/Exploration exact; the policy covers the ZES modes.
         const auto *Mode = GetWorld()->GetAuthGameMode<AHoverGameMode>();
+        const auto *Policy = IHoverTestLevelPolicy::Get(GetWorld());
         UClass *Class =
-            !Mode || Mode->bSpawnBike
+            (!Mode || Mode->bSpawnBike) && (!Policy || Policy->SpawnsTestBike())
                 ? LoadClass<APawn>(nullptr, TEXT("/Game/ScifiHoverbike/Vehicles/Blueprint/BP_Hoverbike.BP_Hoverbike_C"))
                 : nullptr;
         if (Class)
@@ -592,8 +620,11 @@ void AHoverTestController::PlayerTick(float DT)
                 UGameplayStatics::FinishSpawningActor(Bike, Transform);
             }
         }
-        UClass *TruckClass = LoadClass<APawn>(
-            nullptr, TEXT("/Game/Crossroad_Pickup/Blueprints/BP_Crossroad_Pickup.BP_Crossroad_Pickup_C"));
+        UClass *TruckClass =
+            !Policy || Policy->SpawnsTestTruck()
+                ? LoadClass<APawn>(nullptr,
+                                   TEXT("/Game/Crossroad_Pickup/Blueprints/BP_Crossroad_Pickup.BP_Crossroad_Pickup_C"))
+                : nullptr;
         if (TruckClass)
         {
             FTransform Transform = RideStart(TEXT("AFS_TruckStart"), FVector(350, -650, 150));

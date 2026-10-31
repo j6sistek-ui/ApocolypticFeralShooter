@@ -99,12 +99,15 @@ and after at the owner's settings. Keep the 6 GB VRAM budget while the owner gam
 Labels: vfx. Priority: P3. Status: source radius built, not re-captured.
 
 ### Life Engine locomotion A/B in NYC survival
-Labels: motion. Priority: P2. Status: built and proven 2026-10-31, on by default in NYC Survival; toggle with
-`LifeEngine 0/1` in the console. Headless proof `Scripts/ProveLifeEngineAudio.py` walks, jumps, sprints and swings with
+Labels: motion. Priority: P2. Status: built and proven 2026-10-31, on by default in NYC Survival; switch it in the F6
+menu ("Movement" row; `LifeEngine 0/1` also works as a console command). Headless proof `Scripts/ProveLifeEngineAudio.py` walks, jumps, sprints and swings with
 the solver on then off (receipt `D:/AFS_Comparisons/LifeEngine_20261031/proof.json`). Fixed along the way: the parkour
 pawn was excluded outright (now the template only takes over mid-move); long frames are substepped; a start-penetrating
-ground sweep took a wall as the floor and projected the velocity onto it (line-trace fallback); step-up now covers any
-non-walkable face. Owner 2026-10-31: the solver drives, the parkour animations and wall run / jump stay.
+ground sweep took a wall as the floor (line-trace fallback); the snap-down left a zero floor normal; the slide used the
+face normal, so the corner of the start barrier stripped her to 15 cm/s for 0.7 s (now the sweep normal: one glancing
+contact, back to 500 in 0.3 s); step-up covers any non-walkable face and retries while input is held. Switch: F6 /
+D-pad Up menu, row "Movement". Owner 2026-10-31: the solver drives, the parkour animations and wall run / jump stay
+(not yet checked in play with the solver on: whether the template still triggers vaults and wall runs).
 
 ### Audio pass
 Labels: audio. Priority: P1. Status: built 2026-10-31, not yet heard by the owner. WW2 machine-gun pools, sniper crack on the revolver,

@@ -29,6 +29,7 @@
 #include "Components/ProgressBar.h"
 #include "Styling/CoreStyle.h"
 #include "Engine/SkeletalMesh.h"
+#include "Animation/AnimInstance.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISense_Damage.h"
 #include "Perception/AISenseConfig_Hearing.h"
@@ -164,21 +165,51 @@ bool AHoverCyberCityGameMode::CanReachPlayer(AActor *Spawn, APawn *Player)
     }
     if (const bool *Cached = ReachableSpawns.Find(Spawn))
         return *Cached;
+    const bool Reachable = CanReachPoint(Spawn, Target, FVector(100, 100, 120), Player);
+    ReachableSpawns.Add(Spawn, Reachable);
+    return Reachable;
+}
+
+bool AHoverCyberCityGameMode::CanReachPoint(AActor *From, const FVector &Target, const FVector &TargetExtent,
+                                            const UObject *Querier) const
+{
     bool Reachable = false;
+    if (!From)
+        return Reachable;
     if (auto *Navigation = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()))
         if (auto *Data = Navigation->GetDefaultNavDataInstance(FNavigationSystem::DontCreate))
         {
-            FNavLocation From, To;
-            if (Navigation->ProjectPointToNavigation(Spawn->GetActorLocation(), From, FVector(120, 120, 200)) &&
-                Navigation->ProjectPointToNavigation(Target, To, FVector(100, 100, 120)))
+            FNavLocation Start, End;
+            if (Navigation->ProjectPointToNavigation(From->GetActorLocation(), Start, FVector(120, 120, 200)) &&
+                Navigation->ProjectPointToNavigation(Target, End, TargetExtent))
             {
-                FPathFindingQuery Query(Player, *Data, From.Location, To.Location);
+                FPathFindingQuery Query(Querier ? Querier : From, *Data, Start.Location, End.Location);
                 Query.SetAllowPartialPaths(false);
                 Reachable = Navigation->TestPathSync(Query);
             }
         }
-    ReachableSpawns.Add(Spawn, Reachable);
     return Reachable;
+}
+
+void AHoverCyberCityGameMode::OnZombieSpawned(AHoverCyberZombie &Zombie)
+{
+    RecordSpawn(Zombie.GetActorLocation());
+}
+
+float AHoverCyberCityGameMode::GetRoundHealthScale(int32 Wave) const
+{
+    float Health = 1, Damage = 1, Speed = 1;
+    if (WaveSettings)
+        WaveSettings->GetDifficultyMultipliers(Wave, Health, Damage, Speed);
+    return Health;
+}
+
+float AHoverCyberCityGameMode::GetRoundDamageScale(int32 Wave) const
+{
+    float Health = 1, Damage = 1, Speed = 1;
+    if (WaveSettings)
+        WaveSettings->GetDifficultyMultipliers(Wave, Health, Damage, Speed);
+    return Damage;
 }
 
 UZE_ZombieDataAsset *AHoverCyberCityGameMode::SelectZombieData(int32 Wave, int32 SpawnIndex,
@@ -277,6 +308,10 @@ void AHoverCyberCityGameMode::Tick(float DT)
             if (WaveDisplay && !WaveDisplay->IsInViewport())
                 WaveDisplay->AddToViewport(10);
         }
+    }
+    // NYC Survival's director owns placement and pacing; this per-frame gate is Cyber/Lakeside only.
+    if (Player && !bExternalSpawnDirector)
+    {
         FVector Eye;
         FRotator View;
         PC->GetPlayerViewPoint(Eye, View);
@@ -325,7 +360,8 @@ void AHoverCyberCityGameMode::Tick(float DT)
     }
     // The vendor otherwise falls back to PlayerStart when all points are disabled.
     // Wait for a fair entrance instead of spawning beside Vexa or inside a vehicle.
-    if (GetWaveState() != EZE_WaveState::WaveInProgress || ActiveSpawnCount > 0)
+    // An external director instead keeps the vendor rate at BIG_NUMBER until a hidden entrance is enabled.
+    if (bExternalSpawnDirector || GetWaveState() != EZE_WaveState::WaveInProgress || ActiveSpawnCount > 0)
         Super::Tick(DT);
 }
 
@@ -372,10 +408,18 @@ void AHoverCyberZombieAI::Tick(float DT)
         if (const auto *Mode = GetWorld()->GetAuthGameMode<AHoverCyberCityGameMode>(); Mode && Mode->GetWaveSettings())
             Mode->GetWaveSettings()->GetDifficultyMultipliers(Mode->GetCurrentWave(), HealthScale, DamageScale,
                                                               SpeedScale);
+        // A spawn-frozen per-actor scale wins; otherwise the mode's round lookup, which the
+        // base class answers with the same wave-asset value as above.
+        if (const auto *Mode = GetWorld()->GetAuthGameMode<AHoverCyberCityGameMode>())
+            HealthScale =
+                Zombie->HealthScale > 0 ? Zombie->HealthScale : Mode->GetRoundHealthScale(Mode->GetCurrentWave());
         // The supplied character initialized only WalkSpeed. Use its own RunSpeed
         // for pursuit so the existing walk/run blend space can reach its run pose.
-        Zombie->GetCharacterMovement()->MaxWalkSpeed =
-            (Board->GetValueAsObject(Key_TargetEnemy) ? Stats.RunSpeed : Stats.WalkSpeed) * SpeedScale;
+        const bool Pursuing = Board->GetValueAsObject(Key_TargetEnemy) != nullptr;
+        Zombie->GetCharacterMovement()->MaxWalkSpeed = (Pursuing ? Stats.RunSpeed : Stats.WalkSpeed) * SpeedScale;
+        // A rolled speed tier (NYC Survival) replaces the run speed and ignores the wave speed scale.
+        if (Zombie->SpeedTier > 0)
+            Zombie->GetCharacterMovement()->MaxWalkSpeed = Pursuing ? Zombie->SpeedTier : Stats.WalkSpeed;
         if (const auto *Definition = Cast<UHoverCyberZombieDefinition>(Zombie->ZombieData))
             Zombie->GetCharacterMovement()->MaxWalkSpeed =
                 FMath::Min(Zombie->GetCharacterMovement()->MaxWalkSpeed, Definition->MaximumRunSpeed);
@@ -441,6 +485,10 @@ AHoverCyberZombie::AHoverCyberZombie()
 void AHoverCyberZombie::BeginPlay()
 {
     Super::BeginPlay();
+    // Owner 2026-10-31: "I can jump on top of zombies' heads and bounce like a trampoline". The capsule top is
+    // walkable by default, so a character landing on it stands there; marking the capsule unwalkable makes the
+    // movement component treat any contact as a wall and slide off. Pathing and hits are unaffected.
+    GetCapsuleComponent()->SetWalkableSlopeOverride(FWalkableSlopeOverride(WalkableSlope_Unwalkable, 0.f));
     auto *Definition = Cast<UHoverCyberZombieDefinition>(ZombieData);
     if (Definition && Definition->AppearanceMesh)
     {
@@ -453,6 +501,8 @@ void AHoverCyberZombie::BeginPlay()
         GetCharacterMovement()->SetUpdateNavAgentWithOwnersCollisions(true);
         GetCharacterMovement()->UpdateNavAgent(*GetCapsuleComponent());
         GetMesh()->SetSkeletalMesh(Body);
+        if (Definition->AnimClassOverride)
+            GetMesh()->SetAnimInstanceClass(Definition->AnimClassOverride);
         GetMesh()->EmptyOverrideMaterials();
         GetMesh()->SetRelativeScale3D(FVector(Scale));
         GetMesh()->SetRelativeLocation(
@@ -460,7 +510,9 @@ void AHoverCyberZombie::BeginPlay()
         GetMesh()->SetDisablePostProcessBlueprint(true);
         Trousers->SetVisibility(false);
         Shirt->SetVisibility(false);
-        GetCharacterMovement()->RotationRate.Yaw = Definition->Role == EHoverZombieRole::Brute ? 220.f : 600.f;
+        // Role defaults; the Boss role turns like a Brute. AHoverNYCZombie applies the DA overrides on top.
+        GetCharacterMovement()->RotationRate.Yaw =
+            Definition->Role == EHoverZombieRole::Brute || Definition->Role == EHoverZombieRole::Boss ? 220.f : 600.f;
         GetCharacterMovement()->MaxAcceleration = Definition->Role == EHoverZombieRole::Kid ? 2600.f : 1400.f;
     }
     else
@@ -495,7 +547,32 @@ void AHoverCyberZombie::BeginPlay()
     GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
     Blood = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/Rocket/NS1_Blood/NS_NS1_BloodShot.NS_NS1_BloodShot"));
     if (auto *Mode = GetWorld()->GetAuthGameMode<AHoverCyberCityGameMode>())
-        Mode->RecordSpawn(GetActorLocation());
+        Mode->OnZombieSpawned(*this);
+}
+
+void AHoverCyberZombie::FellOutOfWorld(const UDamageType &DamageType)
+{
+    // A director-run round needs every spawned zombie to die by damage, so a fall below
+    // KillZ relocates instead. Without a director (or a spawner) the engine default runs.
+    auto *Mode = GetWorld() ? GetWorld()->GetAuthGameMode<AHoverCyberCityGameMode>() : nullptr;
+    if (!bIsDead && Mode && Mode->UsesExternalSpawnDirector() && Mode->RelocateZombie(*this))
+        return;
+    Super::FellOutOfWorld(DamageType);
+}
+
+void AHoverCyberZombie::EndPlay(const EEndPlayReason::Type Reason)
+{
+    // Leak guard: a living zombie destroyed by anything but Die() would keep the vendor
+    // ZombiesAlive above zero and the round could never end. Route it through OnDeath.
+    auto *Mode = GetWorld() ? GetWorld()->GetAuthGameMode<AHoverCyberCityGameMode>() : nullptr;
+    if (Reason == EEndPlayReason::Destroyed && !bIsDead && Mode && Mode->UsesExternalSpawnDirector())
+    {
+        bIsDead = true;
+        UE_LOG(LogTemp, Warning, TEXT("HOVER_SPAWN_LEAK zombie=%s location=%s relocations=%d"), *GetName(),
+               *GetActorLocation().ToString(), RelocationCount);
+        OnDeath.Broadcast(this);
+    }
+    Super::EndPlay(Reason);
 }
 
 EHoverZombieRole AHoverCyberZombie::GetRole() const
@@ -504,10 +581,18 @@ EHoverZombieRole AHoverCyberZombie::GetRole() const
     return Definition ? Definition->Role : EHoverZombieRole::Standard;
 }
 
+float AHoverCyberZombie::GetStompInterval() const
+{
+    const auto *Definition = Cast<UHoverCyberZombieDefinition>(ZombieData);
+    return Definition ? Definition->StompInterval : .8f;
+}
+
 bool AHoverCyberZombie::StompImpact()
 {
-    if (GetRole() != EHoverZombieRole::Brute || bIsDead || !bIsAttacking ||
-        GetWorld()->GetTimeSeconds() - LastStompTime < .8f)
+    // The Brute role always stomps (Cyber DA_Brute needs no edit); any other role needs bUsesStomp.
+    const auto *Definition = Cast<UHoverCyberZombieDefinition>(ZombieData);
+    const bool bStomper = GetRole() == EHoverZombieRole::Brute || (Definition && Definition->bUsesStomp);
+    if (!bStomper || bIsDead || !bIsAttacking || GetWorld()->GetTimeSeconds() - LastStompTime < GetStompInterval())
         return false;
     FCollisionQueryParams Query(SCENE_QUERY_STAT(BruteLanding), false, this);
     FVector Feet = GetActorLocation() - FVector(0, 0, GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
@@ -518,8 +603,11 @@ bool AHoverCyberZombie::StompImpact()
         return false;
     LastStompTime = GetWorld()->GetTimeSeconds();
     ++StompCount;
-    OnAttackHitCheck(); // Purchased damage trace; Vexa honors the Invincible toggle.
-    auto *Definition = Cast<UHoverCyberZombieDefinition>(ZombieData);
+    // 0 keeps the purchased damage trace (Vexa honors the Invincible toggle); a multiplier applies
+    // a radial 30 x multiplier hit inside StompRadius instead, with the same LOS test below.
+    const float StompDamage = Definition ? 30.f * Definition->StompDamageMultiplier : 0.f;
+    if (StompDamage <= 0.f)
+        OnAttackHitCheck();
     const float Radius = Definition ? Definition->StompRadius : 400.f;
     for (TActorIterator<AHoverPilot> It(GetWorld()); It; ++It)
     {
@@ -532,6 +620,8 @@ bool AHoverCyberZombie::StompImpact()
         const bool Blocked =
             GetWorld()->LineTraceTestByChannel(Floor.ImpactPoint + FVector(0, 0, 65), Target, ECC_Visibility, Query);
         Pilot->ShowStompPulse(Floor.ImpactPoint, Floor.ImpactNormal, Radius, Close && !Blocked);
+        if (Close && !Blocked && StompDamage > 0.f)
+            UGameplayStatics::ApplyDamage(Pilot, StompDamage, GetController(), this, nullptr);
         if (Close && !Blocked && Pilot->GetController() && Pilot->ApplyStompKnockdown(Floor.ImpactPoint))
             ++StompKnockdowns;
         break;
@@ -551,19 +641,17 @@ float AHoverCyberZombie::TakeDamage(float Damage, const FDamageEvent &Event, ACo
 {
     const bool WasAlive = !bIsDead;
     auto *Mode = Cast<AHoverCyberCityGameMode>(GetWorld()->GetAuthGameMode());
+    FHitResult Hit;
+    FVector Direction;
+    Event.GetBestHitInfo(this, Causer, Hit, Direction);
     if (!bIsDead && Damage > 0)
     {
         if (EventController && EventController->GetPawn())
             UAISense_Damage::ReportDamageEvent(this, this, EventController->GetPawn(), Damage,
                                                EventController->GetPawn()->GetActorLocation(), GetActorLocation());
-        FHitResult Hit;
-        FVector Direction;
-        Event.GetBestHitInfo(this, Causer, Hit, Direction);
         UE_LOG(LogTemp, Verbose, TEXT("HOVER_ZOMBIE_HIT causer=%s bone=%s damage=%.1f point=%s"), *GetNameSafe(Causer),
                *Hit.BoneName.ToString(), Damage, *Hit.ImpactPoint.ToString());
-        if (EventController && Cast<AHoverPilot>(EventController->GetPawn()) && SurvivalComponent && Mode &&
-            Mode->HasInstaKill())
-            Damage = FMath::Max(Damage, SurvivalComponent->GetHealth());
+        ModifyIncomingDamage(Damage, Event, EventController, Causer, Hit);
         if (Blood && Event.IsOfType(FPointDamageEvent::ClassID) && Hit.bBlockingHit && Hit.GetActor() == this)
             HoverEffects::BloodBurst(GetWorld(), Blood, Hit.ImpactPoint, Direction);
     }
@@ -585,8 +673,37 @@ float AHoverCyberZombie::TakeDamage(float Damage, const FDamageEvent &Event, ACo
                 }
             }
     if (WasAlive && bIsDead && Mode && ZombieData)
-        Mode->AddGold(FMath::RandRange(ZombieData->Stats.MinGoldReward, ZombieData->Stats.MaxGoldReward));
+        OnKilledBy(EventController, Causer, Hit);
     return Result;
+}
+
+void AHoverCyberZombie::ModifyIncomingDamage(float &Damage, const FDamageEvent &Event, AController *EventController,
+                                             AActor *Causer, const FHitResult &Hit)
+{
+    // Insta-Kill: the pilot's hits one-shot the zombie.
+    const auto *Mode = Cast<AHoverCyberCityGameMode>(GetWorld()->GetAuthGameMode());
+    if (EventController && Cast<AHoverPilot>(EventController->GetPawn()) && SurvivalComponent && Mode &&
+        Mode->HasInstaKill())
+        Damage = FMath::Max(Damage, SurvivalComponent->GetHealth());
+}
+
+void AHoverCyberZombie::OnKilledBy(AController *EventController, AActor *Causer, const FHitResult &Hit)
+{
+    auto *Mode = Cast<AHoverCyberCityGameMode>(GetWorld()->GetAuthGameMode());
+    if (!Mode || !ZombieData)
+        return;
+    // Authored KillPoints (NYC 90 / 115 / 105) replace the vendor roll; 0 keeps it for Cyber and Lakeside.
+    const auto *Definition = Cast<UHoverCyberZombieDefinition>(ZombieData);
+    int32 Points = FMath::RandRange(ZombieData->Stats.MinGoldReward, ZombieData->Stats.MaxGoldReward);
+    if (Definition && Definition->KillPoints > 0)
+    {
+        const bool bHeadshot = Hit.BoneName.ToString().Contains(TEXT("head"), ESearchCase::IgnoreCase);
+        const bool bMelee = Cast<AHoverMeleeWeapon>(Causer) != nullptr;
+        Points = bMelee && Definition->MeleeKillPoints > 0         ? Definition->MeleeKillPoints
+                 : bHeadshot && Definition->HeadshotKillPoints > 0 ? Definition->HeadshotKillPoints
+                                                                   : Definition->KillPoints;
+    }
+    Mode->AddGold(Points);
 }
 
 float AHoverCyberCityGameMode::GetSpeedBonus() const

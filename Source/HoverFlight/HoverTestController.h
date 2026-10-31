@@ -22,6 +22,10 @@ class HOVERFLIGHT_API AHoverTestController : public APlayerController
     virtual void PlayerTick(float DeltaSeconds) override;
     UFUNCTION(Exec) void HoverGraphics();
     UFUNCTION(Exec) void HoverLoadLevel(int32 Level);
+    // Test level menu: 0 PostApo, 1 Cyber City, 2 Lakeside, 3 NYC Exploration, 4 NYC Survival.
+    static constexpr int32 TestLevelCount = 5;
+    static int32 GetTestLevelIndex(const FString &MapName);
+    static const TCHAR *GetTestLevelLabel(int32 Level);
     UFUNCTION(BlueprintPure) bool IsGraphicsMenuOpen() const
     {
         return GraphicsMenu != nullptr;
