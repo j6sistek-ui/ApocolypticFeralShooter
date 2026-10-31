@@ -20,6 +20,17 @@ twist or game appropriate style" ("yes, better ideas"), so four looks take the s
 ring pad with hazard lights, a graffiti circle glowing like UV paint, a busted NYC neon-sign icon, a searchlight
 pillar. The section below was the first idea.
 
+## Style round 1 (2026-10-31): 14 looks on the medkit and the Nuke
+
+Sheets (local): `D:/AFS_Comparisons/PowerUps_20261031/Styles/styles_sheet.png` (2.5 m) and `styles_sheet_10m.png`.
+Showcase map `/Game/HoverPrototype/Maps/L_PowerUpShowcase`; looks under `/Game/HoverPrototype/PowerUps/Styles/` and
+`/Game/HoverPrototype/Effects/PowerUps/`; scripts `Scripts/ImportPowerUps.py`, `Scripts/AuthorPowerUpStyles.py`.
+Strongest reads: 11 scrap ring pad, 13 busted neon, 14 searchlight pillar, 1 road flare, 12 graffiti circle (icon
+missing); 3 supply beacon is the best at 10 m but a haze up close. Weak or off-brief: 4 and 10 (holograms read pale or
+like fire), 5 (items look frosted), 6 (item goes black), 7 (white crackle), 8 (no colour, no visible shaft), 9 (items
+too dark). Lit only in the showcase map; nothing wired to gameplay; owner to pick or combine. Round 2 adds the owner's
+closer references below.
+
 ## Closer references (owner, 2026-10-31)
 
 Seven reference boards the owner found closer to the target (local copies in `Docs/References/PowerUpStyle/`, not in
