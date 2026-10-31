@@ -52,6 +52,15 @@ signature on top of the shared look, starting with the Nuke: it must read as vol
 streaks and micro-explosions; a yellow fog makes it look like toxic waste, not a nuclear device. Round 3: a signature
 pass per item, Nuke first. Owner after the GIFs: look 16 Arc Crawl is a solid Nuke contender too.
 
+## Nuke round 3 (2026-10-31): volatile signatures, GIFs
+
+GIFs (local) `D:/AFS_Comparisons/PowerUps_20261031/Styles/gifs_nuke/`: N1 Spark Crackle, N2 Micro-Detonations, N3
+Tracer Streaks, N4 Unstable Core, N5 Ticking Bomb (the owner's spec: swells on accelerating ticks, spark ring, flash),
+N6 Combo (N5 + N2 + N3); `nuke_grid.gif`, `nuke_far.gif`. Checker's top three: N6, N5, N2. Notes: N2's smoke puffs read
+as tan blobs; N3 reads more like ricochets; N4 looks glassy; flashes light an oval on the ground. All motion is
+script-driven (Niagara candidates on disk ignore scale or are rings); the chosen look gets built as real Niagara on
+a display actor (see LESSONS). Owner also named round-2 look 16 Arc Crawl a contender.
+
 ## Closer references (owner, 2026-10-31)
 
 Seven reference boards the owner found closer to the target (local copies in `Docs/References/PowerUpStyle/`, not in
