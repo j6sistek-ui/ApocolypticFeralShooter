@@ -15,11 +15,15 @@ Vexa, a little per soul, up to 2x normal health. Souls only overheal when she is
 damaged, so standing in a pile of zombies does not keep her topped up. Fiction: the souls merge with her human
 existence and give their last moments to help her survive. Adapted from the familiar "more health" perk.
 
+**Owner follow-up (2026-10-31):** also +20 % health recovery rate. Reasoning: like the familiar max-health perk, once
+you are low it does not matter where you started, so the souls stay an at-full-health overcharge and the regen buff is
+what helps while hurt ("gives it a better home"). This answers the "does nothing when hurt" note below.
+
 **Design notes (AI, for the owner to accept or reject):**
 - Strong fit: original fiction, a visible pickup that rewards aggression and pulls the player through the kill zone
   (risk and reward), and it reuses ghost / blood-magic VFX already on disk.
-- Gap: with souls only working at full health, the perk does nothing at the moment the player is hurt, which can feel
-  like owning nothing. Options: (a) a small passive max-health bonus as the familiar base, with souls stacking
+- Gap (answered by the owner's +20 % regen): with souls only working at full health, the perk did nothing at the
+  moment the player is hurt. Options: (a) a small passive max-health bonus as the familiar base, with souls stacking
   overheal on top; (b) souls picked up while hurt are banked and turn into overheal once health is full again (keeps
   "no healing inside the pile").
 - Overheal should decay slowly or only last the round, otherwise players bank 2x permanently.
