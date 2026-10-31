@@ -4,6 +4,8 @@ How a fresh chat or a new machine picks this project up without re-learning it.
 
 ## Read first
 
+`CLAUDE.md` at the repo root has the working rules every chat follows; `AGENTS.md` points to it.
+
 1. `Docs/SCOPE.md` (what we are building and the current phase)
 2. `Docs/RULES.md` (owner rulings and operational rules)
 3. `Docs/BACKLOG.md` (bugs, ranked to-do, owner decisions; maintained first) and `Docs/DONE.md` (finished work

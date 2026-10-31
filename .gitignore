@@ -3,6 +3,7 @@
 !/.gitignore
 !/.clang-format
 !/AGENTS.md
+!/CLAUDE.md
 !/README.md
 !/Dockerfile
 !/AFS.uproject
@@ -16,17 +17,6 @@ Source/**
 !Source/**/
 Scripts/__pycache__/
 *.pyc
-!Docs/VALIDATION.txt
-!Docs/QUALITY_20261023.txt
-!Docs/KATANA_20261023.txt
-!Docs/ZOMBIE_SPECIALS_20261024.txt
-!Docs/LAKESIDE_CREATURES_20261024.txt
-!Docs/NIGHT_QUALITY_20261024.txt
-!Docs/OWNER_BUGS_20261025.txt
-!Docs/ASSET_AUDIT_REPAIRS_20261025.txt
-!Docs/ANIMATION_POLISH_20261025.txt
-!Docs/KATANA_TERRAIN_20261025.txt
-!Docs/NYC_EXPLORATION_20261028.txt
 # Docs are the shared record (scope, rules, lessons, open issues, design); binaries and references stay out.
 Docs/References/
 Docs/**/*.png
