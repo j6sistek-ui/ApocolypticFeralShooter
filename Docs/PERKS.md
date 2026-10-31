@@ -98,6 +98,24 @@ not meant to be lethal.
 there) so footsteps can check "on blood"; a short cooldown per zombie so the ripple cannot chain into a kill
 machine. Knockdown chance lower on Brutes and bosses. The ripple can reuse the Vefects shockwave at a small scale.
 
+### Reference: the familiar perk it spins off (Black Ops 7 PhD Flopper, researched 2026-10-31)
+
+- Base: immunity to self-inflicted damage and status effects; diving to prone sets off an explosion that grows with
+  the fall height.
+- Augments (one major and two minor active per match): PhD Slider (sliding into enemies explodes), Double Whammy
+  (a second explosion follows), DR Ram (sprinting into normal enemies knocks them down and damages them), EOD
+  Technician (lower height and distance needed for explosions), Tribologist (longer, faster slides), Stuntman (wall
+  jumps explode), Gravity Doctor (even small falls explode).
+- Sources: Dot Esports "All Perk-a-Colas in Black Ops 7 Zombies"; Call of Duty blog "Black Ops 7 Zombies Augments";
+  U4GM and The Filibuster Blog augment guides.
+
+**How Bioreactor differs (AI notes):** the slide hit and knockdown overlap PhD Slider and DR Ram; the blood-footstep
+ripple has no counterpart and is the original part. To keep it a spin-off: biology instead of explosions (blood
+waves, bio pulses), and the movement hooks AFS has that the familiar perk only gets through augments: wall runs, wall
+jumps and landings from the Life Engine and parkour (a blood pulse on a hard landing). Worth borrowing in AFS form:
+immunity to your own area damage (grenades, the toxic gas bomb, the spider drone's blast), since PhD's base job is
+"your own explosives can't hurt you". Upgrade tiers later could mirror the augment idea without copying names.
+
 ## Slots so far
 
 Health: Necrosiphon. Revive: Life Blood. Reload: Headhunter. Stamina: Survivalist. New
