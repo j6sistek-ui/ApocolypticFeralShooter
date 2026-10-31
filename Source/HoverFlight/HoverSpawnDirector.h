@@ -93,6 +93,8 @@ class HOVERFLIGHT_API UHoverSpawnDirector : public UObject
     bool CanReachCached(AZE_ZombieSpawnPoint *Point, const FHoverSpawnTarget &Target);
     void UpdateStragglers();
     void UpdateForcedSprinters();
+    // AFS 2026-10-31 (kid swarm): cuts the parked NYC pickup out of the navmesh (null-area nav modifier).
+    void UpdateTruckNavBlocker();
     UFUNCTION() void OnLiveZombieDeath(AZE_ZombieCharacter *Zombie);
     float Now() const;
 
@@ -118,4 +120,13 @@ class HOVERFLIGHT_API UHoverSpawnDirector : public UObject
     // Round-robin cursor for UpdateStragglers; each pass handles Live.Num() / StragglerPasses zombies.
     int32 StragglerCursor = 0;
     static constexpr int32 StragglerPasses = 4;
+    // AFS 2026-10-31 (kid swarm): the nav modifier actor over the parked pickup, its extent and timers.
+    TWeakObjectPtr<AActor> TruckBlocker;
+    FVector TruckBlockerExtent = FVector::ZeroVector;
+    float NextTruckCheck = 0.f;
+    float TruckSeenAt = -1.f;
+    // Horde spread: bearing (target to entrance) of the last horde pack, so Pick favours another side next.
+    float LastPackBearing = 0.f;
+    bool bHasPackBearing = false;
+    int32 SpreadLoggedRound = 0;
 };

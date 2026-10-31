@@ -61,6 +61,12 @@ Things that were expensive to find out. Newest first within each group.
   toes pointed 178 deg from travel. Measure the rendered toes (foot/ball bones) against travel, and author the mesh yaw
   per definition from a rendered measurement; an AnimPose retarget at authoring time gives the wrong answer because the
   clip goes through the ZESP skeleton of ABP_ZombieMaster first (2026-10-31).
+- In MOVE_None CharacterMovement reports neither IsFalling nor IsMovingOnGround and drops LaunchCharacter, so any
+  Blueprint that reads movement state goes blind while another component moves the capsule; report the real state
+  from a CharacterMovement subclass (2026-10-31).
+- Actors spawned at runtime are not in a static navmesh; cut them out with a nav modifier or the AI paths into them
+  (the NYC truck, 2026-10-31).
+- AHUD::Canvas is protected in UE 5.8; Blueprint variable names can end in "?" (`IsWallRunning?`) (2026-10-31).
 - Two zombie playlists exist: DA_NYCEncounters.Standards and DA_NYCWaves CustomWaves rows. Changing one left the old
   standards spawning (2026-10-31).
 

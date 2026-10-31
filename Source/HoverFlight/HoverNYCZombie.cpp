@@ -988,7 +988,9 @@ void AHoverNYCZombieAI::UpdateDestination(AHoverNYCZombie *Zombie, APawn *Target
         // holding a sector, so the ring stays free for the zombies that can use it.
         if (Slots)
             Slots->ReleaseSlot(Zombie);
-        const bool bStale = !bFarApproachActive || Now >= NextApproachRefresh ||
+        // AFS 2026-10-31 (kid swarm): a stalled zombie (UHoverAttackSlotSubsystem::UpdateProgress) re-plans now.
+        const bool bStale = (Slots && Slots->UpdateProgress(Zombie, Target)) || !bFarApproachActive ||
+                            Now >= NextApproachRefresh ||
                             FVector::Dist2D(Goal, ApproachTargetAt) > 300.f ||
                             FVector::Dist2D(Self, ApproachPoint) < 150.f;
         if (bStale)
@@ -1001,7 +1003,8 @@ void AHoverNYCZombieAI::UpdateDestination(AHoverNYCZombie *Zombie, APawn *Target
             const FVector Desired = Goal + Approach * FMath::Min(Distance * .5f, 400.f) +
                                     Side * Zombie->GetJitter().LateralBias * ApproachSide;
             FVector Point = Goal;
-            if (Slots && !Slots->ProjectSlotPoint(Desired, Point) && !Slots->ProjectSlotPoint(Goal, Point))
+            // AFS 2026-10-31 (kid swarm): on the navmesh and connected to the target, or a stalled zombie's detour.
+            if (Slots && !Slots->ResolveApproachPoint(Zombie, Target, Desired, Point))
                 Point = Goal;
             ApproachPoint = Point;
             ApproachTargetAt = Goal;

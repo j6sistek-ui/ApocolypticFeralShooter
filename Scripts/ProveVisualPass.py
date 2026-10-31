@@ -79,13 +79,30 @@ def key(name, down):
     (S['hold'].add if down else S['hold'].discard)(name)
 
 
-def vram_mb():
+def vram_total_mb():
     try:
         out = subprocess.run(['nvidia-smi', '--query-gpu=memory.used', '--format=csv,noheader,nounits'],
                              capture_output=True, text=True, timeout=5).stdout
         return int(out.strip().splitlines()[0])
     except Exception:  # noqa: BLE001
         return None
+
+
+def vram_mb():
+    """This editor's own dedicated GPU memory (Windows 'GPU Process Memory' counter), so another project's editor,
+    dwm or a game on the same GPU does not count against the 6 GB budget (fixed 2026-10-31: the first 1080p run read
+    12.2 GB board-wide with dwm alone at 4.8 GB and skipped every still). Falls back to the board total."""
+    try:
+        pid = os.getpid()
+        cmd = ("(Get-Counter '\GPU Process Memory(pid_%d_*)\Dedicated Usage').CounterSamples | "
+               "Measure-Object -Property CookedValue -Sum | ForEach-Object { [int]($_.Sum / 1MB) }") % pid
+        out = subprocess.run(['powershell', '-NoProfile', '-Command', cmd], capture_output=True, text=True,
+                             timeout=20).stdout.strip()
+        S['vram_total_mb'] = vram_total_mb()
+        return int(out.splitlines()[-1])
+    except Exception as e:  # noqa: BLE001
+        R['api_errors'].append('process VRAM counter: %s' % str(e)[:100])
+        return vram_total_mb()
 
 
 def channels(prim):
@@ -123,13 +140,79 @@ def record_zombie_channels(w):
 
 
 def clear_zombies(w):
+    # Added 2026-10-31: one zombie is kept as a neighbour, AI dropped and pinned beside Vexa every tick, so the stills
+    # show whether the fill reaches a channel-0 mesh standing next to her (screen patches compared afterwards).
     record_zombie_channels(w)
     cls = getattr(u, 'ZE_ZombieCharacter', None)
     if not cls:
         return
     for z in u.GameplayStatics.get_all_actors_of_class(w, cls):
+        if S.get('neighbor') is None and z.get_controller():
+            S['neighbor'] = z.get_name()
+            R['setup']['neighbor'] = {'actor': z.get_name(), 'class': z.get_class().get_name()}
+            ctrl = z.get_controller()
+            for name in ('un_possess', 'unpossess'):
+                fn = getattr(ctrl, name, None)
+                if fn:
+                    try:
+                        fn()
+                        break
+                    except Exception as e:  # noqa: BLE001
+                        R['api_errors'].append('neighbor %s: %s' % (name, str(e)[:100]))
+            continue
+        if z.get_name() == S.get('neighbor'):
+            continue
         z.destroy_actor()
         S['zombies_removed'] += 1
+
+
+def neighbor_actor(w):
+    cls = getattr(u, 'ZE_ZombieCharacter', None)
+    if not cls or not S.get('neighbor'):
+        return None
+    return next((z for z in u.GameplayStatics.get_all_actors_of_class(w, cls) if z.get_name() == S['neighbor']), None)
+
+
+def pin_neighbor(w, p):
+    z = neighbor_actor(w)
+    if not z:
+        return
+    yaw = p.get_actor_rotation().yaw
+    fwd = u.Rotator(roll=0, pitch=0, yaw=yaw).get_forward_vector()
+    right = u.Rotator(roll=0, pitch=0, yaw=yaw).get_right_vector()
+    # Beside her on the left (the camera sits over her right shoulder), a little ahead, facing back to the camera.
+    spot = p.get_actor_location() - right * 130 + fwd * 40
+    try:
+        spot.z = p.get_actor_location().z - p.get_editor_property('capsule_component').get_scaled_capsule_half_height()             + z.get_editor_property('capsule_component').get_scaled_capsule_half_height()
+    except Exception:  # noqa: BLE001
+        pass
+    z.set_actor_location_and_rotation(spot, u.Rotator(roll=0, pitch=0, yaw=yaw + 180), False, True)
+    mc = z.get_movement_component()
+    if mc:
+        try:
+            mc.stop_movement_immediately()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def screen_points(w, p):
+    out = {}
+    try:
+        out['viewport'] = list(S['pc'].get_viewport_size())
+    except Exception as e:  # noqa: BLE001
+        out['viewport_err'] = str(e)[:80]
+    targets = {'vexa': p.get_actor_location() + u.Vector(0, 0, 25)}
+    z = neighbor_actor(w)
+    if z:
+        targets['zombie'] = z.get_actor_location() + u.Vector(0, 0, 15)
+    for k, loc in targets.items():
+        try:
+            res = u.GameplayStatics.project_world_to_screen(S['pc'], loc, False)
+            v = next((x for x in (res if isinstance(res, tuple) else (res,)) if isinstance(x, u.Vector2D)), None)
+            out[k] = [round(v.x, 1), round(v.y, 1)] if v else None
+        except Exception as e:  # noqa: BLE001
+            out[k + '_err'] = str(e)[:80]
+    return out
 
 
 # ------------------------------------------------------------------------------------------------------- stills
@@ -180,9 +263,11 @@ def snap_tick():
         R['errors'].append('VRAM %d MB above %d MB: still %s skipped' % (used, VRAM_LIMIT_MB, sn['file'].name))
         S['snap'] = None
         return True
+    if sn['meta'].get('view') == 'survival camera':
+        sn['meta']['screen'] = screen_points(world(), pawn())
     u.HoverAuthoring.capture_world_frame(str(sn['file']))
     row = dict(sn['meta'])
-    row.update({'file': sn['file'].name, 'vram_mb': used})
+    row.update({'file': sn['file'].name, 'vram_mb': used, 'vram_board_total_mb': S.get('vram_total_mb')})
     try:
         row['luminance'] = u.HoverAuthoring.measure_frame_luminance(str(sn['file']), .35)
     except Exception as e:  # noqa: BLE001
@@ -238,7 +323,8 @@ def plan():
     base = data_intensity()
     R['setup']['data_intensity'] = base
     q = [
-        (4.0, lambda t: fill(0)),
+        (4.0, need_neighbor),
+        (0.1, lambda t: fill(0)),
         (0.6, lambda t: snap_pawn_view('vexa_fill_off')),
         (0.4, lambda t: fill(1, base)),
         (0.6, lambda t: snap_pawn_view('vexa_fill_on')),
@@ -262,6 +348,14 @@ def plan():
         (1.0, lambda t: finish()),
     ]
     S['queue'] = q
+
+
+def need_neighbor(t):
+    # Wait (up to 30 s) for the first zombie to be kept as the neighbour before the fill stills.
+    if S.get('neighbor') or S.setdefault('neighbor_waits', 0) >= 30:
+        return
+    S['neighbor_waits'] += 1
+    S['queue'].insert(0, (1.0, need_neighbor))
 
 
 def second_gun():
@@ -366,6 +460,7 @@ def tick(dt):
             return
         p = pc.get_controlled_pawn()
         clear_zombies(w)
+        pin_neighbor(w, p)
         if S['cam'] is None:
             if t - S['t_first'] < 3.0:
                 return

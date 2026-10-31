@@ -522,7 +522,19 @@ def summarise():
     }
     R['summary'] = s
     reserve_up = bool(s['ammo_before'] and s['ammo_after'] and s['ammo_after'][1] > s['ammo_before'][1])
-    ripple_ok = targets < 3 or ((s['dist_time_spearman_cpp'] or 0) >= .8 and .3 <= (s['ripple_span_real_s'] or 0) <= .9)
+    # Fixed 2026-10-31: the ripple is a wave from the pickup (delay = RippleSeconds * dist / maxDist), so the
+    # first-to-last span depends on how spread the targets are, not only on RippleSeconds. With every zombie
+    # 13-18 m away the old 0.3 s span floor failed a correct ripple. Check each kill against the wave instead.
+    cpp_rows = n.get('kill_rows_cpp') or []
+    max_d = max([r[0] for r in cpp_rows] or [0])
+    wave_err = max([abs(r[1] - .6 * r[0] / max_d) for r in cpp_rows] or [9]) if max_d else 9
+    s['ripple_wave_max_error_s'] = round(wave_err, 3)
+    s['ripple_last_kill_real_s'] = max([r[1] for r in cpp_rows] or [0])
+    # Kills land on 1/30 s frames, so zombies a few cm apart tie and Spearman drops on ties: require the kill
+    # times to be non-decreasing with distance instead (plus the per-kill wave error above).
+    by_dist = sorted(cpp_rows, key=lambda r: r[0])
+    s['ripple_monotone'] = all(b[1] >= a[1] - 1e-6 for a, b in zip(by_dist, by_dist[1:]))
+    ripple_ok = targets < 3 or (s['ripple_monotone'] and wave_err <= .1 and .45 <= s['ripple_last_kill_real_s'] <= .9)
     R['checks'] = {
         'nuke_picked': s['nuke_picked'],
         'all_targets_died': targets > 0 and (s['nuke_kills_cpp'] or 0) >= targets,

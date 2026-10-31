@@ -20,8 +20,16 @@ class HOVERFLIGHT_API UHoverLocomotionBridge : public UActorComponent
     UPROPERTY(BlueprintReadOnly) bool bReady = false;
     UPROPERTY(EditAnywhere, BlueprintReadWrite) bool bEnabled = true;
     UPROPERTY(BlueprintReadOnly) bool bRifleStance = false;
-    UFUNCTION(BlueprintCallable) bool PlayAction(UAnimSequence *Sequence, float Duration = 0.f, bool UpperBody = true);
+    // LoopCount: the spear's stance loop passes a large count (AFS 2026-10-31 spear item); 1 everywhere else.
+    UFUNCTION(BlueprintCallable)
+    bool PlayAction(UAnimSequence *Sequence, float Duration = 0.f, bool UpperBody = true, int32 LoopCount = 1);
     UFUNCTION(BlueprintCallable) void CancelAction();
+    // AFS 2026-10-31 (spear item): the heavy thrust holds its wind-up (rate 0) and resumes on release.
+    UFUNCTION(BlueprintCallable) bool SetActionPlayRate(float Rate);
+    UFUNCTION(BlueprintPure) class UAnimMontage *GetAction() const
+    {
+        return Action;
+    }
     // Pure so the headless verify can assert no driver montage runs through a rigged burst (design A1).
     UFUNCTION(BlueprintPure) bool IsActionPlaying() const;
 

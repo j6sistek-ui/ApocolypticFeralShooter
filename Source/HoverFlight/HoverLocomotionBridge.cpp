@@ -10,6 +10,7 @@
 #include "Animation/AnimNode_LinkedInputPose.h"
 #include "BoneControllers/AnimNode_SpringBone.h"
 #include "UObject/UnrealType.h"
+#include "UObject/EnumProperty.h"
 #if WITH_EDITOR
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
@@ -183,6 +184,21 @@ void UHoverLocomotionBridge::TickComponent(float DT, ELevelTick Type, FActorComp
     if (auto *Data = FindFProperty<FStructProperty>(Locomotion->GetClass(), TEXT("AnimData")))
     {
         void *Value = Data->ContainerPtrToValuePtr<void>(Locomotion);
+        // AFS 2026-10-31 (Life Engine x parkour): CLS switches on the movement mode it packages from the character
+        // movement, which sits in MOVE_None while the Life Engine solver drives, so her jumps and falls played the
+        // standing set (LifeEngine_20261031 on_jump.png vs off_jump.png). Hand CLS the solver's walking / falling.
+        if (Pilot->IsLifeEngineActive())
+            for (TFieldIterator<FProperty> It(Data->Struct); It; ++It)
+                if (It->GetName().StartsWith(TEXT("MovementMode_")))
+                {
+                    const uint8 Mode = Pilot->GetCharacterMovement()->IsFalling() ? uint8(MOVE_Falling)
+                                                                                : uint8(MOVE_Walking);
+                    if (auto *Byte = CastField<FByteProperty>(*It))
+                        Byte->SetPropertyValue_InContainer(Value, Mode);
+                    else if (auto *Enum = CastField<FEnumProperty>(*It))
+                        Enum->GetUnderlyingProperty()->SetIntPropertyValue(Enum->ContainerPtrToValuePtr<void>(Value),
+                                                                           int64(Mode));
+                }
         const FQuat BodyRotation = Driver->GetComponentQuat() * FRotator(0, 90, 0).Quaternion();
         for (TFieldIterator<FStructProperty> It(Data->Struct); It; ++It)
         {
@@ -213,7 +229,7 @@ UActorComponent *UHoverIntegrationAuthoring::GetCLSData(AActor *Owner)
     auto *Bridge = Owner ? Owner->FindComponentByClass<UHoverLocomotionBridge>() : nullptr;
     return Bridge ? Bridge->Locomotion.Get() : nullptr;
 }
-bool UHoverLocomotionBridge::PlayAction(UAnimSequence *Sequence, float Duration, bool UpperBody)
+bool UHoverLocomotionBridge::PlayAction(UAnimSequence *Sequence, float Duration, bool UpperBody, int32 LoopCount)
 {
     if (!Driver || !Driver->GetAnimInstance() || !Sequence || !bEnabled)
         return false;
@@ -222,13 +238,22 @@ bool UHoverLocomotionBridge::PlayAction(UAnimSequence *Sequence, float Duration,
     // carry a normal sequence through our upper-body blend without cancelling
     // the DefaultSlot used for slide/prone. Original skeleton stays untouched.
     Action = Driver->GetAnimInstance()->PlaySlotAnimationAsDynamicMontage(
-        Sequence, UpperBody ? TEXT("AdditiveHitReact") : TEXT("DefaultSlot"), .12f, .18f, Rate);
+        Sequence, UpperBody ? TEXT("AdditiveHitReact") : TEXT("DefaultSlot"), .12f, .18f, Rate,
+        FMath::Max(1, LoopCount));
     return Action != nullptr;
 }
 void UHoverLocomotionBridge::CancelAction()
 {
     if (Driver && Driver->GetAnimInstance() && Action)
         Driver->GetAnimInstance()->Montage_Stop(.15f, Action);
+}
+bool UHoverLocomotionBridge::SetActionPlayRate(float Rate)
+{
+    auto *Instance = Driver ? Driver->GetAnimInstance() : nullptr;
+    if (!Instance || !Action || !Instance->Montage_IsPlaying(Action))
+        return false;
+    Instance->Montage_SetPlayRate(Action, FMath::Max(0.f, Rate));
+    return true;
 }
 bool UHoverLocomotionBridge::IsActionPlaying() const
 {

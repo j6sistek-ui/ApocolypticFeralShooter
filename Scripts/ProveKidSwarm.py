@@ -206,7 +206,7 @@ def force_horde(w, gm, t):
 # ---------------------------------------------------------------- truck and nav
 def nav_project(w, point, extent):
     try:
-        res = u.NavigationSystemV1.k2_project_point_to_navigation(w, point, None, None, extent)
+        res = u.NavigationSystemV1.project_point_to_navigation(w, point, None, None, extent)  # 5.8 Python name
     except Exception as e:  # noqa: BLE001
         api_err('k2_project_point_to_navigation', e)
         return None
@@ -214,7 +214,9 @@ def nav_project(w, point, extent):
         ok = next((x for x in res if isinstance(x, bool)), True)
         v = next((x for x in res if isinstance(x, u.Vector)), None)
         return v if ok else None
-    return res if isinstance(res, u.Vector) else None
+    if isinstance(res, u.Vector) and max(abs(res.x), abs(res.y), abs(res.z)) < 1e20:  # FLT_MAX = not on nav
+        return res
+    return None
 
 
 def seg_hits_box(a, b, lo, hi):
@@ -281,7 +283,10 @@ def truck_probe(w, tag):
 
 def read_slots(w):
     try:
-        sub = u.SubsystemBlueprintLibrary.get_world_subsystem(w, u.HoverAttackSlotSubsystem)
+        # 5.8 Python has no world-subsystem getter: find the Play world's instance by iteration.
+        sub = next((o for o in u.ObjectIterator(u.HoverAttackSlotSubsystem) if o.get_world() == w), None)
+        if sub is None:
+            raise RuntimeError('no HoverAttackSlotSubsystem in the Play world')
     except Exception as e:  # noqa: BLE001
         api_err('slot subsystem', e)
         return
@@ -492,6 +497,10 @@ def summarise():
         'contact_fraction': round(len(contact) / n, 3) if n else None,
         'contact_median_s': median(contact),
         'contact_max_s': max(contact) if contact else None,
+        # Added 2026-10-31 after the first run: kids that reached the overflow orbit (<= 520 cm) at least once,
+        # and each non-contact kid's closest approach, so a queued / orbiting kid is told apart from a stuck one.
+        'reached_ring_fraction': round(sum(1 for k in kids.values() if (k['min_d2'] or 1e9) <= 520.0) / n, 3) if n else None,
+        'no_contact_min_d2': {name: k['min_d2'] for name, k in sorted(kids.items()) if k['contact_s'] is None},
         'first_move_median_s': median([k['first_move_s'] for k in kids.values() if k['first_move_s'] is not None]),
         'max_far_cluster': clusters[0]['size'] if clusters else (1 if n else 0),
         'max_far_cluster_at': clusters[0] if clusters else None,

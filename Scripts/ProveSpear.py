@@ -75,6 +75,38 @@ def call(obj, name, *args, default=None):
         return default
 
 
+def drop_ai(ctrl):
+    """Unpossess a zombie's AI (5.8 Python names it un_possess; fixed 2026-10-31 after the first run let the
+    zombies reach and kill her during setup), else destroy the controller."""
+    for name in ('un_possess', 'unpossess'):
+        fn = getattr(ctrl, name, None)
+        if fn:
+            try:
+                fn()
+                return True
+            except Exception as e:  # noqa: BLE001
+                R['api_errors'].append('%s.%s: %s' % (type(ctrl).__name__, name, str(e)[:160]))
+    try:
+        ctrl.destroy_actor()
+        return True
+    except Exception as e:  # noqa: BLE001
+        R['api_errors'].append('drop_ai destroy: %s' % str(e)[:160])
+        return False
+
+
+def keep_vexa_alive(p):
+    # Same refill as ProveNukeAmmo: a stray hit during setup must not end the round (game over dilates time).
+    try:
+        c = p.get_editor_property('combat')
+        s = c.get_editor_property('survival') if c else None
+        if s and s.get_health() < s.get_max_health():
+            s.set_health(s.get_max_health())
+            R['refills'] = R.get('refills', 0) + 1
+    except Exception as e:  # noqa: BLE001
+        if 'keep_alive' not in str(R['api_errors']):
+            R['api_errors'].append('keep_alive: %s' % str(e)[:160])
+
+
 def prop(obj, name, default=None):
     try:
         return obj.get_editor_property(name)
@@ -185,7 +217,7 @@ def targets_tick(w):
             R['targets'].setdefault('assigned', []).append((label, z.get_name()))
             ctrl = z.get_controller()
             if ctrl:
-                call(ctrl, 'unpossess')
+                drop_ai(ctrl)
         else:
             z.destroy_actor()
             S['removed'] += 1
@@ -330,8 +362,33 @@ def plan():
     # A trigger tap is a light strike on release.
     q += [(0.0, lambda t: key('LeftMouseButton', True)), (0.08, lambda t: key('LeftMouseButton', False)),
           (1.2, lambda t: None)]
-    q += tap('G', .15) + [(0.8, record_holster), (0.5, lambda t: finish())]
+    q += tap('G', .15) + [(0.8, record_holster)]
+    # Katana regression (added 2026-10-31): hold-R3 equivalent (ToggleMeleeWeapon), one V slash, back to the gun.
+    # The katana's sweep must keep the shipped geometry: range = DA_AFS_Melee MeleeRange, radius = max(50, 2.5 x
+    # MeleeRadius), sweeps at 0.22 / 0.30 / 0.38 / 0.48 s, first blocker per sweep (no pierce).
+    q += [(0.3, katana_on)] + tap('V', .08) + [(1.3, katana_done), (0.5, lambda t: finish())]
     S['queue'] = q
+
+
+def katana_on(t):
+    p = pawn()
+    call(p, 'toggle_melee_weapon')
+    R['katana'] = {'equipped': call(p, 'is_melee_equipped'), 't_on': round(t, 2),
+                   'live_targets': sorted(S['targets'].keys())}
+    try:
+        d = u.load_asset('/Game/HoverPrototype/ZombieEngine/DA_AFS_Melee.DA_AFS_Melee')
+        ms = d.get_editor_property('melee_stats')
+        rng, rad = ms.get_editor_property('melee_range'), ms.get_editor_property('melee_radius')
+        R['katana']['expected'] = {'range': round(rng), 'radius': round(max(50.0, rad * 2.5))}
+    except Exception as e:  # noqa: BLE001
+        R['api_errors'].append('katana expected: %s' % str(e)[:160])
+
+
+def katana_done(t):
+    p = pawn()
+    R['katana']['equipped_after_swing'] = call(p, 'is_melee_equipped')
+    call(p, 'toggle_melee_weapon')
+    R['katana']['equipped_end'] = call(p, 'is_melee_equipped')
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -352,7 +409,7 @@ def harvest_log():
     for tag in ('HOVER_SPEAR_PROFILE', 'HOVER_SPEAR_READY', 'HOVER_SPEAR_GIVEN', 'HOVER_SPEAR_SELECTED',
                 'HOVER_SPEAR_GRIP', 'HOVER_SPEAR_STANCE', 'HOVER_SPEAR_STRIKE', 'HOVER_SPEAR_SWEEP', 'HOVER_SPEAR_HIT',
                 'HOVER_SPEAR_CHARGE', 'HOVER_SPEAR_HEAVY', 'HOVER_SPEAR_BUFFER', 'HOVER_CYCLE_WEAPON',
-                'HOVER_MELEE_SWING_SOUND'):
+                'HOVER_MELEE_SWING_SOUND', 'HOVER_KATANA_SWEEP', 'HOVER_KATANA_HIT'):
         R['log'][tag] = pick(tag)
     R['log']['warnings'] = [l[-220:] for l in lines if ('Spear' in l or 'AS_Spear' in l) and
                             ('Warning' in l or 'Error' in l)][-12:]
@@ -369,6 +426,20 @@ def harvest_log():
 
 
 def summarise():
+    k = R.setdefault('katana', {})
+    sweeps = R['log'].get('HOVER_KATANA_SWEEP') or []
+    geo = set()
+    struck = 0
+    for l in sweeps:
+        m = re.search(r'struck=(\d+) radius=(\d+) range=(\d+)', l)
+        if m:
+            struck += int(m.group(1))
+            geo.add((int(m.group(3)), int(m.group(2))))
+    k['sweep_lines'] = len(sweeps)
+    k['struck_total'] = struck
+    k['geometry_seen'] = sorted(geo)
+    exp = k.get('expected')
+    k['same_as_before'] = bool(exp and struck > 0 and geo == {(exp['range'], exp['radius'])})
     names = [s['name'] for s in R['strikes']]
     hits = {s['name']: s['hits'] for s in R['strikes']}
     per = R['samples'].get('hits_by_strike', {})
@@ -389,8 +460,10 @@ def summarise():
         'hits_per_strike': hits,
     }
     c = R['checks']
+    c['katana_same_as_before'] = R['katana'].get('same_as_before')
     R['ok'] = (c['spear_selected_by_cycle'] and c['melee_flag_while_held'] and c['combo_order'] and c['heavy_thrown']
-               and c['clips_played'] and c['strikes_with_hits'] >= 2 and c['stills'] >= 3 and not R['errors'])
+               and c['clips_played'] and c['strikes_with_hits'] >= 2 and c['stills'] >= 3 and not R['errors']
+               and bool(c['katana_same_as_before']))
 
 
 def finish():
@@ -444,6 +517,7 @@ def tick(dt):
             S['t_first'] = t
             return
         p = pc.get_controlled_pawn()
+        keep_vexa_alive(p)
         if S['cam'] is None:
             if t - S['t_first'] < 3.0:
                 return
@@ -470,10 +544,9 @@ def tick(dt):
             # Until the targets are pinned, every zombie loses its AI where it spawned, so none can reach her.
             for z in live_zombies(w):
                 if z.get_name() not in S['frozen']:
-                    S['frozen'].add(z.get_name())
                     ctrl = z.get_controller()
-                    if ctrl:
-                        call(ctrl, 'unpossess')
+                    if ctrl and drop_ai(ctrl):
+                        S['frozen'].add(z.get_name())
         targets_tick(w)
         watch_tick(t)
         caps_tick(t)

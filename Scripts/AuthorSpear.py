@@ -135,7 +135,13 @@ def retarget_clips():
         return compat_fallback(copies)
     datas = [L.find_asset_data(p) for p in copies.values()]
     result, last = None, None
-    for call in (lambda: op.duplicate_and_retarget(datas, src_mesh, tgt_mesh, rtg, '', '', '', '_Vexa', False),
+    # 5.8 signature (checked 2026-10-31): (assets, source_mesh, target_mesh, rtg, search, replace, prefix, suffix,
+    # target_path, use_source_path, include_referenced_assets, overwrite_existing_files). The 8-positional form
+    # also binds there, but with target_path '' the output did not land next to the copies; name the folder.
+    for call in (lambda: op.duplicate_and_retarget(datas, src_mesh, tgt_mesh, rtg, search='', replace='', prefix='',
+                                                   suffix='_Vexa', target_path=SRC_DIR, use_source_path=False,
+                                                   include_referenced_assets=False, overwrite_existing_files=True),
+                 lambda: op.duplicate_and_retarget(datas, src_mesh, tgt_mesh, rtg, '', '', '', '_Vexa', False),
                  lambda: op.duplicate_and_retarget(datas, src_mesh, tgt_mesh, rtg, '', '', '', '_Vexa'),
                  lambda: op.duplicate_and_retarget(assets_to_retarget=datas, source_mesh=src_mesh,
                                                    target_mesh=tgt_mesh, ik_retarget_asset=rtg, suffix='_Vexa')):
@@ -480,13 +486,24 @@ def author_waves(spear_def):
     R['waves']['spear_slot'] = slot
     if DRY or not spear_def:
         return
-    cfg = u.ZE_StartingWeaponConfig()
-    cfg.set_editor_property('weapon_definition', spear_def)
-    cfg.set_editor_property('add_to_quickbar', True)
-    cfg.set_editor_property('quickbar_slot', slot)
+    # The struct's fields are EditDefaultsOnly, so set_editor_property refuses them on an instance (first real
+    # run 2026-10-31); the keyword constructor is accepted.
+    cfg = u.ZE_StartingWeaponConfig(weapon_definition=spear_def, add_to_quickbar=True, quickbar_slot=slot)
     weapons.append(cfg)
-    gear.set_editor_property('starting_weapons', weapons)  # struct arrays come back as copies: set them back
-    waves.set_editor_property('starting_equipment', gear)
+    try:
+        gear.set_editor_property('starting_weapons', weapons)  # struct arrays come back as copies: set them back
+    except Exception as e:  # noqa: BLE001
+        R['warnings'].append('starting_weapons set_editor_property refused (%s); used import_text' % str(e)[:120])
+        text = gear.export_text()
+        head, sep, tail = text.partition('StartingWeapons=(')
+        assert sep, 'StartingWeapons not in exported text'
+        entry = cfg.export_text()
+        gear.import_text(head + sep + entry + ',' + tail if not tail.startswith(')') else head + sep + entry + tail)
+    try:
+        waves.set_editor_property('starting_equipment', gear)
+    except Exception as e:  # noqa: BLE001
+        R['warnings'].append('starting_equipment set_editor_property refused (%s); used set_editor_properties' % str(e)[:120])
+        waves.set_editor_properties({'starting_equipment': gear})
     back = waves.get_editor_property('starting_equipment').get_editor_property('starting_weapons')
     R['waves']['after'] = [(path_of(w.get_editor_property('weapon_definition')), w.get_editor_property('quickbar_slot'))
                            for w in back]
@@ -540,7 +557,9 @@ def build_plan(mode):
         th = measure_thrust(rows, fwd)
         frac = rows[th['contact_index']]['t'] / lengths[key]
         dur, c, sweeps = timing(key, frac, (-.10, -.04, .02) if key == 'Jab' else (-.12, -.06, 0, .05))
-        reach = tip_reach(rows[th['contact_index']], fwd, lead_left, length_cm, grip)
+        # Each thrust's own lead hand (fixed 2026-10-31: the jab leads left, the thrust right, so the jab's lead
+        # laid the thrust's spear backwards and measured 22 cm).
+        reach = tip_reach(rows[th['contact_index']], fwd, th['lead_left'], length_cm, grip)
         th.update({'contact_frac': round(frac, 3), 'tip_reach_cm': reach, 'duration': dur, 'rate': round(lengths[key] / dur, 2)})
         m['clips'][key] = th
         row = {'duration': dur, 'sweep_times': sweeps, 'chain_open_seconds': round(c * .6, 3),
@@ -572,13 +591,18 @@ def build_plan(mode):
         windup = min(max(rows[th['windup_index']]['t'] / lengths[best], .15), max(.15, frac - .12), .7)
         dur, c, sweeps = timing(best, frac, (-.08, -.03, .02, .07))
         sweeps = [t for t in sweeps if t / dur > windup + .02] or [round(c, 3)]
-        reach = tip_reach(rows[th['contact_index']], fwd, lead_left, length_cm, grip)
+        reach = tip_reach(rows[th['contact_index']], fwd, th['lead_left'], length_cm, grip)
         m['clips']['Heavy'] = dict(th, key=best, contact_frac=round(frac, 3), windup_frac=round(windup, 3),
                                    duration=dur, tip_reach_cm=reach,
                                    candidates={k: v['lunge_cm'] for k, v in heavy_rows.items()})
         row = {'duration': dur, 'sweep_times': sweeps, 'windup_fraction': round(windup, 3)}
-        if reach and 150 <= reach <= 380:
+        # A charged heavy must not reach less than the light thrust (2026-10-31: with each clip's own lead hand the
+        # heavy measured 159 cm against the thrust's 270 cm default); below that keep SpearDefaults' 300 cm.
+        thrust_reach = plan.get('Thrust', {}).get('reach', 270.0)
+        if reach and 150 <= reach <= 380 and reach >= thrust_reach:
             row['reach'] = float(round(reach))
+        elif reach:
+            R['warnings'].append('heavy measured reach %.0f cm < thrust %.0f cm: kept the default' % (reach, thrust_reach))
         plan['Heavy'] = row
         clips['Heavy'] = clips[best]
     plan['grip'] = {'tip_toward_left_hand': bool(lead_left), 'flip_mesh_tip': mesh_info['head_at'] == 'min',

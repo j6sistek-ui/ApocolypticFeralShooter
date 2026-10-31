@@ -12,6 +12,9 @@
 #include "Navigation/PathFollowingComponent.h"
 #include "NavigationSystem.h"
 #include "Zombies/ZE_ZombieAIController.h"
+#include "Components/SceneComponent.h"
+#include "NavAreas/NavArea_Null.h"
+#include "NavModifierComponent.h"
 
 UWorld *UHoverSpawnDirector::GetWorld() const
 {
@@ -80,12 +83,28 @@ void UHoverSpawnDirector::BeginRound(int32 InRound, EHoverRoundKind InKind, int3
     Chosen = nullptr;
     EnableOnly(nullptr);
     NextScore = 0.f;
+    bHasPackBearing = false;
     UE_LOG(LogTemp, Display, TEXT("HOVER_SPAWN_ROUND round=%d kind=%s quota=%d interval=%.2f"), Round,
            *UEnum::GetValueAsString(Kind), Quota, GetSpawnInterval());
 }
 
 void UHoverSpawnDirector::EndRound()
 {
+    // AFS 2026-10-31 (kid swarm): how many entrances fed the round that is ending (once per round).
+    if (Round > 0 && Round != SpreadLoggedRound)
+    {
+        SpreadLoggedRound = Round;
+        int32 Used = 0;
+        FString Uses;
+        for (const FHoverSpawnerState &State : Spawners)
+            if (State.UsesThisRound > 0)
+            {
+                ++Used;
+                Uses += FString::Printf(TEXT("%s:%d,"), *GetNameSafe(State.Point.Get()), State.UsesThisRound);
+            }
+        UE_LOG(LogTemp, Display, TEXT("HOVER_SPAWN_SPREAD round=%d kind=%s spawners=%d uses=%s"), Round,
+               *UEnum::GetValueAsString(Kind), Used, Uses.IsEmpty() ? TEXT("none") : *Uses);
+    }
     Chosen = nullptr;
     Credit = 0.f;
     StallStart = -1.f;
@@ -294,6 +313,15 @@ AZE_ZombieSpawnPoint *UHoverSpawnDirector::Pick(const FHoverSpawnTarget &Target,
                 continue;
             Weight *= Settings->OccludedWeight;
         }
+        // AFS 2026-10-31 (kid swarm): a new horde pack favours entrances away from the last pack's bearing
+        // (x .35 on the same bearing up to x 1 opposite), so a swarm arrives from several sides when the gates
+        // allow it.
+        if (Kind == EHoverRoundKind::Horde && !bPackReuse && bHasPackBearing)
+        {
+            const FVector Delta = Position - Target.Location;
+            const float Bearing = FMath::RadiansToDegrees(FMath::Atan2(Delta.Y, Delta.X));
+            Weight *= .35f + .65f * FMath::Abs(FMath::FindDeltaAngleDegrees(Bearing, LastPackBearing)) / 180.f;
+        }
         if (Weight <= 0.f)
             continue;
         // Reachability is always required (last, because it is the most expensive gate).
@@ -389,6 +417,7 @@ void UHoverSpawnDirector::Update(float DeltaSeconds)
     if (!Mode || !Settings)
         return;
     Live.RemoveAll([](const TWeakObjectPtr<AHoverCyberZombie> &Weak) { return !Weak.IsValid() || Weak->IsDead(); });
+    UpdateTruckNavBlocker();
     if (Mode->GetWaveState() != EZE_WaveState::WaveInProgress)
         return;
     const float Time = Now();
@@ -464,7 +493,19 @@ void UHoverSpawnDirector::OnSpawned(AHoverCyberZombie &Zombie, bool bVendorSpawn
             Recent.SetNum(Settings->RecentCount);
     }
     if (Kind == EHoverRoundKind::Horde)
+    {
+        // AFS 2026-10-31 (kid swarm): remember the bearing of each new pack's entrance (see Pick).
+        if (PackRemaining <= 0 && Point)
+            if (const APawn *PackTarget = UGameplayStatics::GetPlayerPawn(Mode, 0))
+            {
+                const FVector Delta = Point->GetActorLocation() - PackTarget->GetActorLocation();
+                LastPackBearing = FMath::RadiansToDegrees(FMath::Atan2(Delta.Y, Delta.X));
+                bHasPackBearing = true;
+                UE_LOG(LogTemp, Verbose, TEXT("HOVER_SPAWN_HORDE_PACK round=%d spawner=%s bearing=%.0f"), Round,
+                       *GetNameSafe(Point), LastPackBearing);
+            }
         PackRemaining = PackRemaining > 0 ? PackRemaining - 1 : FMath::Max(0, Settings->HordePackSize - 1);
+    }
     const bool bWasRelaxed = bRelaxCone;
     bRelaxCone = false;
     // Jitter: a reachable point near the entrance and +-60 degrees of yaw, so a door never
@@ -482,10 +523,11 @@ void UHoverSpawnDirector::OnSpawned(AHoverCyberZombie &Zombie, bool bVendorSpawn
     const APawn *Player = UGameplayStatics::GetPlayerPawn(Mode, 0);
     UE_LOG(LogTemp, Display,
            TEXT("HOVER_SPAWN time=%.2f round=%d spawner=%s distance=%.0f tier=%.0f interval=%.2f pressure=%.2f "
-                "credit=%.2f candidates=%d relaxCone=%d"),
+                "credit=%.2f candidates=%d relaxCone=%d zombie=%s role=%s"),
            Time, Round, *GetNameSafe(Point),
            Player ? FVector::Dist2D(Player->GetActorLocation(), Zombie.GetActorLocation()) : -1.f, Zombie.SpeedTier,
-           LastInterval, LastPressure, Credit, Candidates, bWasRelaxed ? 1 : 0);
+           LastInterval, LastPressure, Credit, Candidates, bWasRelaxed ? 1 : 0, *Zombie.GetName(),
+           *UEnum::GetValueAsString(Zombie.GetRole()));
     RateJitter = FMath::FRandRange(Settings->RateJitterMin, Settings->RateJitterMax);
     // Re-pick at once, so the next spawn can use a different entrance in the same tick window.
     if (Mode && Mode->GetZombiesRemaining() - Live.Num() > 0)
@@ -549,6 +591,78 @@ void UHoverSpawnDirector::UpdateForcedSprinters()
         if (AHoverCyberZombie *Zombie = Weak.Get();
             Zombie && !Zombie->IsDead() && Zombie->GetRole() == EHoverZombieRole::Standard)
             Zombie->SpeedTier = FMath::Max(Zombie->SpeedTier, Settings->SprinterSpeed);
+}
+
+void UHoverSpawnDirector::UpdateTruckNavBlocker()
+{
+    // AFS 2026-10-31 (kid swarm, owner playtest item 5): "kid zombies bunch / hoard in one spot" by the truck.
+    // AHoverTestController spawns the parked pickup at runtime at AFS_TruckStart (200, 5900), in the North
+    // Avenue lane between the Uptown entrances and the survival start, but L_NYC_Survival's navmesh is
+    // DynamicModifiersOnly and was built without it. Paths, and Detour crowd steering (which only sees navmesh
+    // walls), ran straight through the truck: zombies from Uptown piled against its bumper and crawled along
+    // it at 5-50 cm/s (ZombieDiversity_20261031/proof.json). A null-area nav modifier over the settled truck
+    // cuts it out of the navmesh, so paths go round either side of it.
+    UWorld *World = GetWorld();
+    const float Time = Now();
+    if (!World || !Mode || Time < NextTruckCheck)
+        return;
+    NextTruckCheck = Time + 2.f;
+    const auto *PC = Cast<AHoverTestController>(UGameplayStatics::GetPlayerController(Mode, 0));
+    APawn *Truck = PC ? PC->GetTestTruck() : nullptr;
+    AActor *Blocker = TruckBlocker.Get();
+    if (!IsValid(Truck) || PC->GetPawn() == Truck)
+    {
+        if (Blocker)
+        {
+            Blocker->Destroy();
+            UE_LOG(LogTemp, Display, TEXT("HOVER_SPAWN_TRUCK_NAV action=removed truck=%s"), *GetNameSafe(Truck));
+        }
+        TruckBlocker.Reset();
+        TruckSeenAt = -1.f;
+        return;
+    }
+    if (TruckSeenAt < 0.f)
+        TruckSeenAt = Time;
+    // Spawned 120 cm above the road, it drops onto its wheels first (placed anyway after 6 s of suspension jitter).
+    const float Seen = Time - TruckSeenAt;
+    if (Seen < 1.5f || (Seen < 6.f && Truck->GetVelocity().SizeSquared() > FMath::Square(10.f)))
+        return;
+    FVector Origin, Extent;
+    Truck->GetActorBounds(true, Origin, Extent);
+    // Collision bounds of the vehicle body, clamped so a stray component can never close a whole street.
+    Extent.X = FMath::Clamp<double>(Extent.X, 60.0, 400.0) + 10.0;
+    Extent.Y = FMath::Clamp<double>(Extent.Y, 60.0, 400.0) + 10.0;
+    Extent.Z = FMath::Clamp<double>(Extent.Z, 60.0, 250.0);
+    if (Blocker && FVector::Dist2D(Blocker->GetActorLocation(), Origin) < 40.f &&
+        (TruckBlockerExtent - Extent).GetAbsMax() < 25.f)
+        return;
+    const TCHAR *Action = Blocker ? TEXT("moved") : TEXT("placed");
+    if (Blocker)
+        Blocker->Destroy();
+    TruckBlocker.Reset();
+    FActorSpawnParameters Params;
+    Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    Params.ObjectFlags |= RF_Transient;
+    AActor *Actor = World->SpawnActor<AActor>(AActor::StaticClass(), FTransform(Origin), Params);
+    if (!Actor)
+        return;
+    // No primitive component on purpose: the modifier then uses FailsafeExtent around the actor location, an
+    // axis-aligned box (the root is never rotated), instead of guessing from the vehicle's physics bodies.
+    auto *Root = NewObject<USceneComponent>(Actor, TEXT("AFSTruckNavRoot"));
+    Actor->SetRootComponent(Root);
+    Root->SetWorldLocationAndRotation(Origin, FQuat::Identity);
+    Root->RegisterComponent();
+    auto *Modifier = NewObject<UNavModifierComponent>(Actor, TEXT("AFSTruckNavModifier"));
+    Modifier->AreaClass = UNavArea_Null::StaticClass();
+    Modifier->FailsafeExtent = Extent;
+    Modifier->bIncludeAgentHeight = true;
+    Modifier->RegisterComponent();
+    Actor->Tags.Add(TEXT("AFS_TruckNavBlocker"));
+    TruckBlocker = Actor;
+    TruckBlockerExtent = Extent;
+    UE_LOG(LogTemp, Display, TEXT("HOVER_SPAWN_TRUCK_NAV action=%s truck=%s center=%s extent=%s area=%s"), Action,
+           *Truck->GetName(), *Origin.ToCompactString(), *Extent.ToCompactString(),
+           *GetNameSafe(Modifier->AreaClass.Get()));
 }
 
 void UHoverSpawnDirector::UpdateStragglers()

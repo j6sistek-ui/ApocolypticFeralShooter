@@ -4,6 +4,8 @@
 #include "HoverAnimInstance.h"
 #include "HoverCyberCity.h"
 #include "HoverGunFeel.h"
+#include "HoverEffects.h"
+#include "Kismet/GameplayStatics.h"
 #include "Inventory/ZE_InventoryComponent.h"
 #include "Inventory/ZE_ItemDefinition.h"
 #include "Inventory/ZE_WeaponDefinition.h"
@@ -368,6 +370,7 @@ void AHoverMeleeWeapon::CancelSwing()
     for (FTimerHandle &Timer : SwingTimers)
         GetWorldTimerManager().ClearTimer(Timer);
     SwingTimers.Reset();
+    ResetStrikeState();
     SwingEnd = 0;
     SetActorHiddenInGame(true);
     StaticMeshTP->SetVisibility(false);
@@ -375,6 +378,7 @@ void AHoverMeleeWeapon::CancelSwing()
 }
 void AHoverMeleeWeapon::EndPlay(const EEndPlayReason::Type Reason)
 {
+    ReleaseTwoHandGrip();
     CancelSwing();
     Super::EndPlay(Reason);
 }
@@ -384,9 +388,16 @@ void AHoverMeleeWeapon::Tick(float DT)
     auto *Pilot = Cast<AHoverPilot>(OwnerPawn);
     const bool Active = Pilot && Pilot->IsOnFoot() && !Pilot->IsKnockedDown() && !Pilot->IsDefeated() &&
                         !(Pilot->Combat && Pilot->Combat->IsInventoryOpen()) &&
-                        (Pilot->IsMeleeEquipped() || IsSwinging());
+                        (IsHeldBy(Pilot) || IsSwinging());
     SetFirstPersonDetail(Active && !Pilot->IsThirdPersonView());
     SetActorHiddenInGame(!Active);
+    if (!Active)
+    {
+        // The spear (bCancelWhenInactive): board, knockdown, defeat or inventory end the strike or the charge.
+        if (Profile.bCancelWhenInactive && (IsSwinging() || bCharging))
+            CancelSwing();
+        StopStance(Pilot);
+    }
     if (!Active)
     {
         StaticMeshTP->SetVisibility(false);
@@ -394,6 +405,7 @@ void AHoverMeleeWeapon::Tick(float DT)
         return;
     }
     ConfigureGrip(Pilot);
+    UpdateStance(Pilot);
     const bool ThirdPerson = Pilot->IsThirdPersonView();
     StaticMeshTP->SetHiddenInGame(!ThirdPerson);
     StaticMeshFP->SetHiddenInGame(ThirdPerson);
@@ -417,31 +429,74 @@ void AHoverMeleeWeapon::PerformMeleeTrace()
     // the arc instead: at 0.22, 0.30, 0.38 and 0.48 s a wide sphere is swept from the chest out to the blade's reach
     // along the camera yaw only (no pitch, so a crawler under the crosshair still counts), and every zombie touched is
     // damaged once per swing through the vendor's ProcessHit (damage, flinch, blood, the hit confirm).
+    // AFS 2026-10-31 (spear item): the times, reach and radius now come from the active strike of the weapon's
+    // FHoverMeleeProfile; FHoverMeleeProfile::Katana() holds exactly the values above.
+    ClearSweeps();
+    for (int32 Index = 0; Index < ActiveStrike.SweepTimes.Num(); ++Index)
+        ScheduleSweep(Index, ActiveStrike.SweepTimes[Index]);
+}
+
+void AHoverMeleeWeapon::ClearSweeps()
+{
     for (FTimerHandle &Timer : SwingTimers)
         GetWorldTimerManager().ClearTimer(Timer);
     SwingTimers.Reset();
     SwingHits.Reset();
-    for (const float At : {.22f, .30f, .38f, .48f})
-        GetWorldTimerManager().SetTimer(SwingTimers.AddDefaulted_GetRef(),
-                                        FTimerDelegate::CreateUObject(this, &AHoverMeleeWeapon::SweepOnce), At, false);
+}
+
+void AHoverMeleeWeapon::ScheduleSweep(int32 Index, float Delay)
+{
+    GetWorldTimerManager().SetTimer(SwingTimers.AddDefaulted_GetRef(),
+                                    FTimerDelegate::CreateUObject(this, &AHoverMeleeWeapon::SweepAt, Index),
+                                    FMath::Max(Delay, .001f), false);
 }
 
 void AHoverMeleeWeapon::SweepOnce()
 {
+    SweepAt(0);
+}
+
+void AHoverMeleeWeapon::SweepAt(int32 Index)
+{
     auto *Pilot = Cast<AHoverPilot>(OwnerPawn);
     if (!Pilot || !Pilot->IsOnFoot() || !IsSwinging() || !GetWorld())
         return;
-    const float Range = WeaponDefinition ? WeaponDefinition->MeleeStats.MeleeRange : 150.f;
-    const float Radius = FMath::Max(50.f, WeaponDefinition ? WeaponDefinition->MeleeStats.MeleeRadius * 2.5f : 50.f);
-    const FVector Start = Pilot->GetActorLocation() + FVector(0, 0, 15.f);
-    const FVector Forward = FRotator(0.f, Pilot->GetControlRotation().Yaw, 0.f).Vector();
-    const FVector End = Start + Forward * (Range + 30.f);
+    const FHoverMeleeStrike &Strike = ActiveStrike;
+    const float Range = Strike.Reach > 0.f       ? Strike.Reach
+                        : WeaponDefinition       ? WeaponDefinition->MeleeStats.MeleeRange
+                                                 : 150.f;
+    const float DefinitionRadius = WeaponDefinition ? WeaponDefinition->MeleeStats.MeleeRadius * 2.5f : 50.f;
+    const float Radius = Strike.Radius > 0.f ? Strike.Radius : FMath::Max(50.f, DefinitionRadius);
+    // A straight line along the spear (jab, thrust: both yaws 0) or a narrow arc walked sweep by sweep (swing).
+    const int32 Count = Strike.SweepTimes.Num();
+    const float ArcYaw = Count > 1 ? FMath::Lerp(Strike.ArcStartYaw, Strike.ArcEndYaw, float(Index) / float(Count - 1))
+                                   : Strike.ArcStartYaw;
+    const FVector Forward = FRotator(0.f, Pilot->GetControlRotation().Yaw + ArcYaw, 0.f).Vector();
+    const FVector Start =
+        Pilot->GetActorLocation() + FVector(0, 0, Strike.StartHeight) + Forward * Strike.StartForward;
+    const FVector End = Start + Forward * (Range + Strike.ReachPad);
     TArray<FHitResult> Hits;
     FCollisionQueryParams Params(SCENE_QUERY_STAT(HoverKatanaSweep), false, this);
     Params.AddIgnoredActor(OwnerPawn);
     Params.bReturnPhysicalMaterial = true;
-    GetWorld()->SweepMultiByChannel(Hits, Start, End, FQuat::Identity, ECC_Pawn, FCollisionShape::MakeSphere(Radius),
-                                    Params);
+    if (Profile.bPierce)
+    {
+        // Every touch comes back as an overlap (the query's response caps the object's), nearest first; the line
+        // ends at the first non-zombie that would have blocked the Pawn channel (a wall, a car).
+        GetWorld()->SweepMultiByChannel(Hits, Start, End, FQuat::Identity, ECC_Pawn,
+                                        FCollisionShape::MakeSphere(Radius), Params, FCollisionResponseParams(ECR_Overlap));
+        Hits.Sort([](const FHitResult &A, const FHitResult &B) { return A.Time < B.Time; });
+        const int32 Wall = Hits.IndexOfByPredicate([](const FHitResult &Hit) {
+            const UPrimitiveComponent *Component = Hit.GetComponent();
+            return !Cast<AZE_ZombieCharacter>(Hit.GetActor()) && Component &&
+                   Component->GetCollisionResponseToChannel(ECC_Pawn) == ECR_Block;
+        });
+        if (Wall != INDEX_NONE)
+            Hits.SetNum(Wall);
+    }
+    else
+        GetWorld()->SweepMultiByChannel(Hits, Start, End, FQuat::Identity, ECC_Pawn,
+                                        FCollisionShape::MakeSphere(Radius), Params);
     int32 Struck = 0;
     for (FHitResult &Hit : Hits)
     {
@@ -454,37 +509,523 @@ void AHoverMeleeWeapon::SweepOnce()
         if (Hit.ImpactNormal.IsNearlyZero())
             Hit.ImpactNormal = -Forward;
         Hit.bBlockingHit = true;
-        ProcessHit(Hit);
+        const float Distance = FVector::Dist2D(Actor->GetActorLocation(), Pilot->GetActorLocation());
+        StrikeActor(Hit);
+        if (Strike.HitStopSeconds > 0.f)
+        {
+            FTimerHandle HitStopTimer; // Per victim, as the gun's kill hit-stop (a shared handle cancels restores).
+            HoverEffects::HitStop(Actor, Strike.HitStopDilation, Strike.HitStopSeconds, HitStopTimer);
+        }
+        UE_LOG(LogTemp, Verbose, TEXT("HOVER_%s_HIT strike=%s actor=%s dist=%.0f scale=%.2f"), *Profile.LogTag,
+               *Strike.Name.ToString(), *Actor->GetName(), Distance, ActiveDamageScale);
         ++Struck;
     }
+    StrikeHits += Struck;
     if (Struck)
-        UE_LOG(LogTemp, Verbose, TEXT("HOVER_KATANA_SWEEP struck=%d radius=%.0f range=%.0f"), Struck, Radius, Range);
+        UE_LOG(LogTemp, Verbose, TEXT("HOVER_%s_SWEEP struck=%d radius=%.0f range=%.0f strike=%s index=%d yaw=%.0f"),
+               *Profile.LogTag, Struck, Radius, Range, *Strike.Name.ToString(), Index, ArcYaw);
 }
+
+void AHoverMeleeWeapon::StrikeActor(const FHitResult &Hit)
+{
+    if (FMath::IsNearlyEqual(ActiveDamageScale, 1.f) || !WeaponDefinition)
+    {
+        ProcessHit(Hit); // The katana and every unscaled strike: the vendor path, unchanged.
+        return;
+    }
+    // ProcessHit's own damage pick (MeleeDamage for a melee definition) times the strike's scale; the vendor
+    // function has no scale input. Same ApplyPointDamage call, so flinch, blood, kill points and the hit confirm
+    // (Causer is this AHoverMeleeWeapon) stay identical.
+    const float Base = WeaponDefinition->WeaponType == EZE_WeaponType::Melee ? WeaponDefinition->MeleeStats.MeleeDamage
+                                                                             : WeaponDefinition->CombatStats.Damage;
+    if (OwnerPawn && OwnerPawn->GetController())
+        UGameplayStatics::ApplyPointDamage(Hit.GetActor(), Base * ActiveDamageScale, Hit.ImpactNormal, Hit,
+                                           OwnerPawn->GetController(), this, nullptr);
+}
+
 void AHoverMeleeWeapon::PlayFireAnimation()
 {
+    // Vendor HandleFire path (the katana): the profile's first light strike, swept by PerformMeleeTrace.
+    if (Profile.Light.IsEmpty())
+        Profile = FHoverMeleeProfile::Katana();
+    ActiveStrike = Profile.Light[0];
+    ActiveDamageScale = 1.f;
+    PresentStrike();
+}
+
+bool AHoverMeleeWeapon::PresentStrike(bool bPlayClip)
+{
     LastFireAnimTime = GetWorld()->GetTimeSeconds();
-    SwingEnd = LastFireAnimTime + .8f;
+    StrikeStart = LastFireAnimTime;
+    SwingEnd = LastFireAnimTime + ActiveStrike.Duration;
+    StrikeHits = 0;
+    MaxTipReach = 0.f;
+    bool Played = false;
     if (auto *Pilot = Cast<AHoverPilot>(OwnerPawn))
         Pilot->PlayMeleeSwingSound(); // audio pass 2026-10-31
-    if (auto *Pilot = Cast<AHoverPilot>(OwnerPawn); Pilot && Pilot->LocomotionBridge)
+    if (auto *Pilot = Cast<AHoverPilot>(OwnerPawn); Pilot && Pilot->LocomotionBridge && bPlayClip)
     {
         ConfigureGrip(Pilot);
-        auto *Clip = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/HoverPrototype/Animations/QA_Katana.QA_Katana"));
-        Pilot->LocomotionBridge->PlayAction(Clip, .8f);
-        if (Clip && Pilot->ViewArms)
+        auto *Clip = ActiveStrike.Clip.LoadSynchronous();
+        Played = Pilot->LocomotionBridge->PlayAction(Clip, ActiveStrike.Duration, ActiveStrike.bUpperBody);
+        if (Clip && Pilot->ViewArms && !ActiveStrike.ViewClip.IsNull())
             if (auto *View = Cast<UHoverViewAnimInstance>(Pilot->ViewArms->GetAnimInstance()))
             {
                 View->bMelee = true;
-                auto *ViewClip = LoadObject<UAnimSequence>(
-                    nullptr, TEXT("/Game/HoverPrototype/Animations/QA_KatanaView.QA_KatanaView"));
+                auto *ViewClip = ActiveStrike.ViewClip.LoadSynchronous();
                 if (ViewClip)
                     View->PlaySlotAnimationAsDynamicMontage(ViewClip, TEXT("DefaultSlot"), .08f, .15f,
-                                                            ViewClip->GetPlayLength() / .8f);
+                                                            ViewClip->GetPlayLength() / ActiveStrike.Duration);
             }
     }
+    return Played;
 }
+
+void AHoverMeleeWeapon::SetProfile(const FHoverMeleeProfile &InProfile)
+{
+    CancelSwing();
+    ReleaseTwoHandGrip();
+    Profile = InProfile;
+    if (Profile.Light.IsEmpty())
+        Profile.Light = FHoverMeleeProfile::Katana().Light;
+    ActiveStrike = Profile.Light[0];
+    ComboIndex = 0;
+    bGripConfigured = false;
+}
+
+bool AHoverMeleeWeapon::IsHeldBy(const AHoverPilot *Pilot) const
+{
+    if (!Pilot)
+        return false;
+    const UHoverCombatBridge *Bridge = Pilot->Combat.Get();
+    const bool SpearSelected = Bridge && Bridge->IsSpearSelected();
+    if (Bridge && Bridge->SpearWeapon.Get() == this)
+        return SpearSelected;
+    // The katana: the hold-R3 toggle, except while the spear's quickbar slot carries the melee flag.
+    return Pilot->IsMeleeEquipped() && !SpearSelected;
+}
+
+bool AHoverMeleeWeapon::CanStrike() const
+{
+    const auto *Pilot = Cast<AHoverPilot>(OwnerPawn);
+    return Pilot && GetWorld() && Pilot->IsOnFoot() && !Pilot->IsKnockedDown() && !Pilot->IsDefeated() &&
+           !(Pilot->Combat && Pilot->Combat->IsInventoryOpen()) && IsHeldBy(Pilot);
+}
+
+float AHoverMeleeWeapon::GetChargeAlpha() const
+{
+    if (!bCharging || !GetWorld())
+        return 0.f;
+    return FMath::Clamp((GetWorld()->GetTimeSeconds() - ChargeStart) / FMath::Max(.1f, Profile.FullChargeSeconds), 0.f,
+                        1.f);
+}
+
+void AHoverMeleeWeapon::PressLight()
+{
+    if (Profile.Light.IsEmpty() || bCharging || !CanStrike())
+        return;
+    const float Now = GetWorld()->GetTimeSeconds();
+    if (IsSwinging())
+    {
+        // Too early: ignored. Inside the chain window: buffered for the chain point. Past it: the tail is cancelled.
+        if (Now >= ChainAtTime)
+            StartLight();
+        else if (Now - StrikeStart >= ActiveStrike.ChainOpenSeconds && !bBufferedLight)
+        {
+            bBufferedLight = true;
+            UE_LOG(LogTemp, Verbose, TEXT("HOVER_%s_BUFFER after=%s"), *Profile.LogTag, *ActiveStrike.Name.ToString());
+        }
+        return;
+    }
+    StartLight();
+}
+
+void AHoverMeleeWeapon::StartLight()
+{
+    const float Now = GetWorld()->GetTimeSeconds();
+    if (Now > ComboExpiresAt)
+        ComboIndex = 0;
+    const int32 Index = ComboIndex % Profile.Light.Num();
+    ComboIndex = (Index + 1) % Profile.Light.Num();
+    bBufferedLight = false;
+    StartStrike(Profile.Light[Index], Profile.Light[Index].DamageScale, Index + 1);
+    const float ChainAt = ActiveStrike.ChainAtSeconds > 0.f
+                              ? FMath::Min(ActiveStrike.ChainAtSeconds, ActiveStrike.Duration)
+                              : ActiveStrike.Duration;
+    ChainAtTime = Now + ChainAt;
+    GetWorldTimerManager().SetTimer(ChainTimer, this, &AHoverMeleeWeapon::OnChainPoint, FMath::Max(.05f, ChainAt),
+                                    false);
+    ComboExpiresAt = SwingEnd + Profile.ComboResetSeconds;
+}
+
+void AHoverMeleeWeapon::OnChainPoint()
+{
+    if (bBufferedLight && !bCharging && CanStrike())
+        StartLight();
+    bBufferedLight = false;
+}
+
+void AHoverMeleeWeapon::StartStrike(const FHoverMeleeStrike &Strike, float Scale, int32 ComboStep)
+{
+    FinishStrike(); // A chained strike closes the previous strike's receipt line first.
+    ActiveStrike = Strike;
+    ActiveDamageScale = Scale;
+    const bool Played = PresentStrike();
+    ClearSweeps();
+    for (int32 Index = 0; Index < Strike.SweepTimes.Num(); ++Index)
+        ScheduleSweep(Index, Strike.SweepTimes[Index]);
+    GetWorldTimerManager().SetTimer(StrikeEndTimer, this, &AHoverMeleeWeapon::FinishStrike,
+                                    FMath::Max(.05f, Strike.Duration), false);
+    bStrikeOpen = true;
+    UE_LOG(LogTemp, Verbose,
+           TEXT("HOVER_%s_STRIKE begin name=%s combo=%d clip=%s played=%d duration=%.2f scale=%.2f reach=%.0f "
+                "radius=%.0f"),
+           *Profile.LogTag, *Strike.Name.ToString(), ComboStep, *Strike.Clip.GetAssetName(), Played, Strike.Duration,
+           Scale, Strike.Reach, Strike.Radius);
+}
+
+void AHoverMeleeWeapon::FinishStrike()
+{
+    GetWorldTimerManager().ClearTimer(StrikeEndTimer);
+    if (!bStrikeOpen)
+        return;
+    bStrikeOpen = false;
+    LastStrikeHits = StrikeHits;
+    LastStrikeName = ActiveStrike.Name;
+    LastTipReach = MaxTipReach;
+    ++StrikesFinished;
+    UE_LOG(LogTemp, Verbose, TEXT("HOVER_%s_STRIKE end name=%s hits=%d tip_reach=%.0f scale=%.2f"), *Profile.LogTag,
+           *ActiveStrike.Name.ToString(), StrikeHits, MaxTipReach, ActiveDamageScale);
+}
+
+void AHoverMeleeWeapon::SetAttackHeld(bool Held)
+{
+    if (Held == bAttackHeld)
+        return;
+    bAttackHeld = Held;
+    FTimerManager &Timers = GetWorldTimerManager();
+    if (Held)
+    {
+        bHoldIsCharge = false;
+        // No heavy, or a press during a strike: a light press now (chain buffer or cancel), never a charge.
+        if (!Profile.bHasHeavy || IsSwinging() || bCharging)
+        {
+            PressLight();
+            return;
+        }
+        if (!CanStrike())
+            return;
+        bHoldIsCharge = true;
+        Timers.SetTimer(ChargeTimer, this, &AHoverMeleeWeapon::BeginCharge, FMath::Max(.05f, Profile.ChargeThreshold),
+                        false);
+        return;
+    }
+    if (bCharging)
+        ReleaseHeavy();
+    else if (bHoldIsCharge && Timers.IsTimerActive(ChargeTimer))
+    {
+        // Released before ChargeThreshold: a tap, the light combo.
+        Timers.ClearTimer(ChargeTimer);
+        PressLight();
+    }
+    bHoldIsCharge = false;
+}
+
+void AHoverMeleeWeapon::BeginCharge()
+{
+    auto *Pilot = Cast<AHoverPilot>(OwnerPawn);
+    if (!bAttackHeld || bCharging || IsSwinging() || !CanStrike())
+        return;
+    FinishStrike();
+    ClearSweeps();
+    GetWorldTimerManager().ClearTimer(ChainTimer);
+    bBufferedLight = false;
+    ComboIndex = 0;
+    bCharging = true;
+    ChargeStart = GetWorld()->GetTimeSeconds();
+    ActiveStrike = Profile.Heavy;
+    ActiveDamageScale = Profile.HeavyMinScale;
+    StrikeStart = ChargeStart;
+    ChainAtTime = ChargeStart + 1000.f;
+    // IsSwinging stays true through the wind-up: the gun stays down and the stance loop waits.
+    SwingEnd = ChargeStart + FMath::Max(Profile.FullChargeSeconds, Profile.MaxChargeHoldSeconds) +
+               Profile.Heavy.Duration + 1.f;
+    const float Windup = FMath::Clamp(Profile.Heavy.WindupFraction, .05f, .9f);
+    bChargeClipPlaying = false;
+    if (Pilot && Pilot->LocomotionBridge)
+    {
+        ConfigureGrip(Pilot);
+        // The wind-up plays the heavy clip from its start and reaches WindupFraction at full charge, where it holds.
+        bChargeClipPlaying = Pilot->LocomotionBridge->PlayAction(
+            Profile.Heavy.Clip.LoadSynchronous(), FMath::Max(.1f, Profile.FullChargeSeconds) / Windup,
+            Profile.Heavy.bUpperBody);
+    }
+    FTimerManager &Timers = GetWorldTimerManager();
+    Timers.SetTimer(ChargeFreezeTimer, this, &AHoverMeleeWeapon::FreezeCharge,
+                    FMath::Max(.1f, Profile.FullChargeSeconds), false);
+    Timers.SetTimer(ChargeAutoTimer, this, &AHoverMeleeWeapon::ReleaseHeavy,
+                    FMath::Max(Profile.FullChargeSeconds, Profile.MaxChargeHoldSeconds), false);
+    UE_LOG(LogTemp, Verbose, TEXT("HOVER_%s_CHARGE begin clip=%s played=%d windup=%.2f"), *Profile.LogTag,
+           *Profile.Heavy.Clip.GetAssetName(), bChargeClipPlaying, Windup);
+}
+
+void AHoverMeleeWeapon::FreezeCharge()
+{
+    if (bCharging && bChargeClipPlaying)
+        if (auto *Pilot = Cast<AHoverPilot>(OwnerPawn); Pilot && Pilot->LocomotionBridge)
+            Pilot->LocomotionBridge->SetActionPlayRate(0.f);
+}
+
+void AHoverMeleeWeapon::ReleaseHeavy()
+{
+    if (!bCharging)
+        return;
+    bCharging = false;
+    FTimerManager &Timers = GetWorldTimerManager();
+    Timers.ClearTimer(ChargeFreezeTimer);
+    Timers.ClearTimer(ChargeAutoTimer);
+    auto *Pilot = Cast<AHoverPilot>(OwnerPawn);
+    const FHoverMeleeStrike &Heavy = Profile.Heavy;
+    const float Now = GetWorld()->GetTimeSeconds();
+    const float Alpha = FMath::Clamp((Now - ChargeStart) / FMath::Max(.1f, Profile.FullChargeSeconds), 0.f, 1.f);
+    const float Windup = FMath::Clamp(Heavy.WindupFraction, .05f, .9f);
+    // The clip reached Windup at full charge and held there; an early release lets go from where it got to.
+    float FracNow = Windup * Alpha;
+    float Remaining = FMath::Max(.1f, Heavy.Duration * (1.f - Windup));
+    ActiveStrike = Heavy;
+    ActiveDamageScale = FMath::Lerp(Profile.HeavyMinScale, Profile.HeavyMaxScale, Alpha);
+    UAnimSequence *Clip = Heavy.Clip.LoadSynchronous();
+    bool Resumed = false;
+    if (Pilot && Pilot->LocomotionBridge && Clip && bChargeClipPlaying)
+        Resumed = Pilot->LocomotionBridge->SetActionPlayRate(Clip->GetPlayLength() * (1.f - FracNow) / Remaining);
+    if (Resumed)
+        PresentStrike(false); // Sound, timing and receipt fields; the wind-up montage carries on at the new rate.
+    else
+    {
+        // The wind-up montage was replaced (a crouch, a hit react) or never played: the whole clip from its start.
+        FracNow = 0.f;
+        Remaining = FMath::Max(.1f, Heavy.Duration);
+        PresentStrike(true);
+    }
+    SwingEnd = Now + Remaining;
+    ChainAtTime = SwingEnd;
+    ClearSweeps();
+    const float Span = FMath::Max(.05f, 1.f - FracNow);
+    for (int32 Index = 0; Index < Heavy.SweepTimes.Num(); ++Index)
+    {
+        const float Fraction = Heavy.SweepTimes[Index] / FMath::Max(.05f, Heavy.Duration);
+        if (Fraction > FracNow)
+            ScheduleSweep(Index, (Fraction - FracNow) / Span * Remaining);
+    }
+    Timers.SetTimer(StrikeEndTimer, this, &AHoverMeleeWeapon::FinishStrike, Remaining, false);
+    Timers.SetTimer(ChainTimer, this, &AHoverMeleeWeapon::OnChainPoint, Remaining, false);
+    ComboExpiresAt = SwingEnd + Profile.ComboResetSeconds;
+    bStrikeOpen = true;
+    UE_LOG(LogTemp, Verbose, TEXT("HOVER_%s_HEAVY charge=%.2f scale=%.2f resumed=%d remaining=%.2f"), *Profile.LogTag,
+           Alpha, ActiveDamageScale, Resumed, Remaining);
+}
+
+void AHoverMeleeWeapon::ResetStrikeState()
+{
+    FinishStrike();
+    FTimerManager &Timers = GetWorldTimerManager();
+    for (FTimerHandle *Timer : {&ChainTimer, &ChargeTimer, &ChargeFreezeTimer, &ChargeAutoTimer})
+        Timers.ClearTimer(*Timer);
+    bCharging = bBufferedLight = bHoldIsCharge = bChargeClipPlaying = false;
+    ChainAtTime = 0.f;
+}
+
+void AHoverMeleeWeapon::OnHolstered()
+{
+    CancelSwing();
+    bAttackHeld = false;
+    StopStance(Cast<AHoverPilot>(OwnerPawn));
+}
+
+bool AHoverMeleeWeapon::IsStancePlaying() const
+{
+    const auto *Pilot = Cast<AHoverPilot>(OwnerPawn);
+    const auto *Bridge = Pilot ? Pilot->LocomotionBridge.Get() : nullptr;
+    return bStanceActive && Bridge && StanceMontage.IsValid() && Bridge->GetAction() == StanceMontage.Get() &&
+           Bridge->IsActionPlaying();
+}
+
+void AHoverMeleeWeapon::StopStance(AHoverPilot *Pilot)
+{
+    // Only our own loop is stopped: a crouch, knockdown or ride action that replaced it keeps playing.
+    if (IsStancePlaying() && Pilot && Pilot->LocomotionBridge)
+        Pilot->LocomotionBridge->CancelAction();
+    bStanceActive = false;
+    StanceMontage.Reset();
+}
+
+void AHoverMeleeWeapon::UpdateStance(AHoverPilot *Pilot)
+{
+    auto *Bridge = Pilot ? Pilot->LocomotionBridge.Get() : nullptr;
+    if (!Bridge || Profile.StanceLoop.IsNull())
+        return;
+    bStanceActive = IsStancePlaying(); // A strike, crouch or hit montage replaces the loop.
+    if (IsSwinging() || bCharging)
+        return;
+    const bool Want = IsHeldBy(Pilot) && Pilot->IsThirdPersonView() && !Pilot->GetCharacterMovement()->IsFalling();
+    if (Want && !Bridge->IsActionPlaying())
+    {
+        UAnimSequence *Loop = Profile.StanceLoop.LoadSynchronous();
+        if (Loop && Bridge->PlayAction(Loop, 0.f, true, 100000))
+        {
+            StanceMontage = Bridge->GetAction();
+            bStanceActive = true;
+            UE_LOG(LogTemp, Verbose, TEXT("HOVER_%s_STANCE start clip=%s"), *Profile.LogTag, *Loop->GetName());
+        }
+    }
+    else if (!Want)
+        StopStance(Pilot);
+}
+
+bool AHoverMeleeWeapon::GetShaft(FVector &Butt, FVector &Axis, float &Length) const
+{
+    const UStaticMesh *Mesh = StaticMeshTP ? StaticMeshTP->GetStaticMesh() : nullptr;
+    if (!Mesh)
+        return false;
+    // The shaft is the mesh's longest bounds axis; the head is at its maximum unless the profile flips it.
+    const FBox Box = Mesh->GetBoundingBox();
+    const FVector Size = Box.GetSize();
+    const int32 A = Size.X >= Size.Y && Size.X >= Size.Z ? 0 : (Size.Y >= Size.Z ? 1 : 2);
+    Axis = FVector::ZeroVector;
+    Axis[A] = Profile.bFlipMeshTip ? -1.f : 1.f;
+    Butt = Box.GetCenter();
+    Butt[A] = Profile.bFlipMeshTip ? Box.Max[A] : Box.Min[A];
+    Length = Size[A];
+    return Length > 1.f;
+}
+
+FVector AHoverMeleeWeapon::GetTipLocation() const
+{
+    FVector Butt, Axis;
+    float Length = 0.f;
+    if (!GetShaft(Butt, Axis, Length))
+        return GetActorLocation();
+    return StaticMeshTP->GetComponentTransform().TransformPosition(Butt + Axis * Length);
+}
+
+void AHoverMeleeWeapon::ConfigureTwoHandGrip(AHoverPilot *Pilot)
+{
+    auto *Body = Pilot ? Pilot->GetMesh() : nullptr;
+    FVector Butt, Axis;
+    float Length = 0.f;
+    if (!Body || !GetShaft(Butt, Axis, Length))
+        return;
+    // Carry (no pack clip holding both hands, e.g. mid-jump): the shaft along the fist, gripped as the katana's
+    // handle, at GripFromButt of its length.
+    StaticMeshTP->AttachToComponent(Body, FAttachmentTransformRules::SnapToTargetNotIncludingScale, TEXT("hand_r"));
+    const FTransform HandWorld = Body->GetSocketTransform(TEXT("hand_r"));
+    const FVector Index = HandWorld.InverseTransformPosition(Body->GetSocketLocation(TEXT("index_02_r")));
+    const FVector Pinky = HandWorld.InverseTransformPosition(Body->GetSocketLocation(TEXT("pinky_02_r")));
+    const FVector Palm = HandWorld.InverseTransformPosition(Body->GetSocketLocation(TEXT("middle_01_r")));
+    const FVector FistAxis = (Index - Pinky).GetSafeNormal(SMALL_NUMBER, FVector::UpVector);
+    const FVector Grip = FMath::Lerp((Index + Pinky) * .5f, Palm, .75f);
+    const FQuat Rotation = FQuat::FindBetweenNormals(Axis, FistAxis);
+    const FVector GripLocal = Butt + Axis * (Length * Profile.GripFromButt);
+    CarryRelative = FTransform(Rotation, Grip - Rotation.RotateVector(GripLocal));
+    TwoHandRelative = CarryRelative;
+    TwoHandWeight = 0.f;
+    StaticMeshTP->SetRelativeTransform(CarryRelative);
+    if (Pilot->ViewArms)
+    {
+        StaticMeshFP->AttachToComponent(Pilot->ViewArms, FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+                                        TEXT("hand_r"));
+        StaticMeshFP->SetRelativeTransform(CarryRelative);
+        StaticMeshFP->CastShadow = false;
+        AddTickPrerequisiteComponent(Pilot->ViewArms);
+    }
+    AddTickPrerequisiteComponent(Body);
+    // Same-frame update after the body's bones are final, as AHoverPilot::UpdateGunTransform does for the guns.
+    GripBody = Body;
+    GripPoseHandle = Body->RegisterOnBoneTransformsFinalizedDelegate(
+        FOnBoneTransformsFinalizedMultiCast::FDelegate::CreateUObject(this, &AHoverMeleeWeapon::UpdateTwoHandGrip));
+    bGripConfigured = true;
+    UE_LOG(LogTemp, Display, TEXT("HOVER_%s_GRIP length=%.0f grip_from_butt=%.2f tip_left=%d flip=%d"),
+           *Profile.LogTag, Length, Profile.GripFromButt, Profile.bTipTowardLeftHand, Profile.bFlipMeshTip);
+}
+
+void AHoverMeleeWeapon::ReleaseTwoHandGrip()
+{
+    if (auto *Body = GripBody.Get(); Body && GripPoseHandle.IsValid())
+        Body->UnregisterOnBoneTransformsFinalizedDelegate(GripPoseHandle);
+    GripPoseHandle.Reset();
+    GripBody.Reset();
+}
+
+void AHoverMeleeWeapon::UpdateTwoHandGrip()
+{
+    auto *Body = GripBody.Get();
+    auto *Pilot = Cast<AHoverPilot>(OwnerPawn);
+    if (!Body || !Pilot || !GetWorld() || IsHidden())
+        return;
+    // The pack's own rig (BP_SpearFighter) plays a spear-tracking clip and FABRIKs the hands onto it; here the hands
+    // keep the retargeted body clip and the spear follows them: the shaft runs from the rear palm through the front
+    // palm whenever a pack clip holds both hands on it (strike, wind-up, stance loop).
+    const bool HandsOnShaft = IsSwinging() || bCharging || IsStancePlaying();
+    const FTransform HandWorld = Body->GetSocketTransform(TEXT("hand_r"));
+    FVector Butt, Axis;
+    float Length = 0.f;
+    if (HandsOnShaft && GetShaft(Butt, Axis, Length))
+    {
+        auto PalmOf = [Body](const TCHAR *IndexBone, const TCHAR *PinkyBone, const TCHAR *MiddleBone) {
+            const FVector Knuckles = (Body->GetSocketLocation(IndexBone) + Body->GetSocketLocation(PinkyBone)) * .5f;
+            return FMath::Lerp(Knuckles, Body->GetSocketLocation(MiddleBone), .75f);
+        };
+        const FVector Right = PalmOf(TEXT("index_02_r"), TEXT("pinky_02_r"), TEXT("middle_01_r"));
+        const FVector Left = PalmOf(TEXT("index_02_l"), TEXT("pinky_02_l"), TEXT("middle_01_l"));
+        // AFS 2026-10-31 (spear proof): the pack's lead hand changes between clips (the jab leads with the left
+        // palm, the thrusts and the heavy with the right), so a fixed "head on the left hand" laid the spear
+        // backwards through every thrust (head 86-94 cm ahead while the sweep reached 270-300 cm). The head now
+        // goes on whichever palm is ahead along her facing, with hysteresis so it never flips while the hands pass.
+        const float LeftAhead =
+            FVector::DotProduct((Left - Right).GetSafeNormal(), Pilot->GetActorForwardVector());
+        if (TipLeftLive < 0)
+            TipLeftLive = Profile.bTipTowardLeftHand ? 1 : 0;
+        if (LeftAhead > .3f)
+            TipLeftLive = 1;
+        else if (LeftAhead < -.3f)
+            TipLeftLive = 0;
+        const FVector Rear = TipLeftLive ? Right : Left;
+        const FVector Front = TipLeftLive ? Left : Right;
+        const float Spacing = FVector::Dist(Rear, Front);
+        if (Spacing >= Profile.TwoHandMinSpacing && Spacing <= Profile.TwoHandMaxSpacing)
+        {
+            const FVector Direction = (Front - Rear) / Spacing;
+            // Roll from the right hand's Z so the head's flat turns with the wrist.
+            const FQuat Shaft = FRotationMatrix::MakeFromXZ(Direction, HandWorld.GetUnitAxis(EAxis::Z)).ToQuat();
+            const FQuat MeshWorld = Shaft * FQuat::FindBetweenNormals(Axis, FVector::ForwardVector);
+            const FVector GripLocal = Butt + Axis * (Length * Profile.GripFromButt);
+            const FTransform World(MeshWorld, Rear - MeshWorld.RotateVector(GripLocal));
+            TwoHandRelative = World.GetRelativeTransform(HandWorld);
+            TwoHandRelative.SetScale3D(FVector::OneVector);
+        }
+    }
+    // Only the switch between the carry and the two-hand line is eased (about 0.1 s); while a clip holds both hands
+    // the spear tracks them exactly, frame for frame.
+    const float DT = FMath::Max(GetWorld()->GetDeltaSeconds(), 0.f);
+    TwoHandWeight = FMath::FInterpConstantTo(TwoHandWeight, HandsOnShaft ? 1.f : 0.f, DT, 10.f);
+    FTransform Relative;
+    Relative.SetLocation(FMath::Lerp(CarryRelative.GetLocation(), TwoHandRelative.GetLocation(), TwoHandWeight));
+    Relative.SetRotation(
+        FQuat::Slerp(CarryRelative.GetRotation(), TwoHandRelative.GetRotation(), TwoHandWeight).GetNormalized());
+    StaticMeshTP->SetRelativeTransform(Relative);
+    if (IsSwinging() && !bCharging)
+    {
+        // Receipt: how far ahead of Vexa (along the camera yaw) the head reached in this strike.
+        const FVector Forward = FRotator(0.f, Pilot->GetControlRotation().Yaw, 0.f).Vector();
+        MaxTipReach =
+            FMath::Max(MaxTipReach, float(FVector::DotProduct(GetTipLocation() - Pilot->GetActorLocation(), Forward)));
+    }
+}
+
 void AHoverMeleeWeapon::ConfigureGrip(AHoverPilot *Pilot)
 {
+    if (!bGripConfigured && Pilot && Profile.bTwoHandGrip)
+        ConfigureTwoHandGrip(Pilot); // The spear; a failure falls through to the katana grip below.
     if (bGripConfigured || !Pilot)
         return;
     auto *Body = Pilot->GetMesh();
@@ -566,6 +1107,24 @@ void UHoverCombatBridge::BeginPlay()
             Weapon->FinalizeEquipped();
     }
     MeleeWeapon = Pilot->MeleeWeapon;
+    // AFS 2026-10-31 (spear item), NYC Survival only (owner: the SpearAnimationsV2 pack is Vexa's melee). The spear is
+    // a second AHoverMeleeWeapon owned here; Scripts/AuthorSpear.py authors DA_NYC_Spear (no WeaponActorClass), its
+    // quickbar slot in DA_NYCWaves and DA_SpearProfile. Without the definition nothing changes.
+    if (Pilot->bSurvivalRules)
+        if (auto *Definition = LoadObject<UZE_WeaponDefinition>(
+                nullptr, TEXT("/Game/HoverPrototype/NYC/Weapons/DA_NYC_Spear.DA_NYC_Spear"), nullptr, LOAD_NoWarn))
+        {
+            SpearDefinition = Definition;
+            SpearWeapon = GetWorld()->SpawnActor<AHoverMeleeWeapon>();
+            if (SpearWeapon)
+            {
+                SpearWeapon->SetProfile(FHoverMeleeProfile::LoadSpear());
+                SpearWeapon->SetWeaponDefinition(Definition);
+                SpearWeapon->Equip(Pilot);
+            }
+            UE_LOG(LogTemp, Display, TEXT("HOVER_SPEAR_READY actor=%s slot=%d"), *GetNameSafe(SpearWeapon),
+                   FindSpearSlot());
+        }
 }
 AZE_WeaponBase *UHoverCombatBridge::GetWeapon() const
 {
@@ -597,6 +1156,8 @@ void UHoverCombatBridge::Reload()
 }
 void UHoverCombatBridge::SuspendForRide()
 {
+    if (SpearWeapon)
+        SpearWeapon->CancelSwing();
     if (InventoryUI)
         ToggleInventory();
     SetTrigger(false);
@@ -607,6 +1168,13 @@ void UHoverCombatBridge::SuspendForRide()
 void UHoverCombatBridge::Melee()
 {
     auto *Pilot = Cast<AHoverPilot>(GetOwner());
+    // AFS 2026-10-31 (spear item): while the spear slot is selected the melee input is its light combo.
+    if (bSpearSelected && SpearWeapon)
+    {
+        if (Pilot && Pilot->IsOnFoot() && !InventoryUI)
+            SpearWeapon->PressLight();
+        return;
+    }
     if (!Pilot || !Pilot->IsOnFoot() || InventoryUI || !MeleeWeapon || MeleeWeapon->IsSwinging())
         return;
     if (auto *Weapon = Cast<AHoverCyberRifle>(GetWeapon()))
@@ -676,6 +1244,67 @@ void UHoverCombatBridge::CycleWeapon()
     }
     UE_LOG(LogTemp, Display, TEXT("HOVER_CYCLE_WEAPON no other weapon on the quickbar"));
 }
+AHoverMeleeWeapon *UHoverCombatBridge::GetActiveMelee() const
+{
+    return bSpearSelected && SpearWeapon ? SpearWeapon.Get() : MeleeWeapon.Get();
+}
+int32 UHoverCombatBridge::FindSpearSlot() const
+{
+    if (!SpearDefinition || !Inventory)
+        return 0;
+    for (int32 Slot = 1; Slot <= Inventory->GetQuickbarSize(); ++Slot)
+    {
+        FZE_InventoryItemInstance Item;
+        if (Inventory->GetQuickbarItem(Slot, Item) && Item.Definition.Get() == SpearDefinition.Get())
+            return Slot;
+    }
+    return 0;
+}
+bool UHoverCombatBridge::GiveSpear(int32 Slot)
+{
+    if (!SpearDefinition || !Inventory)
+        return false;
+    if (FindSpearSlot() > 0)
+        return true;
+    FGuid Id;
+    if (!Inventory->AddItemDefinition(SpearDefinition.Get(), 1, Id))
+        return false;
+    const bool Assigned = Inventory->AssignInstanceToQuickbar(Id, FMath::Clamp(Slot, 1, 5));
+    UE_LOG(LogTemp, Display, TEXT("HOVER_SPEAR_GIVEN slot=%d assigned=%d"), Slot, Assigned);
+    return Assigned;
+}
+void UHoverCombatBridge::UpdateSpearSelection()
+{
+    bool Selected = false;
+    if (SpearWeapon && SpearDefinition && Inventory)
+    {
+        FZE_InventoryItemInstance Item;
+        Selected = Inventory->GetQuickbarItem(Inventory->GetActiveQuickbarSlot(), Item) &&
+                   Item.Definition.Get() == SpearDefinition.Get();
+    }
+    if (Selected == bSpearSelected)
+        return;
+    bSpearSelected = Selected;
+    SetTrigger(false);
+    if (!Selected && SpearWeapon)
+        SpearWeapon->OnHolstered();
+    UE_LOG(LogTemp, Display, TEXT("HOVER_SPEAR_SELECTED %d slot=%d"), Selected,
+           Inventory ? Inventory->GetActiveQuickbarSlot() : 0);
+}
+void UHoverCombatBridge::SetSpearTrigger(bool Held)
+{
+    if (SpearWeapon)
+        SpearWeapon->SetAttackHeld(Held && bSpearSelected && !InventoryUI);
+}
+FString UHoverCombatBridge::GetSpearHudText() const
+{
+    if (!SpearWeapon)
+        return FString();
+    const FString &Name = SpearWeapon->GetProfile().HudName;
+    if (!SpearWeapon->IsCharging())
+        return Name;
+    return FString::Printf(TEXT("%s  CHARGE %d%%"), *Name, FMath::RoundToInt(SpearWeapon->GetChargeAlpha() * 100.f));
+}
 void UHoverCombatBridge::UpdateInventoryCursor()
 {
     if (!FSlateApplication::IsInitialized())
@@ -706,6 +1335,8 @@ void UHoverCombatBridge::ToggleInventory()
     Pilot->CancelPostureInput();
     if (MeleeWeapon)
         MeleeWeapon->CancelSwing();
+    if (SpearWeapon)
+        SpearWeapon->CancelSwing();
     if (InventoryUI)
     {
         InventoryUI->RemoveFromParent();
@@ -744,6 +1375,7 @@ void UHoverCombatBridge::TickComponent(float DT, ELevelTick Type, FActorComponen
 {
     Super::TickComponent(DT, Type, Function);
     UpdateInventoryCursor();
+    UpdateSpearSelection();
     auto *Pilot = Cast<AHoverPilot>(GetOwner());
     auto *PC = Pilot ? Cast<APlayerController>(Pilot->GetController()) : nullptr;
     if (!PC)
@@ -798,5 +1430,8 @@ void UHoverCombatBridge::EndPlay(const EEndPlayReason::Type Reason)
     UpdateInventoryCursor();
     if (Weapons)
         Weapons->UnequipCurrentWeapon();
+    if (SpearWeapon)
+        SpearWeapon->Destroy();
+    SpearWeapon = nullptr;
     Super::EndPlay(Reason);
 }

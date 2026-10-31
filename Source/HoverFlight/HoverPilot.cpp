@@ -439,6 +439,9 @@ void AHoverPilot::BeginPlay()
         UE_LOG(LogTemp, Display, TEXT("LIFE_ENGINE created for NYC Survival (preset %d), on by default"),
                int32(LifeMovement->MovementPreset));
     }
+    // AFS 2026-10-31 visual pass: the survival fill light on Vexa (lighting channel 1 only), NYC Survival only.
+    if (bSurvivalRules)
+        SetupFillLight();
     if (Policy && Policy->ForcesThirdPerson())
     {
         bReview = true;
@@ -522,6 +525,13 @@ void AHoverPilot::ToggleMeleeWeapon()
             Rifle->CancelReload();
     }
     MeleeWeapon->CancelSwing();
+    if (bSpearHeld)
+    {
+        // AFS 2026-10-31 (spear item): the spear slot owns the melee flag; Y / G or a number key leaves it.
+        StatusMessage = TEXT("Spear in hand | Y: next weapon");
+        StatusTime = 2.f;
+        return;
+    }
     bMeleeEquipped = !bMeleeEquipped;
     GunRecoil = GunRecoilVelocity = 0;
     bSuppressFireUntilRelease = true;
@@ -877,10 +887,67 @@ void AHoverPilot::UpdateLifeEngine(float DT)
     // plays a root-motion montage; the solver steps aside for that and resumes once she is back on the ground.
     const auto *Anim = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
     const bool RootMotion = Anim && Anim->GetRootMotionMontageInstance() != nullptr;
-    if (bLifeEngineActive && (Move->MovementMode != MOVE_None || RootMotion))
+    // AFS 2026-10-31 (Life Engine x parkour): the template also engages without a mode change of its own. Its
+    // wall run raises its IsWallRunning flag and rewrites GravityScale (which only the character movement reads),
+    // and a slide or crouch needs the character movement's capsule resize; each of those hands the capsule over
+    // too. UHoverMovementComponent reports the solver's ground state, so the template's IsFalling wall-run check
+    // fires mid-jump, and its Launch override hands over on a wall jump. Landing gives the capsule back.
+    // The template variable is "IsWallRunning?" (with the question mark; checked in the asset's name table).
+    static const TCHAR *const WallRunFlags[] = {TEXT("IsWallRunning?"), TEXT("IsWallRunning"), TEXT("Is Wall Running")};
+    bool WallRunning = false;
+    for (const TCHAR *Name : WallRunFlags)
+        if (const auto *Flag = FindFProperty<FBoolProperty>(GetClass(), Name))
+        {
+            WallRunning = Flag->GetPropertyValue_InContainer(this);
+            break;
+        }
+    if (WallRunning != bTemplateWallRunWas)
+    {
+        UE_LOG(LogTemp, Verbose, TEXT("HOVER_PARKOUR_WALLRUN %s solver=%d mode=%d z=%.1f vz=%.1f"),
+               WallRunning ? TEXT("start") : TEXT("end"), bLifeEngineActive, int32(Move->MovementMode.GetValue()),
+               GetActorLocation().Z, GetVelocity().Z);
+        bTemplateWallRunWas = WallRunning;
+    }
+    // AFS 2026-10-31 guard: after a hand-off the template's wall-run flag must not outlive the landing. If the
+    // character movement has walked on the ground for 0.25 s with the flag (and its 0.25 gravity) still set, the
+    // template will not clear it (it only re-evaluates while falling), so clear it here and restore the baseline
+    // gravity; the solver then resumes as on any landing.
+    if (bLifeEngineTemplateOverride && WallRunning && Move->MovementMode == MOVE_Walking && Move->IsMovingOnGround())
+    {
+        TemplateWallRunGroundTime += DT;
+        if (TemplateWallRunGroundTime >= .25f)
+        {
+            for (const TCHAR *Name : WallRunFlags)
+                if (const auto *Flag = FindFProperty<FBoolProperty>(GetClass(), Name))
+                {
+                    Flag->SetPropertyValue_InContainer(this, false);
+                    break;
+                }
+            UE_LOG(LogTemp, Verbose, TEXT("HOVER_PARKOUR_WALLRUN_CLEAR grounded=%.2fs gravity=%.2f->%.2f"),
+                   TemplateWallRunGroundTime, Move->GravityScale, LifeEngineGravityScale);
+            Move->GravityScale = LifeEngineGravityScale;
+            WallRunning = false;
+            bTemplateWallRunWas = false;
+            TemplateWallRunGroundTime = 0.f;
+        }
+    }
+    else
+        TemplateWallRunGroundTime = 0.f;
+    const bool Crouching = Move->bWantsToCrouch || bIsCrouched;
+    const bool GravityChanged =
+        bLifeEngineActive && !FMath::IsNearlyEqual(Move->GravityScale, LifeEngineGravityScale);
+    const bool WasOverride = bLifeEngineTemplateOverride;
+    if (bLifeEngineActive &&
+        (Move->MovementMode != MOVE_None || RootMotion || WallRunning || GravityChanged || Crouching))
         bLifeEngineTemplateOverride = true;
-    else if (bLifeEngineTemplateOverride && Move->IsMovingOnGround() && !RootMotion)
+    else if (bLifeEngineTemplateOverride && Move->IsMovingOnGround() && !RootMotion && !WallRunning && !Crouching)
         bLifeEngineTemplateOverride = false;
+    if (bLifeEngineTemplateOverride != WasOverride)
+        UE_LOG(LogTemp, Verbose,
+               TEXT("HOVER_PARKOUR_%s mode=%d rootmotion=%d wallrun=%d gravity=%.2f crouch=%d z=%.1f v=%s"),
+               bLifeEngineTemplateOverride ? TEXT("YIELD") : TEXT("RESUME"), int32(Move->MovementMode.GetValue()),
+               RootMotion, WallRunning, Move->GravityScale, Crouching, GetActorLocation().Z,
+               *GetVelocity().ToString());
     const bool Want = bLifeEngine && !bMounted && !bLifeEngineTemplateOverride && !bDefeated && !bKnockedDown &&
                       TransitionTime <= 0;
     if (Want != bLifeEngineActive)
@@ -890,20 +957,36 @@ void AHoverPilot::UpdateLifeEngine(float DT)
         {
             LifeMovement->SetHLVelocity(Move->Velocity);
             Move->StopMovementImmediately();
+            // AFS 2026-10-31: seed the solver's ground flag and the template gravity baseline from the character
+            // movement, so the first solver tick neither fires a false landing nor reports a frame of falling.
+            LifeMovement->bGrounded = Move->IsMovingOnGround();
+            LifeEngineGravityScale = Move->GravityScale;
             Move->SetMovementMode(MOVE_None);
             LifeMovement->Activate(true);
         }
         else
         {
+            // AFS 2026-10-31: read the solver velocity before deactivating it; afterwards it reads zero, and a
+            // wall-run hand-off at a sprint started the template's wall run from a standstill (680 -> 0 cm/s).
+            const FVector HandVelocity = LifeMovement->GetHLVelocity();
             LifeMovement->Deactivate();
             // Leave a mode the template already chose alone; otherwise hand back walking or falling.
+            // A wall-run hand-off (flag or gravity) always goes back through falling, even on the landing tick:
+            // the template clears IsWallRunning? and restores its gravity only in OnLanded, which the engine
+            // fires from a falling landing. Handing back walking there left the flag and GravityScale 0.25 stuck,
+            // so the solver never resumed (ProveParkourLifeEngine run 1, 2026-10-31).
             if (Move->MovementMode == MOVE_None)
-                Move->SetMovementMode(LifeMovement->bGrounded ? MOVE_Walking : MOVE_Falling);
-            Move->Velocity = LifeMovement->GetHLVelocity();
+                Move->SetMovementMode(LifeMovement->bGrounded && !WallRunning && !GravityChanged ? MOVE_Walking
+                                                                                                : MOVE_Falling);
+            Move->Velocity = HandVelocity;
         }
         UE_LOG(LogTemp, Display, TEXT("LIFE_ENGINE %s%s"), Want ? TEXT("active") : TEXT("suspended"),
                bLifeEngineTemplateOverride ? TEXT(" (parkour template)") : TEXT(""));
     }
+    // AFS 2026-10-31: truthful ground state for the template and every IsFalling / IsMovingOnGround reader while
+    // the solver drives (UHoverMovementComponent applies it only in MOVE_None).
+    if (auto *HoverMove = Cast<UHoverMovementComponent>(Move))
+        HoverMove->SetExternalSolverState(bLifeEngineActive, LifeMovement->bGrounded);
     if (!bLifeEngineActive)
         return;
     // The pilot's own sampled input (sticks and keys alike) drives the solver; the speed target follows the
@@ -922,10 +1005,82 @@ void AHoverPilot::UpdateLifeEngine(float DT)
 void AHoverPilot::OnLifeEngineLanded()
 {
     // Same landing feel as the character movement path; the mirrored velocity still holds the fall speed.
+    // AFS 2026-10-31 (parkour): report the landing to the character movement at once. The solver ticks after
+    // the pilot, so the cached flag would otherwise say "falling" for one more template tick, on the ground,
+    // and the template started a wall run beside the start barrier at landing height (ProveParkourLifeEngine).
+    if (auto *HoverMove = Cast<UHoverMovementComponent>(GetCharacterMovement()))
+        HoverMove->SetExternalSolverState(bLifeEngineActive, true);
     FHitResult Hit;
     Hit.ImpactNormal = LifeMovement ? LifeMovement->GroundNormal : FVector::UpVector;
     Hit.ImpactPoint = GetActorLocation() - FVector(0, 0, GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
     Landed(Hit);
+}
+
+void AHoverPilot::SetupFillLight()
+{
+    // AFS 2026-10-31 visual pass (owner: "maybe the lighting on the player just a bit"). A soft, shadowless,
+    // warm-neutral point light riding on the capsule behind her right shoulder, on the over-the-shoulder camera's
+    // side (SurvivalArmLength 300 cm back along the control yaw, SurvivalSocketOffset 58 cm right / 42 cm up from
+    // the capsule centre; the capsule yaw follows the control yaw on foot), so it lifts the side of her the
+    // survival camera sees. It shines on lighting channel 1 only; Vexa's body parts, first-person arms and held
+    // guns join channel 1 (keeping channel 0 for the level's lights), so zombies, props and the street never
+    // receive it. No indirect or volumetric contribution: Lumen ignores lighting channels and would bounce it
+    // onto the level. `HoverFillLight [0|1] [cd]` switches it in play for A/B.
+    if (FillLight || !Assets)
+        return;
+    FillLight = NewObject<UPointLightComponent>(this, TEXT("SurvivalFillLight"));
+    FillLight->SetupAttachment(GetRootComponent());
+    FillLight->SetRelativeLocation(Assets->SurvivalFillLightOffset);
+    FillLight->SetIntensityUnits(ELightUnits::Candelas);
+    FillLight->SetIntensity(Assets->SurvivalFillLightIntensity);
+    FillLight->SetAttenuationRadius(Assets->SurvivalFillLightRadius);
+    FillLight->SetSourceRadius(Assets->SurvivalFillLightSourceRadius);
+    FillLight->SetLightColor(Assets->SurvivalFillLightColor);
+    FillLight->SetCastShadows(false);
+    FillLight->SetSpecularScale(Assets->SurvivalFillLightSpecular);
+    FillLight->SetIndirectLightingIntensity(0.f);
+    FillLight->SetVolumetricScatteringIntensity(0.f);
+    FillLight->SetAffectTranslucentLighting(false);
+    FillLight->SetLightingChannels(false, true, false);
+    FillLight->RegisterComponent();
+    const auto JoinFillChannel = [](UPrimitiveComponent *Primitive) {
+        if (Primitive)
+            Primitive->SetLightingChannels(true, true, Primitive->LightingChannels.bChannel2);
+    };
+    for (USkeletalMeshComponent *Part : Parts)
+        JoinFillChannel(Part);
+    JoinFillChannel(ViewArms);
+    JoinFillChannel(ViewGun);
+    JoinFillChannel(WorldGun);
+    JoinFillChannel(ViewGunSkel);
+    JoinFillChannel(WorldGunSkel);
+    bFillLightOn = Assets->SurvivalFillLightIntensity > 0.f;
+    FillLight->SetVisibility(bFillLightOn);
+    UE_LOG(LogTemp, Display, TEXT("HOVER_FILL_LIGHT created on=%d intensity=%.2f cd radius=%.0f offset=%s parts=%d"),
+           bFillLightOn, FillLight->Intensity, FillLight->AttenuationRadius,
+           *Assets->SurvivalFillLightOffset.ToString(), Parts.Num());
+}
+
+void AHoverPilot::HoverFillLight(int32 Mode, float Intensity)
+{
+    if (!FillLight && bSurvivalRules)
+        SetupFillLight();
+    if (!FillLight)
+    {
+        if (GEngine)
+            GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Orange, TEXT("The fill light lives only in NYC Survival"));
+        return;
+    }
+    bFillLightOn = Mode < 0 ? !bFillLightOn : Mode != 0;
+    if (Intensity >= 0.f)
+        FillLight->SetIntensity(Intensity);
+    FillLight->SetVisibility(bFillLightOn);
+    if (GEngine)
+        GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Cyan,
+                                         FString::Printf(TEXT("Fill light %s (%.1f cd)"),
+                                                         bFillLightOn ? TEXT("ON") : TEXT("OFF"), FillLight->Intensity));
+    UE_LOG(LogTemp, Display, TEXT("HOVER_FILL_LIGHT %s intensity=%.2f"), bFillLightOn ? TEXT("on") : TEXT("off"),
+           FillLight->Intensity);
 }
 
 void AHoverPilot::UpdateInput(float DT)
@@ -1083,6 +1238,27 @@ void AHoverPilot::UpdateInput(float DT)
     if (Reset && !bWasReset && bSandboxResetAllowed)
         HoverReset();
     bWasReset = Reset;
+    // AFS 2026-10-31 (spear item), NYC Survival: the quickbar's spear slot (UHoverCombatBridge::IsSpearSelected) is a
+    // melee stance, so the katana flag carries it on foot (no aim, gun hidden, strafe facing, unarmed CLS stance) and
+    // the trigger below feeds its tap / hold input. Leaving the slot hands the gun back.
+    const bool SpearHeld = Combat && Combat->IsSpearSelected() && IsOnFoot();
+    if (SpearHeld != bSpearHeld || (SpearHeld && !bMeleeEquipped))
+    {
+        const bool Changed = SpearHeld != bSpearHeld;
+        bSpearHeld = SpearHeld;
+        bMeleeEquipped = SpearHeld;
+        bSuppressFireUntilRelease = true;
+        bAiming = false;
+        GunRaisedTime = 0;
+        GunRecoil = GunRecoilVelocity = 0;
+        if (Changed)
+        {
+            StatusMessage = SpearHeld ? TEXT("Spear | R2 / V: combo | Hold R2: heavy thrust | Y: next weapon")
+                                      : TEXT("Gun equipped");
+            StatusTime = 2.f;
+        }
+        SetView();
+    }
     const bool Aim = !bMeleeEquipped && (PC->GetInputAnalogKeyState(EKeys::Gamepad_LeftTriggerAxis) > .2f ||
                                          Down(EKeys::RightMouseButton));
     if (Aim != bAiming)
@@ -1115,7 +1291,9 @@ void AHoverPilot::UpdateInput(float DT)
     {
         if (Combat)
             Combat->SetTrigger(false);
-        if (CanFire && MeleeWeapon && !MeleeWeapon->IsSwinging())
+        if (bSpearHeld && Combat)
+            Combat->SetSpearTrigger(CanFire); // Tap: light combo on release; hold: heavy thrust.
+        else if (CanFire && MeleeWeapon && !MeleeWeapon->IsSwinging())
             Melee();
     }
     else if (Combat)
@@ -3190,6 +3368,7 @@ void AHoverHUD::DrawHUD()
     const auto *Pilot = Cast<AHoverPilot>(GetOwningPawn());
     if (!Canvas)
         return;
+    UHoverPickupFeedback::DrawHUD(this); // AFS 2026-10-31: Nuke flash/banner, pickup toasts (NYC only)
     DrawText(TEXT("D-pad Up / F6: test settings + level"), FLinearColor(.7f, .85f, 1.f), 24, 16);
     const FString HealthLabel =
         Pilot ? FString::Printf(TEXT("%s | HP %.0f/%.0f"), Pilot->IsInvincible() ? TEXT("INVINCIBLE") : TEXT("NORMAL"),
@@ -3277,6 +3456,10 @@ void AHoverHUD::DrawHUD()
     if (Pilot->IsOnFoot())
         DrawText(TEXT("Tap R3 / V: slash | Hold R3: katana / gun | R2: use weapon"), FLinearColor(.8f, .85f, .9f), 32,
                  Canvas->ClipY - 120);
+    // AFS 2026-10-31 (spear item): no vendor weapon is equipped while the spear slot is selected.
+    if (Pilot->Combat && Pilot->Combat->IsSpearSelected())
+        DrawText(Pilot->Combat->GetSpearHudText(), FLinearColor::White, Canvas->ClipX - 285, Canvas->ClipY - 185,
+                 nullptr, 1.4f);
     if (Pilot->Combat)
         if (const auto *Weapon = Pilot->Combat->GetWeapon())
         {
@@ -3288,6 +3471,9 @@ void AHoverHUD::DrawHUD()
                                       : Weapon->GetCurrentClipAmmo() == 0 ? TEXT("  EMPTY - tap X / R")
                                                                           : TEXT(""));
             DrawText(Ammo, FLinearColor::White, Canvas->ClipX - 285, Canvas->ClipY - 185, nullptr, 1.4f);
+            UHoverPickupFeedback::DrawReserveFlash(this, Weapon->GetCurrentClipAmmo(), Weapon->GetReserveAmmo(),
+                                                    Pilot->IsMeleeEquipped(), Canvas->ClipX - 285, Canvas->ClipY - 185,
+                                                    1.4f);
         }
 }
 

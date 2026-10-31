@@ -62,6 +62,7 @@ void UHoverAttackSlotSubsystem::Deinitialize()
     Tokens.Reset();
     BossTokens.Reset();
     Corpses.Reset();
+    Progress.Reset();
     Super::Deinitialize();
 }
 
@@ -72,6 +73,9 @@ bool UHoverAttackSlotSubsystem::IsZombieUsable(const AHoverNYCZombie *Zombie)
 
 void UHoverAttackSlotSubsystem::Prune()
 {
+    for (auto It = Progress.CreateIterator(); It; ++It)
+        if (!IsZombieUsable(It->Key.Get()))
+            It.RemoveCurrent();
     for (auto It = Rings.CreateIterator(); It; ++It)
     {
         if (!It->Key.IsValid())
@@ -133,6 +137,151 @@ bool UHoverAttackSlotSubsystem::ProjectSlotPoint(const FVector &Point, FVector &
     return true;
 }
 
+// ---------------------------------------------------------------------------------------------
+// AFS 2026-10-31 (kid swarm, owner playtest item 5): progress watchdog and approach routing. Zombies from the
+// Uptown entrances piled against the parked pickup at AFS_TruckStart, crawling along its bumper at 5-50 cm/s
+// (ZombieDiversity_20261031/proof.json, y ~6010), because nothing in the slot ring or the far approach ever
+// noticed a zombie that was not getting closer. The director now cuts the truck out of the navmesh; this is
+// the safety net for any obstacle the navmesh does not know (a pile at a corner, a pushed prop).
+
+bool UHoverAttackSlotSubsystem::IsReachable(const FVector &From, const FVector &To, const UObject *Querier) const
+{
+    auto *Navigation = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
+    const ANavigationData *Data =
+        Navigation ? Navigation->GetDefaultNavDataInstance(FNavigationSystem::DontCreate) : nullptr;
+    if (!Data)
+        return true;
+    FNavLocation Start, End;
+    if (!Navigation->ProjectPointToNavigation(From, Start, FVector(120, 120, 200)) ||
+        !Navigation->ProjectPointToNavigation(To, End, FVector(60, 60, 200)))
+        return false;
+    FPathFindingQuery Query(Querier, *Data, Start.Location, End.Location);
+    Query.SetAllowPartialPaths(false);
+    return Navigation->TestPathSync(Query);
+}
+
+bool UHoverAttackSlotSubsystem::UpdateProgress(AHoverNYCZombie *Zombie, const APawn *Target)
+{
+    if (!IsZombieUsable(Zombie) || !IsValid(Target))
+        return false;
+    const float Now = GetWorld()->GetTimeSeconds();
+    const FVector Here = Zombie->GetActorLocation();
+    FProgress &State = Progress.FindOrAdd(SlotKey(Zombie));
+    // Swinging, roaring or already close: no progress is expected. Any real travel restarts the window.
+    const bool bBusy = Zombie->IsSwingActive() || Zombie->IsRoaring();
+    const float Distance = FVector::Dist2D(Here, Target->GetActorLocation());
+    if (State.WindowStart < 0.f || bBusy || Distance <= StallMinDistance ||
+        FVector::Dist2D(Here, State.Origin) >= StallMoveCm)
+    {
+        State.Origin = Here;
+        State.WindowStart = Now;
+        return false;
+    }
+    if (Now - State.WindowStart < StallSeconds)
+        return false;
+    // Restart the window, so a zombie that stays stuck is flagged again after another StallSeconds.
+    State.Origin = Here;
+    State.WindowStart = Now;
+    State.bStalled = true;
+    ++Stalls;
+    UE_LOG(LogTemp, Verbose, TEXT("HOVER_SLOT_STALL zombie=%s role=%s distance=%.0f at=%s"), *Zombie->GetName(),
+           *UEnum::GetValueAsString(Zombie->GetRole()), Distance, *Here.ToCompactString());
+    return true;
+}
+
+bool UHoverAttackSlotSubsystem::BuildDetour(const AHoverNYCZombie *Zombie, const APawn *Target, FProgress &State)
+{
+    const FVector Here = Zombie->GetActorLocation();
+    FVector Toward = (Target->GetActorLocation() - Here).GetSafeNormal2D();
+    if (Toward.IsNearlyZero())
+        Toward = Zombie->GetActorForwardVector().GetSafeNormal2D();
+    const FVector Side(-Toward.Y, Toward.X, 0);
+    // The first stall takes the LateralBias side, so a swarm splits round an obstacle; later stalls alternate.
+    State.DetourSide = State.DetourSide == 0.f ? (Zombie->GetJitter().LateralBias >= 0.f ? 1.f : -1.f)
+                                               : -State.DetourSide;
+    const float First = State.DetourSide;
+    for (const float Sign : {First, -First})
+        for (const float Lateral : {320.f, 220.f, 450.f})
+        {
+            FVector Point;
+            if (!ProjectSlotPoint(Here + Side * (Sign * Lateral) + Toward * 150.f, Point) ||
+                FVector::Dist2D(Point, Here) < 150.f || !IsReachable(Here, Point, Zombie))
+                continue;
+            State.Detour = Point;
+            State.DetourUntil = GetWorld()->GetTimeSeconds() + DetourSeconds;
+            State.DetourSide = Sign;
+            ++Detours;
+            UE_LOG(LogTemp, Verbose, TEXT("HOVER_SLOT_DETOUR zombie=%s side=%.0f lateral=%.0f from=%s to=%s"),
+                   *Zombie->GetName(), Sign, Lateral, *Here.ToCompactString(), *Point.ToCompactString());
+            return true;
+        }
+    UE_LOG(LogTemp, Verbose, TEXT("HOVER_SLOT_DETOUR_FAILED zombie=%s at=%s"), *Zombie->GetName(),
+           *Here.ToCompactString());
+    return false;
+}
+
+bool UHoverAttackSlotSubsystem::GetDetour(AHoverNYCZombie *Zombie, const APawn *Target, FVector &OutPoint)
+{
+    FProgress *State = IsValid(Target) ? Progress.Find(SlotKey(Zombie)) : nullptr;
+    if (!State)
+        return false;
+    const float Now = GetWorld()->GetTimeSeconds();
+    if (Now < State->DetourUntil)
+    {
+        // Held until reached (just outside the 120 cm roam acceptance) or DetourSeconds have passed.
+        if (FVector::Dist2D(Zombie->GetActorLocation(), State->Detour) > 130.f)
+        {
+            OutPoint = State->Detour;
+            return true;
+        }
+        State->DetourUntil = 0.f;
+    }
+    if (!State->bStalled)
+        return false;
+    State->bStalled = false;
+    if (!BuildDetour(Zombie, Target, *State))
+        return false;
+    OutPoint = State->Detour;
+    return true;
+}
+
+bool UHoverAttackSlotSubsystem::ResolveApproachPoint(AHoverNYCZombie *Zombie, const APawn *Target,
+                                                     const FVector &Desired, FVector &OutPoint)
+{
+    if (!IsZombieUsable(Zombie) || !IsValid(Target))
+        return ProjectSlotPoint(Desired, OutPoint);
+    if (GetDetour(Zombie, Target, OutPoint))
+        return true;
+    const FVector Goal = Target->GetActorLocation();
+    FVector GoalNav;
+    // Airborne or mounted targets may not project; then only the projection is required, as before.
+    const bool bGoalOnNav = ProjectSlotPoint(Goal, GoalNav);
+    FVector Point;
+    if (ProjectSlotPoint(Desired, Point) && (!bGoalOnNav || IsReachable(Point, GoalNav, Zombie)))
+    {
+        OutPoint = Point;
+        return true;
+    }
+    // A fan round the target at the same radius, nearest the desired bearing first.
+    const float Radius = FMath::Max(150.f, float(FVector::Dist2D(Goal, Desired)));
+    const float Base = BearingOf(Goal, Desired);
+    for (const float Offset : {35.f, -35.f, 70.f, -70.f, 110.f, -110.f})
+    {
+        if (!ProjectSlotPoint(Goal + BearingDirection(Base + Offset) * Radius, Point) ||
+            (bGoalOnNav && !IsReachable(Point, GoalNav, Zombie)))
+            continue;
+        ++ApproachReroutes;
+        UE_LOG(LogTemp, Verbose, TEXT("HOVER_APPROACH_REROUTE zombie=%s offset=%.0f point=%s"), *Zombie->GetName(),
+               Offset, *Point.ToCompactString());
+        OutPoint = Point;
+        return true;
+    }
+    if (!bGoalOnNav)
+        return false;
+    OutPoint = GoalNav;
+    return true;
+}
+
 bool UHoverAttackSlotSubsystem::SectorPoint(const FRing &Ring, float BearingDegrees, float Radius, float MinRadius,
                                             FVector &Out) const
 {
@@ -150,16 +299,21 @@ bool UHoverAttackSlotSubsystem::BuildRoamPoint(const FRing &Ring, const AHoverNY
     FVector Approach = (Zombie->GetActorLocation() - Ring.Anchor).GetSafeNormal2D();
     if (Approach.IsNearlyZero())
         Approach = FVector::ForwardVector;
-    const FVector Side(-Approach.Y, Approach.X, 0);
+    // AFS 2026-10-31 (kid swarm): each refresh steps 20-40 deg round the target on the LateralBias side, so the
+    // overflow orbits instead of re-picking its own spot, and 350-520 cm (half the bias sideways) keeps it
+    // inside 600 cm of the target. Was 400-600 cm on its own bearing plus the full bias (up to 630 cm).
     const float Bias = Zombie->GetJitter().LateralBias;
-    for (const float Distance : {FMath::FRandRange(400.f, 600.f), 400.f})
+    const FVector Orbit = Approach.RotateAngleAxis((Bias < 0.f ? -1.f : 1.f) * FMath::FRandRange(20.f, 40.f),
+                                                   FVector::UpVector);
+    const FVector Side(-Orbit.Y, Orbit.X, 0);
+    for (const float Distance : {FMath::FRandRange(350.f, 520.f), 350.f})
     {
         FVector Point;
-        if (ProjectSlotPoint(Ring.Anchor + Approach * Distance + Side * Bias, Point))
+        if (ProjectSlotPoint(Ring.Anchor + Orbit * Distance + Side * Bias * .5f, Point))
         {
             Out.Location = Point;
             Out.Distance = FVector::Dist2D(Ring.Anchor, Point);
-            Out.RefreshAt = GetWorld()->GetTimeSeconds() + FMath::FRandRange(2.5f, 3.5f);
+            Out.RefreshAt = GetWorld()->GetTimeSeconds() + FMath::FRandRange(2.f, 3.f);
             return true;
         }
     }
@@ -213,6 +367,22 @@ FHoverSlotClaim UHoverAttackSlotSubsystem::ClaimSlot(AHoverNYCZombie *Zombie, AP
     const float QueueRadius = FMath::Max(Definition ? Definition->QueueRingRadius : 260.f, InnerRadius + 60.f);
     const float InnerStep = 360.f / InnerSectors;
     const float QueueStep = 360.f / QueueSectors;
+    // AFS 2026-10-31 (kid swarm): a zombie that stopped making progress well outside the queue ring (an
+    // obstacle the navmesh does not know, a pile at a corner) takes a short lateral detour instead of a sector.
+    UpdateProgress(Zombie, Target);
+    if (FVector::Dist2D(Ring.Anchor, Zombie->GetActorLocation()) > QueueRadius + 250.f)
+    {
+        FVector Detour;
+        if (GetDetour(Zombie, Target, Detour))
+        {
+            RemoveFromRing(Ring, Zombie);
+            Claim.Location = Detour;
+            Claim.Kind = EHoverSlotKind::Roam;
+            Claim.Sector = INDEX_NONE;
+            Claim.StopRadius = FVector::Dist2D(Ring.Anchor, Detour);
+            return Claim;
+        }
+    }
     const auto Fill = [&Claim, &Ring](const FVector &Location, EHoverSlotKind Kind, int32 Sector) {
         Claim.Location = Location;
         Claim.Kind = Kind;
@@ -310,7 +480,7 @@ FHoverSlotClaim UHoverAttackSlotSubsystem::ClaimSlot(AHoverNYCZombie *Zombie, AP
         if (Slot.Get() == Zombie)
             Slot.Reset();
     FRoamPoint *Roam = Ring.Roaming.Find(SlotKey(Zombie));
-    if (!Roam || Now >= Roam->RefreshAt)
+    if (!Roam || Now >= Roam->RefreshAt || FVector::Dist2D(Zombie->GetActorLocation(), Roam->Location) < 150.f)
     {
         FRoamPoint Fresh;
         if (BuildRoamPoint(Ring, Zombie, Fresh))

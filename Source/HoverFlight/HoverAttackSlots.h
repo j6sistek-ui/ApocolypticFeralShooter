@@ -45,6 +45,13 @@ class HOVERFLIGHT_API UHoverAttackSlotSubsystem : public UWorldSubsystem
     // Matches UHoverBTTask_MoveToSlot's ObservedBlackboardValueTolerance: a target turning or
     // aiming in place never moves the ring.
     static constexpr float AnchorTolerance = 60.f;
+    // AFS 2026-10-31 (kid swarm): progress watchdog. A zombie farther than StallMinDistance from its target
+    // that has travelled less than StallMoveCm in StallSeconds (not swinging or roaring) is stalled and gets a
+    // lateral detour for up to DetourSeconds.
+    static constexpr float StallSeconds = 2.f;
+    static constexpr float StallMoveCm = 60.f;
+    static constexpr float StallMinDistance = 600.f;
+    static constexpr float DetourSeconds = 2.f;
 
     static UHoverAttackSlotSubsystem *Get(const UObject *WorldContext);
 
@@ -102,6 +109,27 @@ class HOVERFLIGHT_API UHoverAttackSlotSubsystem : public UWorldSubsystem
     // Nav projection used by every slot point (extent 60, 60, 200).
     bool ProjectSlotPoint(const FVector &Point, FVector &OutPoint) const;
 
+    // AFS 2026-10-31 (kid swarm): samples the zombie's travel; true once each time it becomes stalled (see
+    // StallSeconds). Called by ClaimSlot and by the far-approach branch of AHoverNYCZombieAI::UpdateDestination.
+    bool UpdateProgress(AHoverNYCZombie *Zombie, const APawn *Target);
+    // Far-approach point: a live detour for a stalled zombie, else Desired when it is on the navmesh and
+    // connected to the target, else the nearest of a fan of bearings round the target, else the target's own
+    // nav point. False (OutPoint unset) only when none of them projects.
+    bool ResolveApproachPoint(AHoverNYCZombie *Zombie, const APawn *Target, const FVector &Desired,
+                              FVector &OutPoint);
+    UFUNCTION(BlueprintPure) int32 GetStallCount() const
+    {
+        return Stalls;
+    }
+    UFUNCTION(BlueprintPure) int32 GetDetourCount() const
+    {
+        return Detours;
+    }
+    UFUNCTION(BlueprintPure) int32 GetApproachRerouteCount() const
+    {
+        return ApproachReroutes;
+    }
+
   protected:
     virtual bool DoesSupportWorldType(const EWorldType::Type WorldType) const override;
 
@@ -133,6 +161,20 @@ class HOVERFLIGHT_API UHoverAttackSlotSubsystem : public UWorldSubsystem
     int32 PeakTokens = 0;
     int32 PeakHeavyInner = 0;
     int32 RingMoves = 0;
+    // AFS 2026-10-31 (kid swarm): per-zombie progress window and detour (UpdateProgress / GetDetour).
+    struct FProgress
+    {
+        FVector Origin = FVector::ZeroVector;
+        float WindowStart = -1.f;
+        bool bStalled = false;
+        FVector Detour = FVector::ZeroVector;
+        float DetourUntil = 0.f;
+        float DetourSide = 0.f;
+    };
+    TMap<TWeakObjectPtr<AHoverNYCZombie>, FProgress> Progress;
+    int32 Stalls = 0;
+    int32 Detours = 0;
+    int32 ApproachReroutes = 0;
 
     void Prune();
     static bool IsZombieUsable(const AHoverNYCZombie *Zombie);
@@ -140,6 +182,9 @@ class HOVERFLIGHT_API UHoverAttackSlotSubsystem : public UWorldSubsystem
     void RemoveFromRing(FRing &Ring, const AHoverNYCZombie *Zombie);
     bool SectorPoint(const FRing &Ring, float BearingDegrees, float Radius, float MinRadius, FVector &Out) const;
     bool BuildRoamPoint(const FRing &Ring, const AHoverNYCZombie *Zombie, FRoamPoint &Out) const;
+    bool IsReachable(const FVector &From, const FVector &To, const UObject *Querier) const;
+    bool BuildDetour(const AHoverNYCZombie *Zombie, const APawn *Target, FProgress &State);
+    bool GetDetour(AHoverNYCZombie *Zombie, const APawn *Target, FVector &OutPoint);
 };
 
 // Optional per-map crowd manager for UHoverNYCNavigationSystem::CrowdManagerClass. Unused until a

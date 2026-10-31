@@ -153,6 +153,23 @@ class HOVERFLIGHT_API UHoverPilotAssets : public UDataAsset
     float SurvivalHipFOV = 88.f;
     UPROPERTY(EditAnywhere, Category = "Survival camera", meta = (ClampMin = "30", ClampMax = "120"))
     float SurvivalAimFOV = 68.f;
+    // Survival fill light (visual pass 2026-10-31, owner: "maybe the lighting on the player just a bit"): a soft,
+    // shadowless point light on lighting channel 1 that only Vexa and her held guns receive. Offset is capsule
+    // space (behind / right / up: the over-the-shoulder camera's side). Intensity 0 starts it off and
+    // `HoverFillLight 1 <cd>` turns it on in play. The NYC sun is 5 lux under a low exposure range, so a few
+    // candelas already read.
+    UPROPERTY(EditAnywhere, Category = "Survival camera|Fill light", meta = (ClampMin = "0", ClampMax = "100"))
+    float SurvivalFillLightIntensity = 2.5f;
+    UPROPERTY(EditAnywhere, Category = "Survival camera|Fill light", meta = (ClampMin = "50", ClampMax = "1000"))
+    float SurvivalFillLightRadius = 400.f;
+    UPROPERTY(EditAnywhere, Category = "Survival camera|Fill light", meta = (ClampMin = "0", ClampMax = "100"))
+    float SurvivalFillLightSourceRadius = 40.f;
+    UPROPERTY(EditAnywhere, Category = "Survival camera|Fill light", meta = (ClampMin = "0", ClampMax = "1"))
+    float SurvivalFillLightSpecular = .35f;
+    UPROPERTY(EditAnywhere, Category = "Survival camera|Fill light")
+    FVector SurvivalFillLightOffset = FVector(-140, 90, 75);
+    UPROPERTY(EditAnywhere, Category = "Survival camera|Fill light")
+    FLinearColor SurvivalFillLightColor = FLinearColor(1.f, .93f, .85f);
     // Third-person self-occlusion: when spring-arm collision pins the review camera within this
     // distance of the capsule centre (zombies pushing Vexa into a wall or the parked truck), her
     // body and held rifle are hidden from her own view (shadow kept) until the camera backs off past
@@ -229,6 +246,9 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     // other modes. While active the character movement sits in MOVE_None and mirrors the solver's velocity so the
     // animation, aim and camera code keep reading GetVelocity(); the board, parkour, knockdown and defeat suspend it.
     UFUNCTION(Exec) void LifeEngine(int32 Mode = -1);
+    // NYC Survival fill light on Vexa (visual pass 2026-10-31): `HoverFillLight` flips it, `HoverFillLight 0` / `1`
+    // sets it, a second argument sets the intensity in candelas (A/B without the F6 menu).
+    UFUNCTION(Exec) void HoverFillLight(int32 Mode = -1, float Intensity = -1.f);
     // Audio pass 2026-10-31: the katana swing whoosh (AHoverMeleeWeapon::PlayFireAnimation calls it).
     void PlayMeleeSwingSound();
     UFUNCTION(BlueprintPure) bool IsLifeEngineActive() const
@@ -531,6 +551,15 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     // The parkour template (BP_Vexa_CLS_Parkour) owns vaults, wall runs and slides through the character movement;
     // while it drives a mode change or a root-motion montage the solver steps aside and resumes on the ground.
     bool bLifeEngineTemplateOverride = false;
+    // AFS 2026-10-31 (Life Engine x parkour): edge detector for the template's wall-run flag (HOVER_PARKOUR_WALLRUN)
+    // and the GravityScale it had when the solver last took over (a change means its wall run began).
+    bool bTemplateWallRunWas = false;
+    float TemplateWallRunGroundTime = 0.f; // AFS 2026-10-31: stuck-flag guard, see UpdateLifeEngine
+    float LifeEngineGravityScale = 1.f;
+    // Visual pass 2026-10-31: the survival fill light (SetupFillLight from BeginPlay, NYC Survival only).
+    UPROPERTY() TObjectPtr<UPointLightComponent> FillLight;
+    bool bFillLightOn = false;
+    void SetupFillLight();
     void UpdateLifeEngine(float DT);
     UFUNCTION() void OnLifeEngineLanded();
     float FlightPitch = 0, FlightPitchVelocity = 0, HopStartZ = 0, HopTilt = 0;
@@ -564,6 +593,7 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     bool bSteppingOn = false;
     bool bMounted = false, bAiming = false, bReview = false, bBoost = false;
     bool bMeleeEquipped = false, bSuppressFireUntilRelease = false;
+    bool bSpearHeld = false; // AFS 2026-10-31 (spear item): the NYC spear slot is selected and she is on foot.
     bool bHoldConsumed = false, bWasJump = false, bWasView = false, bWasSlide = false;
     bool bWasReloadKey = false; // NYC Survival: X is reload only, the glider rides on Y / G
     bool bWasReset = false, bHeightHolding = false;
@@ -610,6 +640,11 @@ class HOVERFLIGHT_API AHoverHUD : public AHUD
     GENERATED_BODY()
   public:
     virtual void DrawHUD() override;
+    // AFS 2026-10-31: AHUD::Canvas is protected in 5.8; UHoverPickupFeedback draws through this.
+    UCanvas *GetHudCanvas() const
+    {
+        return Canvas;
+    }
 };
 
 UCLASS()

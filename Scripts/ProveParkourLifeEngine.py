@@ -233,7 +233,7 @@ def find_wall(origin):
     for c in cands:
         p, n = c['point'], c['normal']
         for side, t in (('left', V(n.y, -n.x, 0)), ('right', V(-n.y, n.x, 0))):
-            start = stand_at(p + n * 70 - t * 600)
+            start = stand_at(p + n * 50 - t * 600)  # was 70: the template side trace barely reached (0.07 s wall run, solver off)
             if start and lane_clear(start, t):
                 c.update({'source': 'level', 'tangent': t, 'wall_side': side, 'lane_start': start})
                 return c
@@ -255,7 +255,7 @@ def spawn_wall(origin, forward):
     p = V(center.x, center.y, g0 + 120) + n * 20
     t = V(n.y, -n.x, 0)
     return {'source': 'spawned', 'actor': a.get_name(), 'point': p, 'normal': n, 'tangent': t, 'wall_side': 'left',
-            'lane_start': stand_at(p + n * 70 - t * 600) or V(p.x, p.y, g0 + 99) + n * 70 - t * 600, 'dist': 350}
+            'lane_start': stand_at(p + n * 50 - t * 600) or V(p.x, p.y, g0 + 99) + n * 50 - t * 600, 'dist': 350}
 
 
 # ------------------------------------------------------------------------------------------------------- state
@@ -328,9 +328,9 @@ def snapshot(p):
         row['solver_gnd'] = lm.get_editor_property('grounded') if lm else None
     except Exception as e:  # noqa: BLE001
         row['life_err'] = str(e)[:80]
-    row['wallrun'] = bp_var(p, ['IsWallRunning', 'is_wall_running', 'Is Wall Running'])
+    row['wallrun'] = bp_var(p, ['IsWallRunning?', 'Is Wall Running?', 'IsWallRunning', 'is_wall_running', 'Is Wall Running'])
     row['wjlock'] = bp_var(p, ['WallJumpLock', 'wall_jump_lock', 'Wall Jump Lock'])
-    row['jumped'] = bp_var(p, ['HasJumped', 'has_jumped', 'Has Jumped'])
+    row['jumped'] = bp_var(p, ['HasJumped?', 'Has Jumped?', 'HasJumped', 'has_jumped', 'Has Jumped'])
     mesh = body_mesh(p)
     row['montage'] = montage_name(mesh)
     try:

@@ -9,6 +9,7 @@
 #include "World/ZE_ZombieSpawnPoint.h"
 #include "HoverCyberVariants.h"
 #include "HoverTestLevelPolicy.h"
+#include "HoverPickupFeedback.h"
 #include "NavigationSystem.h"
 #include "HoverCyberCity.generated.h"
 
@@ -193,6 +194,11 @@ UCLASS()
 class HOVERFLIGHT_API AHoverCyberPowerUp : public AZE_PowerUpPickup
 {
     GENERATED_BODY()
+  public:
+    // AFS 2026-10-31 (owner playtest item 1): NYC Survival presentation of the Nuke (banner, flash, blast,
+    // shockwave, shake, rumble, distance ripple, optional slow motion). Owner-editable on BP_CyberPower_Nuke.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Presentation") FHoverNukePresentation NukePresentation;
+
   protected:
     virtual void OnOverlapBegin(UPrimitiveComponent *OverlappedComp, AActor *OtherActor, UPrimitiveComponent *OtherComp,
                                 int32 OtherBodyIndex, bool bFromSweep, const FHitResult &SweepResult) override;
@@ -203,6 +209,24 @@ UCLASS()
 class HOVERFLIGHT_API AHoverAmmoPickup : public AZE_PickupBase
 {
     GENERATED_BODY()
+  public:
+    // AFS 2026-10-31 (owner playtest item 6): readable ammo drop in NYC Survival (outline, glint, bob and spin,
+    // walk-over pickup, pickup sound, "+N AMMO" toast). Members defined in HoverPickupFeedback.cpp.
+    AHoverAmmoPickup(const FObjectInitializer &ObjectInitializer = FObjectInitializer::Get());
+    virtual void Tick(float DeltaSeconds) override;
+    virtual void Interact_Implementation(APawn *InteractingPawn) override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Presentation") FHoverAmmoPresentation Presentation;
+
+  private:
+    void SetupPresentation();
+    UPROPERTY() TObjectPtr<class UPointLightComponent> Glint;
+    FVector MeshBase = FVector::ZeroVector;
+    FRotator MeshBaseRotation = FRotator::ZeroRotator;
+    float PresentAge = 0.f;
+    bool bPresentationChecked = false;
+    bool bPresentationActive = false;
+    bool bPickedUp = false;
+
   protected:
     virtual void BeginPlay() override;
 };

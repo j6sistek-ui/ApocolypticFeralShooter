@@ -31,6 +31,12 @@ exist), and turn-in-place or strafing so they do not back into her.
 
 ### Kid swarm clumps at its spawn
 Labels: zombies, AI. Priority: P1.
+Status 2026-10-31: fixed and proven in part (`Scripts/ProveKidSwarm.py`). Root cause: the parked pickup at
+AFS_TruckStart is spawned after the navmesh exists, so kids pathed into it and shoved it about 5.5 m onto Vexa; every
+horde spawner left by the 1400 cm minimum sits behind it. Now the truck is cut out of the navmesh at runtime (0 paths
+through it, truck stays put), horde packs spread by bearing (7 spawners), stalled zombies get detours. Still: only 2
+horde attack tokens, so 3 of 20 kids hold the queue ring at about 3 m (contact 85 %). Owner calls: truck to the Garage?
+a closer horde-only spawn band? more horde tokens?
 Frames 5m06s and 8m40s: the kids hoard in one spot by the truck until she walks up. Check the feral kid's sight and
 aggro range, the attack-slot ring for Kid role, and whether the swarm round spawns all kids at one spawner.
 
@@ -41,6 +47,9 @@ swing. Still to judge in play; consider a hit-stop on contact and a lunge.
 
 ### Nuke kills everything with no presentation
 Labels: feel, power-ups. Priority: P1.
+Status 2026-10-31: built and proven (`Scripts/ProveNukeAmmo.py`): ripple kills outward over about 0.6 s, banner
+(placeholder text "STREET SWEEP"), flash, explosion, shockwave ring, shake, rumble, 0.35 s slow motion, no damage
+numbers. Owner design (POWERUP_CATALOG.md) later: ticking pickup animation, bosses take heavy damage instead of dying.
 The Nuke power-up applies 999,999 to every zombie with a generic pickup sound. Needs a banner, a screen flash, an
 explosion sound from `SF_Explosives_SFX`, and a short slow-motion beat. (Corpse launch fixed separately.)
 
@@ -64,6 +73,10 @@ landscape. Not seen in the NYC footage.
 
 ### No ammo purchase, clip pickup unreadable
 Labels: economy, HUD. Priority: P2.
+Status 2026-10-31: pickup readability built and proven: bob/spin, glint, pickup sound, "+N AMMO" toast, reserve
+flash. Flaw: the glint light acts like a lamp (lights the barrier and grass, and nearby zombies); tone down. Ammo buy
+points (reusing the Cyber City supply crate, `Scripts/AuthorNukeAmmoStations.py`) are staged but NOT placed: owner OK
+pending.
 Picking old clips refills but nothing shows it. Needs an ammo pickup toast and the wall-buy or MaxAmmo loop.
 
 ### No tactical items, no other weapons in the mode
@@ -97,6 +110,17 @@ Labels: camera. Priority: P2. Status: built 2026-10-31, not yet seen in play.
 Owner: "the camera needs to stay at a fixed distance almost, except zooming or maybe sprinting". The spring arm's
 positional lag (up to 60 cm) is off; the arm is 300 at rest, 210 aiming, 340 sprinting, interpolated at 6/s.
 
+### Spear melee weapon
+Labels: weapons, melee. Priority: P2. Status 2026-10-31: built and proven (`Scripts/AuthorSpear.py`,
+`Scripts/ProveSpear.py`): quickbar slot 4 through the Y/G cycle, Jab -> Thrust -> Swing combo, charged heavy thrust,
+piercing sweeps, shared strike path (katana values unchanged). Gaps: the visible spear head reaches about 0.9-1.2 m
+while the sweeps hit at 1.7-3.4 m; upper body only (the pack's lunge is lost); the jab points about 40 degrees high.
+
+### Visual pass: fill light and texture groups
+Labels: visuals. Priority: P3. Status 2026-10-31: a 2.5 cd fill light on lighting channel 1 lights only Vexa (torso
++54 %, a zombie beside her unchanged; console `HoverFillLight 0|1 [cd]`); `Scripts/VisualQualityPass.py` set 126
+texture groups/caps (revertable with --revert). The rifle stays 2K until GUN.spp is re-exported at 4096.
+
 ### First-person arms fill the view
 Labels: camera. Priority: P3.
 `HoverView` is Exec-only; needs BlueprintCallable and an FP capture to tune the arm offset and FOV.
@@ -120,6 +144,15 @@ and after at the owner's settings. Keep the 6 GB VRAM budget while the owner gam
 
 ### Small-gun muzzle flash still hot within 20 cm (EM21, EM08)
 Labels: vfx. Priority: P3. Status: source radius built, not re-captured.
+
+### Life Engine x parkour template
+Labels: motion. Priority: P2. Status 2026-10-31: the template had no way to see Vexa airborne under the solver
+(CharacterMovement in MOVE_None reports neither falling nor grounded), so wall runs, wall jumps and jump poses never
+fired. UHoverMovementComponent now reports the solver's ground state; the solver yields on the template's
+`IsWallRunning?` flag and resumes on landing (`Scripts/ProveParkourLifeEngine.py`). Weak spots: the template's wall
+runs are very short in both modes; a 30 degree run at a wall stops dead under the solver (it does not slide along
+walls); the solver's jump peaks at 111 cm against 251 cm with classic movement. There is no vault anywhere in the
+pack or AFS.
 
 ### Life Engine locomotion A/B in NYC survival
 Labels: motion. Priority: P2. Status: built and proven 2026-10-31, on by default in NYC Survival; switch it in the F6

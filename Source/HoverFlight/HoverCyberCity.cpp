@@ -761,6 +761,9 @@ void AHoverCyberPowerUp::OnOverlapBegin(UPrimitiveComponent *OverlappedComp, AAc
     {
         TArray<AActor *> Targets;
         UGameplayStatics::GetAllActorsOfClass(this, AHoverCyberZombie::StaticClass(), Targets);
+        // AFS 2026-10-31 (playtest item 1): in NYC Survival the presentation ripple owns the kills.
+        if (UHoverPickupFeedback::BeginNuke(this, Pawn, Targets, NukePresentation))
+            Targets.Reset();
         for (auto *Target : Targets)
             UGameplayStatics::ApplyDamage(Target, 999999.f, Pawn->GetController(), Pawn, UDamageType::StaticClass());
     }
