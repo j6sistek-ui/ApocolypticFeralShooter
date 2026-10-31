@@ -8,7 +8,7 @@ tuned in play.
 Working slots from 2026-10-29: Second Wind (revive), Ironhide (max health), Fast Lane (reload), Bullseye (aim and
 headshots), Hair Trigger (fire rate), Marathon (stamina).
 
-## 1. Necroflora (owner draft, 2026-10-31): the health perk
+## 1. Necrosiphon (owner draft, 2026-10-31; first called Necroflora): the health perk
 
 **Owner's idea.** Killing zombies makes them release the soul of their lost human host. Walking over a soul overheals
 Vexa, a little per soul, up to 2x normal health. Souls only overheal when she is at full health, not when she is
@@ -30,5 +30,6 @@ what helps while hurt ("gives it a better home"). This answers the "does nothing
 - Overheal is lost first when hit, shown as a separate layer on the health bar in the soul colour.
 - Not every kill should drop a soul (a chance, more from specials and bosses); souls live a few seconds and drift to
   her within about 1.5 m so it never becomes tedious collecting.
-- Open: does Necroflora replace the Ironhide slot? Does "flora" fit souls, or is the name meant to tie to something
-  growing from the dead? Souls per player or shared in multiplayer?
+- Name: Necrosiphon (owner, 2026-10-31; typed "Neceosiphon", spelling to confirm), replacing Necroflora: it siphons
+  the hosts' souls.
+- Open: does it replace the Ironhide slot? Souls per player or shared in multiplayer?
