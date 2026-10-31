@@ -7,6 +7,14 @@ on `L_NYC_Survival`, benchmarked on Black Ops 7 Zombies, played with Vexa, a Dua
 The full design is `NYC_ZOMBIE_SURVIVAL_DESIGN_20261029.md` (numeric spine, rounds, AI, gunplay, economy, equipment,
 zones, HUD, roster). The current order lives in `BACKLOG.md` (the old running log is `Archive/NYC_PRIORITIES_AND_ANIMATION_NEEDS_20261029.md`).
 
+## The project and its maps (owner, 2026-10-31)
+
+AFS began as a sandbox: the name comes from the Advanced Flight System plugin the owner meant to test (the one thing
+never built in it). Cyber City, Lakeside, PostApo and NYC Exploration, with their zombies and mechanics, are test
+pads. **NYC Survival is the first map being taken further and is the product.** The test pads may be used to stage
+things for evaluation (NYC Exploration first: same city and lighting as NYC Survival, no zombies). No new secret
+levels unless a GPU or performance concern needs one. Keep it simple, less work.
+
 ## Owner direction
 
 "A realistic, high-quality zombie shooter that works and feels good, then the bells and whistles." Gameplay and feel

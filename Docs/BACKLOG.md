@@ -76,7 +76,8 @@ While the owner cannot playtest, in-between work chips away at the top items tha
   Overdrive, Be-Gone Cloud, Frostbite Shake, Lucky Scav Box, Hemo Burst, Static Surprise, Banshee's Whistle, Good
   Boy companion; in `POWERUP_CATALOG.md` with the model each could repurpose.
 - Stations beyond Stage 1: mystery crate, armour box, health station.
-- Movement extras: a vault (needs a pack clip), motion matching locomotion option.
+- Movement extras: a vault (needs a pack clip), motion matching locomotion option, the Advanced Flight System plugin
+  (the project's namesake, never tested; owner's Fab library).
 - Controls and HUD naming (PlayStation glyphs), tracer trial (Free Arrow Trail), EM_11 right-side camera, revolver
   cup reading as a barrel.
 
