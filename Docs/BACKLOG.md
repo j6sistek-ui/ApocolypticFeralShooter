@@ -9,6 +9,8 @@ Only open work: bugs, the ranked to-do list, and decisions waiting on the owner.
 - When the owner raises something that is not game-breaking, confirm its priority (where it slots).
 - When the owner asks for it now, name the current top task and confirm the owner wants to pull it ahead first.
 - Game-breaking bugs (crash, softlock, mode unplayable) go straight to the top.
+- **Later** is a parking lot: it keeps ideas safe so work does not drift onto things that matter much later while
+  Now has needs (owner, 2026-10-31).
 - When an item is done it is **removed from here** and added to `DONE.md`. The owner's in-game check ticks it there
   or sends it back here. No done items stay in this file.
 
