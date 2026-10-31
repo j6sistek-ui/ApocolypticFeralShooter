@@ -59,6 +59,12 @@ model as batch 01's `rusted_flask_2` (same 4,740 triangles, same look) with 4K t
 |---|---|---|---|---|---|---|
 | 16 | futuristic_trap_device | Oval pod, amber glass inside, a spider-legged mechanism folded in the middle; a small loose spider-shaped fragment floats above it (Tripo stray, delete on import) | 4.8k | The Robot Mine's pickup and deploy pod. The owner's Robot Mine design (2026-10-31): a tactical, thrown, lands and assembles, seeks the nearest zombie, explodes with area damage. The `SilkTrap` spider robot is already in AFS with Assembly, Jump, Attack and Death clips: the pod is what you pick up and what lands, the SilkTrap unfolds out of it. | amber | later (with the Robot Mine) |
 
+## Batch 04 (2026-10-31, 1 model)
+
+| # | File | What it is (from the render) | Tris | Use |
+|---|---|---|---|---|
+| 17 | radiation_grenade | The same black-and-gold radiation canister as #12, clean, one piece | 4.8k | **The Nuke model.** Replaces #12 (83k triangles, segmented; kept as a source only). One piece, so the owner's ticking expand/contract is a pulse of the whole body and its glow. |
+
 ## Owner design (2026-10-31, from the numbered sheet)
 
 The owner numbered the 15 tiles in order, so from the eighth tile on the owner's number is one less than the
@@ -76,7 +82,7 @@ catalogue number (catalogue #8 was the duplicate flask). This table supersedes t
 | 9 | 8 | Stone skull | Zombie boss totem, 60 s: a zombie boss / high-value target spawns and fights on your side, strong, takes out a lot; when its rampage ends it turns on you and you must defeat it | timed power-up |
 | 10 | 9 | Tactical vest | Max armour | pickup |
 | 11 | 10 | Energy cell | 30 s unlimited sprint, movement speed +25 % | timed power-up |
-| 12 | 11 | Radiation canister | **Nuke**: segmented and animated, expands and contracts like a ticking bomb; picking it up kills every spawned zombie and greatly damages a high-value target (bosses survive) | instant power-up |
+| 12 / 17 | 11 | Radiation canister (model #17 from batch 04) | **Nuke**: animated, expands and contracts like a ticking bomb; picking it up kills every spawned zombie and greatly damages a high-value target (bosses survive) | instant power-up |
 | 13 | 12 | Radiation sphere | **Toxic gas** tactical: throw a gas sludge bomb that melts zombies in an area for 60 s in one spot (acid death) | tactical (equipment slot) |
 | 14 | 13 | Medical crate | Health pickup: recover 20-25 % health instantly; more common than the power-ups | pickup |
 | 15 | 14 | Clover flask | Gas can: fuel for the hoverboard and cars, if they stay and need fuel to be fair (maybe) | pickup (maybe) |
