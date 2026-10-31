@@ -121,3 +121,20 @@ immunity to your own area damage (grenades, the toxic gas bomb, the spider drone
 Health: Necrosiphon. Revive: Life Blood. Reload: Headhunter. Stamina: Survivalist. New
 passive damage: Bioreactor. Still holding working names: Bullseye (aim and headshots) and Hair Trigger (fire rate).
 With five drafted, one more makes six; decide whether it is Bullseye, Hair Trigger or something new.
+
+## Machines (owner concept art, 2026-10-31)
+
+Preliminary concepts for five machines (local copies in `Docs/References/PerkMachines/`, not in git): Bioreactor
+(dark tech tower, cyan bubbling liquid tube, brain "perk active" screen), Survivalist (rusted olive military vending
+unit, CRT biohazard screen, green formula canister on pipes), Lifeblood (burgundy and brass cabinet, glowing anatomical
+heart, blood cylinder, coin slot), Headhunter (gunmetal jukebox shape, laurel skull crest, blood-streaked tube with a
+crosshair skull), Necrosiphon (spiked dome, green tentacle tank, skull and tentacle relief, swirl porthole).
+
+The owner is remaking them in Tripo as subcomponents, optimising first, then cleanup with the AI. Notes for that
+pass: keep each part a separate mesh (body shell, glass tube, inner liquid or creature, screen panel, sign plate,
+hoses, dispense tray) so the glass and liquid get their own translucent and emissive materials and Niagara (bubbles,
+swirl, heartbeat) can live inside; signs and screens as flat panels so text and screen content can be swapped without
+re-modelling; one shared real-world scale (about 2.1-2.4 m tall, like a vending machine), front on -Y, pivot at the
+bottom centre. The concept art's own text (taglines, the Survivalist dial labels) is placeholder.
+
+Open: "Lifeblood" (one word, as on the machine) or "Life Blood"?
