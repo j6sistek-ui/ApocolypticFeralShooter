@@ -75,8 +75,8 @@ uses the heartbeat pulse (look 20) as its last-5-seconds despawn warning (owner,
   Toxic Aura (look 21: a coloured haze hugging the item, in the item's colour) plus a touch of Blood Magic (look 6:
   a thin red mist and ember rim). Last 5 s before despawn: the heartbeat pulse.
 - **The Nuke:** its own volatile signature: N4's shake throughout, N1 sparks alternating with N2 pops over its 30 s
-  life, then the heartbeat (owner, 2026-10-31; to confirm whether the heartbeat comes before the last-5-s arc crawl or
-  replaces it). Variants being built live in NYC Exploration.
+  life; the heartbeat from 10 s left; the arc crawl on top of the heartbeat in the last 5 s (decided 2026-10-31; owner:
+  "decisions, let's do it and move on"). Built live in NYC Exploration.
 - The GIF variants are kept for a trial another day; no more GIF rounds now. Build the decided look in-engine on the
   display actor, then back to perks.
 
