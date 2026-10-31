@@ -66,6 +66,8 @@ loop; "aggressive" meant the look, not the pace. Leaning N6, but wants: N4's sha
 (a little of N1), and 2-3 spark combos from N2's micro-detonations spread through its dropped life (a power-up sits
 30 s before it despawns, vendor `InitialLifeSpan`). Pace the events over those 30 s, not a 2.4 s loop. Owner added:
 the arc crawl (look 16) comes on in the LAST 5 SECONDS as the despawn warning ("perfect").
+Every other power-up
+uses the heartbeat pulse (look 20) as its last-5-seconds despawn warning (owner, 2026-10-31).
 
 ## Closer references (owner, 2026-10-31)
 
