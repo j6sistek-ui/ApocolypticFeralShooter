@@ -34,6 +34,8 @@ Severity: **G** game-breaking, **M** major (hurts play), **m** minor.
 ## Priority to-do (ranked, proposed; owner to confirm)
 
 **Now**
+0. In progress (owner pulled ahead 2026-10-31, "work on the 15 until I get back"): power-up models cleaned and
+   imported, plus effect style options (hologram, blood magic, Niagara) for the owner to pick from.
 1. Owner playtest of everything in `DONE.md`; the results re-rank this list.
 2. Life Engine movement feel: measured 2026-10-31 (`Scripts/ProveLifeEngineCompare.py`); waiting on the owner's test
    to choose jump height and air control (options: match Classic, or a middle ground), then wall slide and wall runs.
