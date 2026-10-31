@@ -132,6 +132,11 @@ class HOVERFLIGHT_API AHoverNYCSurvivalGameMode : public AHoverCyberCityGameMode
     // Boss round state (06.4). Pending entries are stored reversed so Pop() releases the listed
     // order; an additive entry (boss or boss add) costs no standard ordinal.
     UPROPERTY() TArray<TObjectPtr<UZE_ZombieDataAsset>> PendingBosses;
+    // AFS 2026-10-31 (zombie diversity): standards come from a shuffled deck that persists across rounds,
+    // so every roster type shows up before any repeats, whatever the round quota.
+    UPROPERTY() TArray<TObjectPtr<UZE_ZombieDataAsset>> StandardDeck;
+    UPROPERTY() TObjectPtr<UZE_ZombieDataAsset> LastStandardDrawn;
+    UZE_ZombieDataAsset *DrawStandard(const TArray<UZE_ZombieDataAsset *> &Types);
     TWeakObjectPtr<AHoverCyberZombie> LeadBoss;
     int32 BossesReleased = 0;
     float SecondEntersAtFraction = 0.f;

@@ -18,6 +18,14 @@
 #include "Survival/ZE_SurvivalComponent.h"
 #include "TimerManager.h"
 #include "Zombies/ZE_ZombieSettings.h"
+#include "Animation/MorphTarget.h"
+#include "Components/AudioComponent.h"
+#include "Engine/SkeletalMesh.h"
+#include "Materials/MaterialInterface.h"
+#include "NiagaraComponent.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
+#include "Sound/SoundBase.h"
 
 const FName AHoverNYCZombieAI::Key_AttackSlotLocation(TEXT("AttackSlotLocation"));
 
@@ -34,6 +42,74 @@ float CollisionHalfHeight(const AActor *Actor)
     if (const auto *Capsule = Actor ? Cast<UCapsuleComponent>(Actor->GetRootComponent()) : nullptr)
         return Capsule->GetScaledCapsuleHalfHeight();
     return Actor ? Actor->GetSimpleCollisionHalfHeight() : 0.f;
+}
+
+// Diversity pass tuning (2026-10-31).
+// AFS 2026-10-31 (review): square up to the target only inside attack range + 100 (left again past + 200), and
+// only while swinging, roaring, nearly still, or moving roughly toward the target. The queue ring (260 cm) sits
+// inside that radius and moves with the player, and the gait is a forward-only speed blend, so facing the target
+// while the slot steering moves the zombie sideways or away would play the forward walk in reverse.
+constexpr float FaceTargetEnter = 100.f;
+constexpr float FaceTargetExit = 200.f;
+constexpr float FaceStillSpeed = 40.f;      // cm/s; below this a zombie in range squares up (60 to stop)
+constexpr float FaceStillSpeedHold = 60.f;
+constexpr float FaceMoveCos = .5f;          // cos 60 deg: moving within 60 deg of the target direction
+constexpr float FaceMoveCosHold = .2588f;   // cos 75 deg once already facing
+constexpr float SightRoarRange = 2500.f;    // first sight of the player inside this rolls the roar
+constexpr float FootstepRange = 2500.f;     // steps further than this from the player are skipped
+constexpr float VocalAudibleRange = 3300.f; // inner 300 + falloff 3000 of the shared attenuation
+constexpr float PainVocalInterval = 1.2f;
+
+// Uniform roll in [Low, High] (order-insensitive), with the spread around the centre scaled.
+float RollRange(const FVector2D &Range, float Spread)
+{
+    const float Low = FMath::Min(Range.X, Range.Y), High = FMath::Max(Range.X, Range.Y);
+    const float Middle = (Low + High) * .5f;
+    return FMath::FRandRange(Middle - (Middle - Low) * Spread, Middle + (High - Middle) * Spread);
+}
+
+template <typename T> T *PickRandom(const TArray<TObjectPtr<T>> &Items)
+{
+    TArray<T *, TInlineAllocator<16>> Valid;
+    for (const TObjectPtr<T> &Item : Items)
+        if (Item)
+            Valid.Add(Item.Get());
+    return Valid.Num() ? Valid[FMath::RandRange(0, Valid.Num() - 1)] : nullptr;
+}
+
+// One-shot blood: stops emitting after StopAfter and is removed after DestroyAfter even if the
+// system loops (several Blood_VFX_Pack systems do).
+void SpawnTimedBlood(UWorld *World, UNiagaraSystem *System, const FVector &Location, const FRotator &Rotation,
+                     float Scale, float StopAfter, float DestroyAfter)
+{
+    if (!World || !System)
+        return;
+    UNiagaraComponent *Effect =
+        UNiagaraFunctionLibrary::SpawnSystemAtLocation(World, System, Location, Rotation, FVector(FMath::Max(Scale, .01f)),
+                                                       /*bAutoDestroy*/ true, /*bAutoActivate*/ true);
+    if (!Effect)
+        return;
+    const TWeakObjectPtr<UNiagaraComponent> Weak(Effect);
+    FTimerHandle StopHandle, CleanupHandle;
+    World->GetTimerManager().SetTimer(
+        StopHandle,
+        [Weak]() {
+            if (Weak.IsValid())
+                Weak->Deactivate();
+        },
+        StopAfter, false);
+    World->GetTimerManager().SetTimer(
+        CleanupHandle,
+        [Weak]() {
+            if (Weak.IsValid())
+                Weak->DestroyComponent();
+        },
+        DestroyAfter, false);
+}
+
+bool IsHeavyRole(const UHoverCyberZombieDefinition *Definition)
+{
+    return Definition && (Definition->Role == EHoverZombieRole::Brute || Definition->Role == EHoverZombieRole::Boss);
 }
 } // namespace
 
@@ -75,6 +151,12 @@ AHoverNYCZombie::AHoverNYCZombie()
         TEXT("/Game/ZESP/ZE/Animations/Zombies/Zombie_001/ABP_ZombieMaster"));
     if (ZombieAnim.Succeeded() && !GetMesh()->AnimClass)
         GetMesh()->SetAnimInstanceClass(ZombieAnim.Class);
+    // Owner 2026-10-31 "zombies walk backwards": the pawn followed the controller yaw (focus on the
+    // player) while crowd/slot steering moved it elsewhere. The body now faces its movement, and
+    // Tick squares it up to the target itself when close, swinging or roaring.
+    bUseControllerRotationYaw = false;
+    GetCharacterMovement()->bOrientRotationToMovement = true;
+    GetCharacterMovement()->bUseControllerDesiredRotation = false;
 }
 
 const FHoverNYCJitter &AHoverNYCZombie::GetJitter() const
@@ -125,7 +207,8 @@ bool AHoverNYCZombie::IsUsingVendorTree() const
 bool AHoverNYCZombie::CanStartAttack() const
 {
     const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
-    return !bIsDead && !bIsAttacking && !bSwingPending && ZombieData && Now >= NextAttackTime && Now >= VendorResetAt;
+    return !bIsDead && !bIsAttacking && !bSwingPending && !bRoaring && ZombieData && Now >= NextAttackTime &&
+           Now >= VendorResetAt;
 }
 
 void AHoverNYCZombie::BeginPlay()
@@ -163,10 +246,407 @@ void AHoverNYCZombie::BeginPlay()
     const FHoverNYCJitter &Roll = GetJitter();
     Movement->RotationRate.Yaw *= Roll.Yaw;
     Movement->MaxAcceleration *= Roll.Accel;
+
+    // Facing fix (see the constructor). Re-applied here in case a Blueprint subclass or the
+    // spawn path restored the ACharacter defaults.
+    bUseControllerRotationYaw = false;
+    Movement->bOrientRotationToMovement = true;
+    Movement->bUseControllerDesiredRotation = false;
+    static TWeakObjectPtr<UWorld> FacingLoggedWorld;
+    if (FacingLoggedWorld.Get() != GetWorld())
+    {
+        FacingLoggedWorld = GetWorld();
+        UE_LOG(LogTemp, Display,
+               TEXT("HOVER_ZOMBIE_FACING_FIX zombie=%s bUseControllerRotationYaw=%d bOrientRotationToMovement=%d "
+                    "bUseControllerDesiredRotation=%d face_target_within=attack_range+%.0f/+%.0f "
+                    "face_when=swing|roar|speed<%.0f|heading<60deg rotation_yaw=%.0f"),
+               *GetName(), bUseControllerRotationYaw ? 1 : 0, Movement->bOrientRotationToMovement ? 1 : 0,
+               Movement->bUseControllerDesiredRotation ? 1 : 0, FaceTargetEnter, FaceTargetExit, FaceStillSpeed,
+               Movement->RotationRate.Yaw);
+    }
+
+    // Per-zombie variation (scale, anim rate, skin, morphs) before the crowd agent is sized.
+    AlignMeshFacing();
+    ApplyVariation();
+    const float Now = GetWorld()->GetTimeSeconds();
+    if (Definition)
+        NextVocalTime = Now + FMath::FRandRange(.5f, FMath::Max(.5f, Definition->VocalInterval.GetMax()));
+    NextSightCheck = Now + FMath::FRandRange(0.f, .3f);
+
     // Possession ran before this BeginPlay, so the crowd agent registered with the class-default
     // capsule. Re-apply the agent settings now that the capsule has its final size.
     if (auto *AI = Cast<AHoverNYCZombieAI>(GetController()))
         AI->ApplyCrowdSettings();
+}
+
+void AHoverNYCZombie::AlignMeshFacing()
+{
+    // AFS 2026-10-31 (review): the native AHoverNYCZombie never set a mesh yaw (the Cyber BP child did), and the
+    // roster bodies face different axes once the compatible-skeleton clips play (Standard bodies 180 deg, the
+    // UE4-mannequin bodies 90 deg). The yaw is measured once per definition at authoring time from the walk cycle
+    // retargeted onto the body (AuthorZombieDiversity.py) and only applied here: no runtime pose sampling, no
+    // per-session cache and no snap after spawn. Definitions without bAlignMeshYaw (bosses, other maps) are untouched.
+    const auto *Definition = GetNYCDefinition();
+    USkeletalMeshComponent *Body = GetMesh();
+    if (!Definition || !Definition->bAlignMeshYaw || !Body)
+    {
+        MeshFacingYaw = Body ? Body->GetRelativeRotation().Yaw : 0.f;
+        return;
+    }
+    FRotator Rotation = Body->GetRelativeRotation();
+    const float Previous = Rotation.Yaw;
+    Rotation.Yaw = FRotator::NormalizeAxis(Definition->MeshYawOffset);
+    Body->SetRelativeRotation(Rotation);
+    MeshFacingYaw = Rotation.Yaw;
+    UE_LOG(LogTemp, Verbose, TEXT("HOVER_ZOMBIE_MESH_YAW %s mesh=%s applied=%.1f previous=%.1f"),
+           *GetNameSafe(Definition), *GetNameSafe(Body->GetSkeletalMeshAsset()), Rotation.Yaw, Previous);
+}
+
+void AHoverNYCZombie::ApplyVariation()
+{
+    const auto *Definition = GetNYCDefinition();
+    if (!Definition)
+        return;
+    USkeletalMeshComponent *Body = GetMesh();
+    UCapsuleComponent *Capsule = GetCapsuleComponent();
+    // Bosses keep half the spread so their nav/slot sizing stays close to the authored capsule.
+    const float Spread = IsBoss() ? .5f : 1.f;
+
+    // Uniform actor scale. The mesh offset and scale are relative to the capsule, so they scale
+    // with it; the actor moves by the half-height change so the capsule bottom stays put.
+    const float Scale = RollRange(Definition->ScaleJitter, Spread);
+    if (Scale > .01f && !FMath::IsNearlyEqual(Scale, 1.f, .001f))
+    {
+        const float OldHalf = Capsule->GetScaledCapsuleHalfHeight();
+        SetActorScale3D(GetActorScale3D() * Scale);
+        const float NewHalf = Capsule->GetScaledCapsuleHalfHeight();
+        AddActorWorldOffset(FVector(0.f, 0.f, NewHalf - OldHalf));
+        GetCharacterMovement()->UpdateNavAgent(*Capsule);
+    }
+    VariantScale = GetActorScale3D().Z;
+
+    // Gait and swing tempo (a multiplier, so a rate set elsewhere is kept; (1, 1) changes nothing).
+    const float Rate = FMath::Max(.1f, RollRange(Definition->AnimRateJitter, Spread));
+    if (!FMath::IsNearlyEqual(Rate, 1.f, .001f))
+        Body->GlobalAnimRateScale *= Rate;
+    VariantAnimRate = Body->GlobalAnimRateScale;
+
+    // Skin.
+    FString SkinName = TEXT("none");
+    if (UMaterialInterface *Skin = PickRandom(Definition->SkinMaterials))
+    {
+        const int32 Slot =
+            Definition->SkinMaterialSlot.IsNone() ? 0 : Body->GetMaterialIndex(Definition->SkinMaterialSlot);
+        if (Slot == INDEX_NONE || Slot >= Body->GetNumMaterials())
+        {
+            UE_LOG(LogTemp, Warning, TEXT("HOVER_ZOMBIE_VARIANT_SKIN_SLOT_MISSING %s slot=%s mesh=%s"),
+                   *GetNameSafe(Definition), *Definition->SkinMaterialSlot.ToString(),
+                   *GetNameSafe(Body->GetSkeletalMeshAsset()));
+        }
+        else
+        {
+            Body->SetMaterial(Slot, Skin);
+            SkinName = Skin->GetName();
+        }
+    }
+
+    // Morphs.
+    int32 Morphs = 0;
+    if (Definition->bRandomizeMorphTargets)
+    {
+        TArray<FName> Names = Definition->MorphTargetNames;
+        if (Names.IsEmpty())
+            if (const USkeletalMesh *Asset = Body->GetSkeletalMeshAsset())
+                for (const TObjectPtr<UMorphTarget> &Morph : Asset->GetMorphTargets())
+                    if (Morph)
+                        Names.Add(Morph->GetFName());
+        for (const FName &Name : Names)
+        {
+            Body->SetMorphTarget(Name, FMath::FRandRange(0.f, FMath::Max(0.f, Definition->MorphTargetMax)), false);
+            ++Morphs;
+        }
+    }
+    UE_LOG(LogTemp, Display, TEXT("HOVER_ZOMBIE_VARIANT %s scale=%.3f rate=%.3f skin=%s morphs=%d"),
+           *GetNameSafe(Definition), VariantScale, VariantAnimRate, *SkinName, Morphs);
+}
+
+APawn *AHoverNYCZombie::GetChaseTarget() const
+{
+    const auto *AI = Cast<AHoverNYCZombieAI>(GetController());
+    return AI ? AI->GetChaseTarget() : nullptr;
+}
+
+void AHoverNYCZombie::Tick(float DeltaSeconds)
+{
+    Super::Tick(DeltaSeconds);
+    if (bIsDead || !ZombieData || DeltaSeconds <= 0.f)
+        return;
+    const float Now = GetWorld()->GetTimeSeconds();
+    APawn *Target = GetChaseTarget();
+    // AFS 2026-10-31 (review): a hit reaction (DefaultSlot) or any other montage can cut the sight roar short.
+    // End the roar with its montage, so the zombie does not stand still, unable to swing, for the rest of the timer.
+    if (bRoaring)
+    {
+        const auto *Definition = GetNYCDefinition();
+        const UAnimInstance *Anim = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+        const UAnimMontage *Montage = Definition ? Definition->SightRoarMontage.Get() : nullptr;
+        if (!Anim || !Montage || Anim->Montage_GetIsStopped(Montage))
+        {
+            UE_LOG(LogTemp, Verbose, TEXT("HOVER_ZOMBIE_ROAR_CUT %s by=montage_stopped"), *GetNameSafe(Definition));
+            EndRoar();
+        }
+    }
+    UpdateFacing(Target, DeltaSeconds);
+    UpdateSightRoar(Target, Now);
+    UpdateVocals(Target, Now);
+    UpdateFootsteps(DeltaSeconds);
+    if (bRoaring)
+        GetCharacterMovement()->MaxWalkSpeed = 0.f;
+}
+
+void AHoverNYCZombie::UpdateFacing(APawn *Target, float DeltaSeconds)
+{
+    UCharacterMovementComponent *Movement = GetCharacterMovement();
+    FVector To = Target ? Target->GetActorLocation() - GetActorLocation() : FVector::ZeroVector;
+    To.Z = 0.f;
+    const float Distance = To.Size();
+    const float AttackRange = ZombieData->Stats.AttackRange;
+    // Range hysteresis, so a zombie hovering at the edge does not flip modes every frame.
+    if (!Target || Distance > AttackRange + FaceTargetExit)
+        bInFaceRange = false;
+    else if (Distance <= AttackRange + FaceTargetEnter)
+        bInFaceRange = true;
+    bool bFace = false;
+    if (Target && Distance > KINDA_SMALL_NUMBER)
+    {
+        if (bIsAttacking || bRoaring)
+            bFace = true;
+        else if (bInFaceRange)
+        {
+            // Square up only when that does not make the body slide sideways or backwards on the forward walk.
+            FVector Velocity = GetVelocity();
+            Velocity.Z = 0.f;
+            const float Speed = Velocity.Size();
+            if (Speed < (bFacingTarget ? FaceStillSpeedHold : FaceStillSpeed))
+                bFace = true;
+            else
+                bFace = FVector::DotProduct(Velocity / Speed, To / Distance) >=
+                        (bFacingTarget ? FaceMoveCosHold : FaceMoveCos);
+        }
+    }
+    bFacingTarget = bFace;
+    // Otherwise face the movement direction (slot shuffles, retreats to a queue point that moved).
+    Movement->bOrientRotationToMovement = !bFace;
+    if (!bFace)
+        return;
+    const float Rate = Movement->RotationRate.Yaw > 0.f ? Movement->RotationRate.Yaw : 360.f;
+    const FRotator Current = GetActorRotation();
+    const float Yaw = FMath::FixedTurn(Current.Yaw, To.Rotation().Yaw, Rate * DeltaSeconds);
+    SetActorRotation(FRotator(0.f, Yaw, 0.f));
+    ++FacingFrames;
+}
+
+bool AHoverNYCZombie::PlayVoiceSound(EHoverZombieVoiceKind Kind, USoundBase *Sound)
+{
+    const auto *Definition = GetNYCDefinition();
+    auto *Voice = UHoverZombieVoice::Get(this);
+    if (!Definition || !Voice || !Sound)
+        return false;
+    USkeletalMeshComponent *Body = GetMesh();
+    const FName Head = ZombieData->Stats.HeadBoneName;
+    const FName Socket = !Head.IsNone() && Body->DoesSocketExist(Head) ? Head : NAME_None;
+    const float Pitch = FMath::Max(.1f, RollRange(Definition->VoicePitch, 1.f));
+    if (!Voice->PlayVocal(this, Kind, Sound, Body, Socket, Definition->VoiceVolume, Pitch, GetNameSafe(Definition)))
+        return false;
+    ++VocalsStarted;
+    return true;
+}
+
+bool AHoverNYCZombie::PlayVoice(EHoverZombieVoiceKind Kind, const TArray<TObjectPtr<USoundBase>> &Sounds)
+{
+    USoundBase *Sound = PickRandom(Sounds);
+    return Sound && PlayVoiceSound(Kind, Sound);
+}
+
+void AHoverNYCZombie::UpdateVocals(APawn *Target, float Now)
+{
+    const auto *Definition = GetNYCDefinition();
+    if (!Definition || Now < NextVocalTime)
+        return;
+    const float Low = FMath::Max(.5f, Definition->VocalInterval.GetMin());
+    NextVocalTime = Now + FMath::FRandRange(Low, FMath::Max(Low, Definition->VocalInterval.GetMax()));
+    // Swings and roars voice themselves; inaudible zombies do not spend the budget.
+    if (bIsAttacking || bRoaring)
+        return;
+    const auto *Voice = UHoverZombieVoice::Get(this);
+    if (!Voice || FVector::Dist(GetActorLocation(), Voice->GetListenerLocation()) > VocalAudibleRange)
+        return;
+    const bool bChasing = Target && GetVelocity().Size2D() > 30.f;
+    const auto &Primary = bChasing ? Definition->ChaseVocals : Definition->IdleVocals;
+    const auto &Fallback = bChasing ? Definition->IdleVocals : Definition->ChaseVocals;
+    const EHoverZombieVoiceKind Kind = bChasing ? EHoverZombieVoiceKind::Chase : EHoverZombieVoiceKind::Idle;
+    // An empty list borrows the other one, so a definition with only chase vocals still murmurs.
+    PlayVoice(Kind, Primary.IsEmpty() ? Fallback : Primary);
+}
+
+void AHoverNYCZombie::UpdateFootsteps(float DeltaSeconds)
+{
+    const auto *Definition = GetNYCDefinition();
+    UCharacterMovementComponent *Movement = GetCharacterMovement();
+    if (!Definition || Definition->FootstepSounds.IsEmpty() || !Movement->IsMovingOnGround())
+        return;
+    StepDistance += GetVelocity().Size2D() * DeltaSeconds;
+    const float Stride = FMath::Max(10.f, Definition->FootstepStride * GetActorScale3D().Z);
+    if (StepDistance < Stride)
+        return;
+    StepDistance = FMath::Fmod(StepDistance, Stride);
+    const APawn *Player = UGameplayStatics::GetPlayerPawn(this, 0);
+    auto *Voice = UHoverZombieVoice::Get(this);
+    if (!Player || !Voice || FVector::Dist(Player->GetActorLocation(), GetActorLocation()) > FootstepRange)
+        return;
+    USoundBase *Sound = PickRandom(Definition->FootstepSounds);
+    if (!Sound || !Voice->TryConsumeFootstep())
+        return;
+    const bool bHeavy = IsHeavyRole(Definition);
+    const float Volume = Definition->FootstepVolume * (bHeavy ? 1.6f : 1.f);
+    const float Pitch = FMath::FRandRange(.94f, 1.06f) * (bHeavy ? .8f : 1.f);
+    const FVector Feet = GetActorLocation() - FVector(0.f, 0.f, GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+    UGameplayStatics::PlaySoundAtLocation(this, Sound, Feet, FRotator::ZeroRotator, Volume, Pitch, 0.f,
+                                          Voice->GetFootstepAttenuation());
+    ++FootstepsPlayed;
+    UE_LOG(LogTemp, Verbose, TEXT("HOVER_ZOMBIE_STEP %s"), *GetNameSafe(Definition));
+}
+
+void AHoverNYCZombie::UpdateSightRoar(APawn *Target, float Now)
+{
+    if (bSightRollDone || bRoaring || !Target || Now < NextSightCheck)
+        return;
+    NextSightCheck = Now + .3f;
+    const auto *Definition = GetNYCDefinition();
+    if (!Definition || !Definition->SightRoarMontage)
+    {
+        bSightRollDone = true;
+        return;
+    }
+    if (FVector::Dist(Target->GetActorLocation(), GetActorLocation()) > SightRoarRange)
+        return;
+    const auto *AI = Cast<AAIController>(GetController());
+    if (!AI || !AI->LineOfSightTo(Target))
+        return;
+    // One roll per zombie, on the first acquisition with line of sight.
+    bSightRollDone = true;
+    if (bIsAttacking || bSwingPending || FMath::FRand() >= Definition->SightRoarChance)
+        return;
+    auto *Voice = UHoverZombieVoice::Get(this);
+    if (!Voice || !Voice->TryStartRoar())
+        return;
+    StartRoar(Target);
+}
+
+void AHoverNYCZombie::StartRoar(APawn *Target)
+{
+    const auto *Definition = GetNYCDefinition();
+    UAnimMontage *Montage = Definition ? Definition->SightRoarMontage.Get() : nullptr;
+    const float Duration = Montage ? PlayAnimMontage(Montage) : 0.f;
+    if (Duration <= 0.f)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("HOVER_ZOMBIE_ROAR_FAILED %s montage=%s (no matching slot?)"),
+               *GetNameSafe(Definition), *GetNameSafe(Montage));
+        return;
+    }
+    bRoaring = true;
+    ++Roars;
+    UCharacterMovementComponent *Movement = GetCharacterMovement();
+    PreRoarSpeed = Movement->MaxWalkSpeed;
+    Movement->StopMovementImmediately();
+    Movement->MaxWalkSpeed = 0.f;
+    SetCrowdSimulation(true);
+    // Dedicated sight roar if authored, otherwise a chase vocal.
+    USoundBase *Sound = Definition->SightRoar.IsNull() ? nullptr : Definition->SightRoar.LoadSynchronous();
+    if (!Sound)
+        Sound = PickRandom(Definition->ChaseVocals);
+    PlayVoiceSound(EHoverZombieVoiceKind::Roar, Sound);
+    UE_LOG(LogTemp, Display, TEXT("HOVER_ZOMBIE_ROAR %s montage=%s duration=%.2f target=%s"), *GetNameSafe(Definition),
+           *GetNameSafe(Montage), Duration, *GetNameSafe(Target));
+    // PlayAnimMontage's length ignores the mesh GlobalAnimRateScale.
+    const float RealDuration = Duration / FMath::Max(GetMesh()->GlobalAnimRateScale, .1f);
+    GetWorldTimerManager().SetTimer(RoarEndTimer, FTimerDelegate::CreateWeakLambda(this, [this] { EndRoar(); }),
+                                    FMath::Max(RealDuration, .05f), false);
+}
+
+void AHoverNYCZombie::EndRoar()
+{
+    if (!bRoaring)
+        return;
+    bRoaring = false;
+    GetWorldTimerManager().ClearTimer(RoarEndTimer);
+    if (bIsDead)
+        return;
+    SetCrowdSimulation(false);
+    // The AI tick rewrites the speed every ~0.5 s; restore it now so the zombie does not idle.
+    GetCharacterMovement()->MaxWalkSpeed = PreRoarSpeed;
+}
+
+UAnimMontage *AHoverNYCZombie::SelectDeathMontage()
+{
+    if (const auto *Definition = GetNYCDefinition())
+        if (UAnimMontage *Variant = PickRandom(Definition->DeathMontageVariants))
+        {
+            UE_LOG(LogTemp, Verbose, TEXT("HOVER_ZOMBIE_DEATH_VARIANT %s %s"), *GetNameSafe(Definition),
+                   *Variant->GetName());
+            return Variant;
+        }
+    return Super::SelectDeathMontage();
+}
+
+bool AHoverNYCZombie::ShouldPlayDataAssetSounds() const
+{
+    const auto *Definition = GetNYCDefinition();
+    return !(Definition && Definition->HasCustomVoice());
+}
+
+bool AHoverNYCZombie::SpawnDefinitionHitBlood(const FHitResult &Hit, const FVector &ShotDirection)
+{
+    const auto *Definition = GetNYCDefinition();
+    if (!Definition || (!Definition->HitBlood && !Definition->HeadshotBlood))
+        return false;
+    const FName Bone = Hit.BoneName;
+    const bool bHead = !Bone.IsNone() && (Bone == ZombieData->Stats.HeadBoneName ||
+                                          Bone.ToString().Contains(TEXT("head"), ESearchCase::IgnoreCase));
+    const bool bUseHead = bHead && Definition->HeadshotBlood;
+    UNiagaraSystem *System = bUseHead ? Definition->HeadshotBlood.Get() : Definition->HitBlood.Get();
+    if (!System)
+        return false;
+    const FVector Back = ShotDirection.IsNearlyZero() ? GetActorForwardVector() : -ShotDirection.GetSafeNormal();
+    SpawnTimedBlood(GetWorld(), System, Hit.ImpactPoint, Back.Rotation(), Definition->BloodScale, 1.f, 5.f);
+    ++BloodSpawns;
+    UE_LOG(LogTemp, Verbose, TEXT("HOVER_ZOMBIE_BLOOD %s %s"), bUseHead ? TEXT("Headshot") : TEXT("Hit"),
+           *System->GetName());
+    return true;
+}
+
+void AHoverNYCZombie::SpawnDeathBlood()
+{
+    const auto *Definition = GetNYCDefinition();
+    if (!Definition || !Definition->DeathBlood)
+        return;
+    const USkeletalMeshComponent *Body = GetMesh();
+    static const FName Pelvis(TEXT("pelvis"));
+    const FVector From = Body->GetBoneIndex(Pelvis) != INDEX_NONE ? Body->GetBoneLocation(Pelvis) : GetActorLocation();
+    FCollisionQueryParams Query(SCENE_QUERY_STAT(HoverZombieDeathBlood), false, this);
+    FHitResult Floor;
+    FVector Point = From - FVector(0.f, 0.f, GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+    FVector Normal = FVector::UpVector;
+    if (GetWorld()->LineTraceSingleByChannel(Floor, From + FVector(0.f, 0.f, 50.f), From - FVector(0.f, 0.f, 400.f),
+                                             ECC_Visibility, Query))
+    {
+        Point = Floor.ImpactPoint;
+        Normal = Floor.ImpactNormal;
+    }
+    SpawnTimedBlood(GetWorld(), Definition->DeathBlood, Point, FRotationMatrix::MakeFromZ(Normal).Rotator(),
+                    Definition->BloodScale, 3.f, 20.f);
+    ++BloodSpawns;
+    UE_LOG(LogTemp, Verbose, TEXT("HOVER_ZOMBIE_BLOOD Death %s"), *Definition->DeathBlood->GetName());
 }
 
 void AHoverNYCZombie::EndPlay(const EEndPlayReason::Type Reason)
@@ -187,6 +667,12 @@ void AHoverNYCZombie::ReleaseCrowdClaims()
         bSwingPending = false;
         bIsAttacking = false;
         SetBlackboardAttacking(false);
+    }
+    if (bRoaring)
+    {
+        bRoaring = false;
+        if (UWorld *World = GetWorld())
+            World->GetTimerManager().ClearTimer(RoarEndTimer);
     }
     if (auto *Slots = UHoverAttackSlotSubsystem::Get(this))
     {
@@ -283,6 +769,8 @@ void AHoverNYCZombie::StartSwing(AActor *Target)
     // Same length the vendor reset timer uses (PlayAnimMontage's return at rate 1).
     const float Duration = Montage ? Montage->GetPlayLength() / FMath::Max(Montage->RateScale, .01f) : 1.f;
     ++AttackSwings;
+    if (const auto *Definition = GetNYCDefinition())
+        PlayVoice(EHoverZombieVoiceKind::Attack, Definition->AttackVocals);
     AttackStartTime = Now;
     VendorResetAt = Now + Duration;
     SetCrowdSimulation(true);
@@ -340,6 +828,12 @@ float AHoverNYCZombie::TakeDamage(float Damage, const FDamageEvent &Event, ACont
         {
             if (bIsAttacking)
                 CancelSwing();
+            // The vendor hit reaction replaces the roar montage: end the roar state with it (review 2026-10-31).
+            if (bRoaring)
+            {
+                UE_LOG(LogTemp, Verbose, TEXT("HOVER_ZOMBIE_ROAR_CUT %s by=flinch"), *GetNameSafe(Definition));
+                EndRoar();
+            }
             LastHitTime = Now - 1.f;
             LastMontageFlinch = Now;
             ++MontageFlinches;
@@ -355,11 +849,26 @@ float AHoverNYCZombie::TakeDamage(float Damage, const FDamageEvent &Event, ACont
     // The vendor Die() ran synchronously inside Super and has already set the corpse lifespan.
     if (bWasAlive && bIsDead)
         HandleKilled();
+    else if (bWasAlive && Damage > 0.f)
+        if (const auto *Definition = GetNYCDefinition(); Definition && Definition->PainVocals.Num())
+        {
+            const float Now = GetWorld()->GetTimeSeconds();
+            if (Now - LastPainVocal >= PainVocalInterval)
+            {
+                LastPainVocal = Now;
+                PlayVoice(EHoverZombieVoiceKind::Pain, Definition->PainVocals);
+            }
+        }
     return Result;
 }
 
 void AHoverNYCZombie::HandleKilled()
 {
+    // The vendor Die() already chose the clip through SelectDeathMontage and muted its own
+    // DeathSound when this definition has a voice set.
+    if (const auto *Definition = GetNYCDefinition())
+        PlayVoice(EHoverZombieVoiceKind::Death, Definition->DeathVocals);
+    SpawnDeathBlood();
     ReleaseCrowdClaims();
     if (auto *Slots = UHoverAttackSlotSubsystem::Get(this))
         Slots->RegisterCorpse(this);
@@ -407,8 +916,9 @@ void AHoverNYCZombieAI::ApplyCrowdSettings()
     if (!Crowd || !Zombie)
         return;
     const auto *Definition = Zombie->GetNYCDefinition();
-    const float Radius =
-        Definition ? Definition->CapsuleRadius : Zombie->GetCapsuleComponent()->GetScaledCapsuleRadius();
+    // The definition radius follows the per-zombie scale roll (AHoverNYCZombie::ApplyVariation).
+    const float Radius = Definition ? Definition->CapsuleRadius * Zombie->GetActorScale3D().X
+                                    : Zombie->GetCapsuleComponent()->GetScaledCapsuleRadius();
     const float Weight = (Definition ? Definition->SeparationWeight : 10.f) * Zombie->GetJitter().Separation;
     // Overrides the Cyber 3 / 500 / High set when the follower was created.
     Crowd->SetCrowdSeparation(true, false);
@@ -562,7 +1072,8 @@ void AHoverNYCZombieAI::Tick(float DeltaSeconds)
         Speed = FMath::Min(Speed, Definition->MaximumRunSpeed);
     if (const auto *Mode = GetWorld()->GetAuthGameMode<AHoverCyberCityGameMode>())
         Speed *= Mode->Tuning.Speed;
-    Zombie->GetCharacterMovement()->MaxWalkSpeed = Speed;
+    // A sight roar holds the zombie in place until its montage ends.
+    Zombie->GetCharacterMovement()->MaxWalkSpeed = Zombie->IsRoaring() ? 0.f : Speed;
 }
 
 FPathFollowingRequestResult AHoverNYCZombieAI::MoveTo(const FAIMoveRequest &MoveRequest, FNavPathSharedPtr *OutPath)

@@ -15,6 +15,8 @@ tell which is newer.
   capsule while it is mid-move. (2026-10-31)
 - **Fixed camera distance.** The survival camera stays at its arm length; only the aim zoom and a sprint stretch change
   it. No positional lag. (2026-10-31)
+- **Spear pack is Vexa's melee.** `SpearAnimationsV2` becomes a spear melee weapon; its poses may be mildly adapted for
+  other melee weapons rather than authoring motion from scratch. (2026-10-31)
 - **Sprint was too fast.** 900 cm/s came from our DefaultGame.ini, not the parkour pack; it is 680 now. Walk stays 500
   until the owner says otherwise. (2026-10-31)
 - **Do not change control bindings** until the owner has tested the current ones. (2026-10-30)

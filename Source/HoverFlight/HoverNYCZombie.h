@@ -2,6 +2,7 @@
 #include "CoreMinimal.h"
 #include "HoverCyberCity.h"
 #include "HoverAttackSlots.h"
+#include "HoverZombieVoice.h"
 #include "BehaviorTree/Tasks/BTTask_MoveTo.h"
 #include "Zombies/ZE_BTService_CheckAttackRange.h"
 #include "Zombies/ZE_BTTask_ZombieAttack.h"
@@ -35,6 +36,7 @@ class HOVERFLIGHT_API AHoverNYCZombie : public AHoverCyberZombie
     AHoverNYCZombie();
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type Reason) override;
+    virtual void Tick(float DeltaSeconds) override;
     virtual void PerformAttack(AActor *Target) override;
     virtual float TakeDamage(float Damage, const FDamageEvent &Event, AController *EventController,
                              AActor *Causer) override;
@@ -62,14 +64,49 @@ class HOVERFLIGHT_API AHoverNYCZombie : public AHoverCyberZombie
     // teleports the zombie, and the downed-player grace window calls it through the AI.
     void ReleaseCrowdClaims();
 
+    bool IsRoaring() const
+    {
+        return bRoaring;
+    }
+    // Spawns the definition's HitBlood / HeadshotBlood for a point hit. Returns false (and spawns
+    // nothing) when the definition authors neither, so the caller keeps the NS_NS1_BloodShot path.
+    bool SpawnDefinitionHitBlood(const FHitResult &Hit, const FVector &ShotDirection);
+
     // Validation counters (read by the offscreen review script).
     UPROPERTY(BlueprintReadOnly) int32 MontageFlinches = 0;
     UPROPERTY(BlueprintReadOnly) int32 SuppressedFlinches = 0;
     UPROPERTY(BlueprintReadOnly) int32 FlinchCancels = 0;
     UPROPERTY(BlueprintReadOnly) int32 AttackSwings = 0;
     UPROPERTY(BlueprintReadOnly) int32 TokenDenials = 0;
+    UPROPERTY(BlueprintReadOnly) int32 VocalsStarted = 0;
+    UPROPERTY(BlueprintReadOnly) int32 FootstepsPlayed = 0;
+    UPROPERTY(BlueprintReadOnly) int32 BloodSpawns = 0;
+    UPROPERTY(BlueprintReadOnly) int32 Roars = 0;
+    // Frames this zombie turned itself toward its target (close, swinging or roaring).
+    UPROPERTY(BlueprintReadOnly) int32 FacingFrames = 0;
+    // Rolled at BeginPlay (1 when the definition authors no variation).
+    UPROPERTY(BlueprintReadOnly) float VariantScale = 1.f;
+    // Relative mesh yaw applied by AlignMeshFacing (proof scripts read it).
+    UPROPERTY(BlueprintReadOnly) float MeshFacingYaw = 0.f;
+    UPROPERTY(BlueprintReadOnly) float VariantAnimRate = 1.f;
 
   protected:
+    virtual UAnimMontage *SelectDeathMontage() override;
+    virtual bool ShouldPlayDataAssetSounds() const override;
+
+    void ApplyVariation();
+    // AFS 2026-10-31 (review): applies the definition's authored MeshYawOffset (bAlignMeshYaw only).
+    void AlignMeshFacing();
+    void UpdateFacing(APawn *Target, float DeltaSeconds);
+    void UpdateVocals(APawn *Target, float Now);
+    void UpdateFootsteps(float DeltaSeconds);
+    void UpdateSightRoar(APawn *Target, float Now);
+    void StartRoar(APawn *Target);
+    void EndRoar();
+    APawn *GetChaseTarget() const;
+    bool PlayVoice(EHoverZombieVoiceKind Kind, const TArray<TObjectPtr<USoundBase>> &Sounds);
+    bool PlayVoiceSound(EHoverZombieVoiceKind Kind, USoundBase *Sound);
+    void SpawnDeathBlood();
     void StartSwing(AActor *Target);
     void EndSwing();
     void CancelSwing();
@@ -87,6 +124,20 @@ class HOVERFLIGHT_API AHoverNYCZombie : public AHoverCyberZombie
     // A new swing waits until that timer has fired, so it never clears a later swing.
     float VendorResetAt = 0.f;
     mutable FHoverNYCJitter Jitter;
+
+    // Diversity pass state (voice, footsteps, sight roar).
+    FTimerHandle RoarEndTimer;
+    bool bRoaring = false;
+    bool bSightRollDone = false;
+    float NextSightCheck = 0.f;
+    // UpdateFacing hysteresis: inside the face-target radius (enter AttackRange + 100, leave AttackRange + 200),
+    // and whether the zombie squared up to its target last frame.
+    bool bInFaceRange = false;
+    bool bFacingTarget = false;
+    float NextVocalTime = 0.f;
+    float LastPainVocal = -10.f;
+    float StepDistance = 0.f;
+    float PreRoarSpeed = 0.f;
 };
 
 // NYC Survival controller: C++ equivalents of the owned-BT rules that run under the unmodified
@@ -112,6 +163,11 @@ class HOVERFLIGHT_API AHoverNYCZombieAI : public AHoverCyberZombieAI
     }
     // The AHoverPilot (on foot or riding the hoverboard), otherwise the player pawn.
     APawn *FindChaseTarget() const;
+    // The target UpdateDestination last chased (null until the first tick or after unpossess).
+    APawn *GetChaseTarget() const
+    {
+        return ChaseTarget.Get();
+    }
     const FHoverSlotClaim &GetCurrentClaim() const
     {
         return CurrentClaim;

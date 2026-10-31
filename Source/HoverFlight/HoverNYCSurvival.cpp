@@ -63,6 +63,23 @@ UHoverCyberZombieDefinition::UHoverCyberZombieDefinition()
     };
     for (const TCHAR *Name : Feeding)
         FeedingSounds.Add(NYCZombieSound(TEXT("Feeding"), Name));
+    // Zombie-diversity defaults (also the in-class initialisers; repeated here so the contract
+    // values live next to the other definition defaults).
+    SkinMaterialSlot = NAME_None;
+    bRandomizeMorphTargets = false;
+    MorphTargetMax = .8f;
+    // Neutral: only definitions that author a range are varied (review 2026-10-31).
+    ScaleJitter = FVector2D(1.f, 1.f);
+    AnimRateJitter = FVector2D(1.f, 1.f);
+    bAlignMeshYaw = false;
+    MeshYawOffset = 0.f;
+    SightRoarChance = .4f;
+    VoicePitch = FVector2D(.95f, 1.05f);
+    VoiceVolume = 1.f;
+    VocalInterval = FVector2D(3.f, 8.f);
+    FootstepVolume = .6f;
+    FootstepStride = 75.f;
+    BloodScale = 1.f;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -460,7 +477,34 @@ UZE_ZombieDataAsset *AHoverNYCSurvivalGameMode::SelectZombieData(int32 Wave, int
     }
     if (const auto *Special = ScheduledSpecials.Find(SpawnedThisRound); Special && *Special)
         return *Special;
-    return Types.Num() ? Types[SpawnedThisRound % Types.Num()] : nullptr;
+    // AFS 2026-10-31: was Types[SpawnedThisRound % Num], which restarts every round, so a quota of 6-8 never
+    // reached the later roster entries (owner: "I saw 2-3 maybe?").
+    return DrawStandard(Types);
+}
+
+UZE_ZombieDataAsset *AHoverNYCSurvivalGameMode::DrawStandard(const TArray<UZE_ZombieDataAsset *> &Types)
+{
+    if (Types.IsEmpty())
+        return nullptr;
+    // Drop cards that are not in this round's list (a Kid-only horde round, a roster edit).
+    StandardDeck.RemoveAll([&Types](const TObjectPtr<UZE_ZombieDataAsset> &Card)
+                           { return !Card || !Types.Contains(Card.Get()); });
+    if (StandardDeck.IsEmpty())
+    {
+        for (UZE_ZombieDataAsset *Type : Types)
+            if (Type)
+                StandardDeck.Add(Type);
+        for (int32 i = StandardDeck.Num() - 1; i > 0; --i)
+            StandardDeck.Swap(i, FMath::RandRange(0, i));
+        // Pop takes from the back; never hand out the same type twice in a row across a reshuffle.
+        if (StandardDeck.Num() > 1 && StandardDeck.Last() == LastStandardDrawn)
+            StandardDeck.Swap(StandardDeck.Num() - 1, 0);
+        UE_LOG(LogTemp, Verbose, TEXT("HOVER_NYC_DECK reshuffle types=%d"), StandardDeck.Num());
+    }
+    if (StandardDeck.IsEmpty())
+        return nullptr;
+    LastStandardDrawn = StandardDeck.Pop();
+    return LastStandardDrawn;
 }
 
 float AHoverNYCSurvivalGameMode::GetEffectiveSpawnRate() const

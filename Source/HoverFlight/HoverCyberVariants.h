@@ -7,6 +7,8 @@
 class USoundBase;
 class UAnimInstance;
 class UAnimMontage;
+class UMaterialInterface;
+class UNiagaraSystem;
 
 // Boss (Stage 1) and Riot (Stage 2) follow Kid; UENUMs serialize by name, so existing assets load unchanged.
 UENUM(BlueprintType)
@@ -180,6 +182,90 @@ class HOVERFLIGHT_API UHoverCyberZombieDefinition : public UZE_ZombieDataAsset
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Audio")
     TArray<TSoftObjectPtr<USoundBase>> FeedingSounds;
     // end audio additions
+
+    // zombie-diversity additions (2026-10-31). Read only by AHoverNYCZombie, so Cyber City, Lakeside and
+    // PostApo assets are unaffected. Empty arrays / null pointers keep the existing behaviour.
+    // One entry is picked per zombie and applied to SkinMaterialSlot.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Variety")
+    TArray<TObjectPtr<UMaterialInterface>> SkinMaterials;
+    // NAME_None = material slot 0.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Variety")
+    FName SkinMaterialSlot = NAME_None;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Variety")
+    bool bRandomizeMorphTargets = false;
+    // Empty = every morph target on the mesh.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Variety")
+    TArray<FName> MorphTargetNames;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Variety", meta = (ClampMin = "0", ClampMax = "1"))
+    float MorphTargetMax = .8f;
+    // Uniform actor scale range rolled per zombie (bosses use half the spread). The default (1, 1) changes
+    // nothing; AuthorZombieDiversity.py writes the ranges on the NYC roster definitions.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Variety")
+    FVector2D ScaleJitter = FVector2D(1.f, 1.f);
+    // Multiplier on the mesh GlobalAnimRateScale rolled per zombie. Default (1, 1) = unchanged.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Variety")
+    FVector2D AnimRateJitter = FVector2D(1.f, 1.f);
+    // AFS 2026-10-31 (review): the mesh yaw on the capsule that puts this body's animated toes on actor +X,
+    // measured once per definition at authoring time (AuthorZombieDiversity.py samples the walk cycle retargeted
+    // onto the body). Applied at BeginPlay only when bAlignMeshYaw is set, so unauthored definitions (bosses,
+    // Cyber City, Lakeside) keep their mesh rotation.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Variety")
+    bool bAlignMeshYaw = false;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Variety", meta = (EditCondition = "bAlignMeshYaw"))
+    float MeshYawOffset = 0.f;
+
+    // Empty = the vendor DeathMontage.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Anim")
+    TArray<TObjectPtr<UAnimMontage>> DeathMontageVariants;
+    // Played once on first sight of the player (slot DefaultSlot or UpperBody of ABP_ZombieMaster).
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Anim")
+    TObjectPtr<UAnimMontage> SightRoarMontage;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Anim", meta = (ClampMin = "0", ClampMax = "1"))
+    float SightRoarChance = .4f;
+
+    // Per-zombie voice (UHoverZombieVoice budget). Any of these set also mutes the vendor
+    // AttackSound / DeathSound so the two never double up.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Voice")
+    TArray<TObjectPtr<USoundBase>> IdleVocals;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Voice")
+    TArray<TObjectPtr<USoundBase>> ChaseVocals;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Voice")
+    TArray<TObjectPtr<USoundBase>> AttackVocals;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Voice")
+    TArray<TObjectPtr<USoundBase>> PainVocals;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Voice")
+    TArray<TObjectPtr<USoundBase>> DeathVocals;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Voice")
+    TArray<TObjectPtr<USoundBase>> FootstepSounds;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Voice")
+    FVector2D VoicePitch = FVector2D(.95f, 1.05f);
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Voice", meta = (ClampMin = "0"))
+    float VoiceVolume = 1.f;
+    // Seconds between idle / chase vocals (jittered per call).
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Voice")
+    FVector2D VocalInterval = FVector2D(3.f, 8.f);
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Voice", meta = (ClampMin = "0"))
+    float FootstepVolume = .6f;
+    // Centimetres of travel per step, scaled by the zombie's actor scale.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Voice", meta = (ClampMin = "10"))
+    float FootstepStride = 75.f;
+
+    // Null keeps the shared NS_NS1_BloodShot hit path (and no death pool).
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Blood")
+    TObjectPtr<UNiagaraSystem> HitBlood;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Blood")
+    TObjectPtr<UNiagaraSystem> HeadshotBlood;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Blood")
+    TObjectPtr<UNiagaraSystem> DeathBlood;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Blood", meta = (ClampMin = "0"))
+    float BloodScale = 1.f;
+
+    // True when any voice array is authored.
+    bool HasCustomVoice() const
+    {
+        return IdleVocals.Num() || ChaseVocals.Num() || AttackVocals.Num() || PainVocals.Num() || DeathVocals.Num();
+    }
+    // end zombie-diversity additions
 };
 
 UCLASS()

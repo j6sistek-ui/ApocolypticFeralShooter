@@ -1,4 +1,5 @@
 #include "HoverCyberCity.h"
+#include "HoverNYCZombie.h"
 #include "HoverEffects.h"
 #include "HoverCombatBridge.h"
 #include "HoverPilot.h"
@@ -652,8 +653,14 @@ float AHoverCyberZombie::TakeDamage(float Damage, const FDamageEvent &Event, ACo
         UE_LOG(LogTemp, Verbose, TEXT("HOVER_ZOMBIE_HIT causer=%s bone=%s damage=%.1f point=%s"), *GetNameSafe(Causer),
                *Hit.BoneName.ToString(), Damage, *Hit.ImpactPoint.ToString());
         ModifyIncomingDamage(Damage, Event, EventController, Causer, Hit);
-        if (Blood && Event.IsOfType(FPointDamageEvent::ClassID) && Hit.bBlockingHit && Hit.GetActor() == this)
-            HoverEffects::BloodBurst(GetWorld(), Blood, Hit.ImpactPoint, Direction);
+        if (Event.IsOfType(FPointDamageEvent::ClassID) && Hit.bBlockingHit && Hit.GetActor() == this)
+        {
+            // NYC zombies whose definition authors HitBlood / HeadshotBlood spawn their own; every
+            // other zombie (and an NYC definition without them) keeps NS_NS1_BloodShot.
+            auto *NYCZombie = Cast<AHoverNYCZombie>(this);
+            if (!(NYCZombie && NYCZombie->SpawnDefinitionHitBlood(Hit, Direction)) && Blood)
+                HoverEffects::BloodBurst(GetWorld(), Blood, Hit.ImpactPoint, Direction);
+        }
     }
     // Vendor health, hit montages, damage numbers, death, loot and wave callback.
     const float Result = Super::TakeDamage(Damage, Event, EventController, Causer);

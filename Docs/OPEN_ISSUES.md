@@ -6,7 +6,25 @@ state in the working copy on the date shown; "coded" means written but not yet b
 ## From the owner's 2026-10-31 playtest
 
 ### Zombies all look, sound and move the same
-Labels: zombies, animation, audio. Priority: P1.
+Labels: zombies, animation, audio. Priority: P1. Status: built and proven headless 2026-10-31, waiting for the owner's
+playtest. Proof (`Scripts/ProveZombieDiversity.py`, `D:/AFS_Comparisons/ZombieDiversity_20261031/proof.json`): 11
+standard types seen in rounds 1-4 (Shambler, Lurcher, Runner, Brawler, Drifter, Bog, Horror, Pirate, Plant, Etherion
+A/B), 15 body+skin looks, 0% backwards, toes within 2-8 deg of travel (EtherionB 23), every swing on an attack
+montage (13 distinct), 124 vocal lines from 65 sounds under a 6-voice budget, footsteps, headshot and death blood,
+sight roars. The real moonwalk was the mesh, not the actor: the Standard bodies' toes pointed 178 deg from travel;
+each definition now carries an authored MeshYawOffset. Open: Brute, Kid horde and bosses not yet seen rendered; some
+foot sliding on slow walks scaled up; vendor swing/death timers ignore the per-zombie anim-rate roll; body-hit blood
+uses the old NS_NS1_BloodShot (P_BigSplash_Hit drew a flat red disc).
+Root causes found 2026-10-31: the four standards and the Brute share one blend space, two attacks, one hit and one
+death; every vocal field is empty; the NYC zombie had bUseControllerRotationYaw on with orient-to-movement, so it
+faced the player while crowd steering moved it (the moonwalk); Etherion montages use a "FullBody" slot the vendor ABP
+lacks. Every roster skeleton shares the 61 core mannequin bones with all four zombie packs, so pack clips play through
+compatible skeletons without retargeting. Owner 2026-10-31: "at least 5-10 usable zombies for diversity in the
+group. I saw 2-3". Plan: 10+ NYC standard definitions (four standards, four Lakeside bodies, two Etherion bodies with
+random skins and morphs, optionally the ZombieMale body) each with its own gait, attacks, hits, deaths and voice
+palette; per-zombie scale, anim-rate, skin and morph variation; budgeted voices and footsteps; Blood_VFX_Pack hits,
+headshots and death splashes; sight roars; facing fix. Scripts: `InventoryZombieAssets.py`, `ProbeZombieRigs.py`,
+`AuthorZombieDiversity.py`, `ProveZombieDiversity.py`; receipts in `D:/AFS_Comparisons/ZombieDiversity_20261031/`.
 Same vocals on every type, walking backwards at the player, no visible attack motion, generic look. Needs per-type
 locomotion, attack, hit-react and death sets from the packs on disk, per-type vocals (ZombieV2, Entity, Monster sets
 exist), and turn-in-place or strafing so they do not back into her.
@@ -56,6 +74,11 @@ HoverCyberRifle actor) in slot 2 with pistol ammo (`Scripts/AddStartingPistol.py
 find the other EM rigs and the tactical items (Robot Mine, horror grenades), and the frag throw's presentation.
 **There are no perks, wall buys or stations in NYC Survival yet**: the mode logs them as deferred at InitGame; only
 Cyber City has its three supply crates. Ammo comes from drops and the MaxAmmo power-up.
+
+### Idea: zombies throw spears at an unreachable player
+Labels: zombies, AI, idea. Priority: P3. Owner 2026-10-31: "maybe zombies can throw spears later on, or if you're too
+high / glitch / hoverboard". An anti-camping answer: when no nav path reaches Vexa for a few seconds (rooftop, glitch
+spot, hovering on the board), a nearby zombie throws a spear with `SpearAnimationsV2` A_1H_Throw. Later, not now.
 
 ### Cannot enter cars
 Labels: vehicles. Priority: P3.

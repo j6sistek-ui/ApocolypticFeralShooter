@@ -57,6 +57,12 @@ Things that were expensive to find out. Newest first within each group.
 - A feature gated on `bParkourMovement` never runs in NYC Survival: the NYC pawn is `BP_Vexa_CLS_Parkour`, so that
   flag is always true there. Gate on what the template is actually doing (movement mode changed, root-motion montage
   playing), not on the pawn class (Life Engine, 2026-10-31).
+- "Walks backwards" can be the mesh, not the actor. Actor-forward vs velocity passed at 0% while the Standard bodies'
+  toes pointed 178 deg from travel. Measure the rendered toes (foot/ball bones) against travel, and author the mesh yaw
+  per definition from a rendered measurement; an AnimPose retarget at authoring time gives the wrong answer because the
+  clip goes through the ZESP skeleton of ABP_ZombieMaster first (2026-10-31).
+- Two zombie playlists exist: DA_NYCEncounters.Standards and DA_NYCWaves CustomWaves rows. Changing one left the old
+  standards spawning (2026-10-31).
 
 ## Design
 

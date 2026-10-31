@@ -16,6 +16,8 @@
 #if WITH_EDITOR
 #include "NiagaraSystem.h"
 #include "Animation/BlendSpace.h"
+#include "Animation/AnimMontage.h"
+#include "Animation/BlendSpace1D.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/AnimData/IAnimationDataModel.h"
 #include "Animation/Skeleton.h"
@@ -2084,5 +2086,114 @@ void UHoverAuthoring::CaptureWorldFrame(const FString &Filename)
                     FFileHelper::SaveArrayToFile(PNG, *Filename);
             }
         }
+#endif
+}
+
+// ---------------------------------------------------------------------------------------------
+// NYC zombie diversity helpers (Scripts/AuthorZombieDiversity.py, 2026-10-31).
+
+bool UHoverAuthoring::MakeSkeletonCompatible(USkeleton *Target, USkeleton *Source)
+{
+#if WITH_EDITOR
+    // Only owned skeletons are edited; the pack skeletons stay as shipped (the script duplicates a pack body
+    // and its skeleton first when it needs one).
+    if (!Target || !Source || Target == Source || !Target->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/")))
+        return false;
+    const FReferenceSkeleton &Reference = Target->GetReferenceSkeleton();
+    if (Reference.GetNum() == 0)
+        return false;
+    const FSoftObjectPath SourcePath(Source);
+    auto IsListed = [&]() {
+        for (const TSoftObjectPtr<USkeleton> &Listed : Target->GetCompatibleSkeletons())
+            if (Listed.ToSoftObjectPath() == SourcePath)
+                return true;
+        return false;
+    };
+    const int32 Pelvis = Reference.FindBoneIndex(TEXT("pelvis"));
+    auto Wanted = [Pelvis](int32 Bone) {
+        return Bone == 0        ? EBoneTranslationRetargetingMode::Animation
+               : Bone == Pelvis ? EBoneTranslationRetargetingMode::AnimationScaled
+                                : EBoneTranslationRetargetingMode::Skeleton;
+    };
+    bool bModesHold = true;
+    for (int32 Bone = 0; Bone < Reference.GetNum() && bModesHold; ++Bone)
+        bModesHold = Target->GetBoneTranslationRetargetingMode(Bone) == Wanted(Bone);
+    if (IsListed() && bModesHold)
+        return true;
+    Target->Modify();
+    if (!IsListed())
+        Target->AddCompatibleSkeleton(Source);
+    if (!bModesHold)
+    {
+        Target->SetBoneTranslationRetargetingMode(0, EBoneTranslationRetargetingMode::Skeleton, true);
+        Target->SetBoneTranslationRetargetingMode(0, EBoneTranslationRetargetingMode::Animation);
+        if (Pelvis != INDEX_NONE)
+            Target->SetBoneTranslationRetargetingMode(Pelvis, EBoneTranslationRetargetingMode::AnimationScaled);
+    }
+    Target->MarkPackageDirty();
+    return IsListed();
+#else
+    return false;
+#endif
+}
+
+bool UHoverAuthoring::BuildSpeedBlend1D(UBlendSpace *Blend, const TArray<UAnimSequence *> &Clips,
+                                        const TArray<float> &Speeds, float MaxSpeed)
+{
+#if WITH_EDITOR
+    if (!Blend || !Blend->IsA<UBlendSpace1D>() || !Blend->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/")) ||
+        Clips.IsEmpty() || Clips.Num() != Speeds.Num() || MaxSpeed <= 0.f)
+        return false;
+    for (int32 I = 0; I < Clips.Num(); ++I)
+        if (!Clips[I] || !Clips[I]->GetSkeleton() || Speeds[I] < 0.f || Speeds[I] > MaxSpeed)
+            return false;
+    auto *Property = FindFProperty<FStructProperty>(Blend->GetClass(), TEXT("BlendParameters"));
+    if (!Property)
+        return false;
+    Blend->Modify();
+    Blend->SetSkeleton(Clips[0]->GetSkeleton());
+    while (Blend->GetNumberOfBlendSamples())
+        Blend->DeleteSample(Blend->GetNumberOfBlendSamples() - 1);
+    // Axis first: AddSample rejects values outside the axis range.
+    auto *Speed = Property->ContainerPtrToValuePtr<FBlendParameter>(Blend, 0);
+    Speed->DisplayName = TEXT("Speed");
+    Speed->Min = 0.f;
+    Speed->Max = MaxSpeed;
+    Speed->GridNum = 4;
+    Speed->bSnapToGrid = false;
+    Speed->bWrapInput = false;
+    for (int32 I = 0; I < Clips.Num(); ++I)
+        if (Blend->AddSample(Clips[I], FVector(Speeds[I], 0.f, 0.f)) == INDEX_NONE)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("HOVER_AUTHOR BuildSpeedBlend1D %s rejected %s at %.1f"), *Blend->GetName(),
+                   *Clips[I]->GetPathName(), Speeds[I]);
+            return false;
+        }
+    Blend->TargetWeightInterpolationSpeedPerSec = 5.f;
+    Blend->ValidateSampleData();
+    Blend->ResampleData();
+    Blend->PostEditChange();
+    Blend->MarkPackageDirty();
+    return Blend->GetNumberOfBlendSamples() == Clips.Num();
+#else
+    return false;
+#endif
+}
+
+bool UHoverAuthoring::SetMontageSlot(UAnimMontage *Montage, FName Slot)
+{
+#if WITH_EDITOR
+    if (!Montage || Slot.IsNone() || !Montage->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/")) ||
+        Montage->SlotAnimTracks.IsEmpty())
+        return false;
+    if (Montage->SlotAnimTracks[0].SlotName == Slot)
+        return true;
+    Montage->Modify();
+    Montage->SlotAnimTracks[0].SlotName = Slot;
+    Montage->PostEditChange();
+    Montage->MarkPackageDirty();
+    return Montage->SlotAnimTracks[0].SlotName == Slot;
+#else
+    return false;
 #endif
 }

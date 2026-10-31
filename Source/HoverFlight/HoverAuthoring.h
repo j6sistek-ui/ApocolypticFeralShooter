@@ -162,4 +162,23 @@ class HOVERFLIGHT_API UHoverAuthoring : public UBlueprintFunctionLibrary
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static bool SetSupportHandOverride(class AHoverPilot *Pilot, bool bEnabled, FRotator GunSpaceDelta,
                                        float Curl = 1.f);
+
+    // NYC zombie diversity (Scripts/AuthorZombieDiversity.py). Editor-only bodies; each returns whether the asset
+    // now reads as requested. Only owned /Game/HoverPrototype/ assets are changed, never pack originals.
+    //
+    // Adds Source to Target.CompatibleSkeletons so a pack clip plays on the roster body by bone name, and sets the
+    // same translation retargeting as ConfigureVariantSkeleton (Skeleton for every bone, Animation on the root,
+    // AnimationScaled on pelvis). Leaves the package clean when both already hold. True when Source is listed after.
+    UFUNCTION(BlueprintCallable, Category = "AFS|Authoring")
+    static bool MakeSkeletonCompatible(class USkeleton *Target, class USkeleton *Source);
+    // Rebuilds a BlendSpace1D on one axis "Speed" 0..MaxSpeed: Clips[i] at Speeds[i] cm/s, rate scale 1 (the caller
+    // may change RateScale on the sample copies afterwards). The blend space takes the first clip's skeleton; every
+    // other clip must use it or a compatible one. False on any rejected sample.
+    UFUNCTION(BlueprintCallable, Category = "AFS|Authoring")
+    static bool BuildSpeedBlend1D(class UBlendSpace *Blend, const TArray<class UAnimSequence *> &Clips,
+                                  const TArray<float> &Speeds, float MaxSpeed);
+    // Renames the first slot track of an owned montage (UpperBody for attacks, DefaultSlot for full-body reactions,
+    // roars and deaths; ABP_ZombieMaster has only those two). The montage skeleton's slot groups are not touched.
+    UFUNCTION(BlueprintCallable, Category = "AFS|Authoring")
+    static bool SetMontageSlot(class UAnimMontage *Montage, FName Slot);
 };
