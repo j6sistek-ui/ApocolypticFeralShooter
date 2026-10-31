@@ -11,6 +11,9 @@ tell which is newer.
   Keep the repo simple: design, issues, needs and context. Finished work is removed from the backlog and goes
   to `Docs/DONE.md` with the AI validation; the owner's in-game check ticks it there or sends it back to the backlog.
   No stale done items in the backlog. (2026-10-31)
+- **Effect explorations go in a trial map.** Build options as placed actors in a trial map the owner can open and see
+  live (motion running in-engine, not only from a preview script), and also send a few shots or GIFs for when the owner
+  is away. Only fall back to script-driven renders when building it in the map is much harder. (2026-10-31)
 - **Feel first.** Gameplay and feel before bells and whistles; placeholders are fine. (2026-10-29)
 - **No Call of Duty names.** Perks use the original six names (Second Wind, Ironhide, Fast Lane, Bullseye, Hair
   Trigger, Marathon). (2026-10-29)
