@@ -69,6 +69,10 @@ Things that were expensive to find out. Newest first within each group.
 - AHUD::Canvas is protected in UE 5.8; Blueprint variable names can end in "?" (`IsWallRunning?`) (2026-10-31).
 - A background run redirected into a folder that does not exist yet fails before the editor starts (twice on
   2026-10-31): mkdir the receipt folder before launching.
+- Script-driven previews of effects cost about as much as building them in Unreal and then have to be rebuilt once a
+  look is picked (the power-up rounds moved sparks, embers and arcs as spheres from Python). Build explorations
+  in-engine from the start: real Niagara, a display actor with spin/bob/pulse components, placed in a trial map, so
+  the approved option is the shipping asset (owner, 2026-10-31).
 - Two zombie playlists exist: DA_NYCEncounters.Standards and DA_NYCWaves CustomWaves rows. Changing one left the old
   standards spawning (2026-10-31).
 
