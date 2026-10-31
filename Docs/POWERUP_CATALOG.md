@@ -31,6 +31,11 @@ like fire), 5 (items look frosted), 6 (item goes black), 7 (white crackle), 8 (n
 too dark). Lit only in the showcase map; nothing wired to gameplay; owner to pick or combine. Round 2 adds the owner's
 closer references below.
 
+**Owner verdict on round 1:** rule out anything with beacons or extra objects: a power-up is the item that spawns,
+plus effects on and around it. No added props, ground features, rings or markings ("not very power-up like").
+Keep 5 Radioactive, 6 Blood Relic, 7 Infected, 8 Dust Shaft, 13 Busted Neon; round 2 refines those and adds new
+options built with the closer references below.
+
 ## Closer references (owner, 2026-10-31)
 
 Seven reference boards the owner found closer to the target (local copies in `Docs/References/PowerUpStyle/`, not in
