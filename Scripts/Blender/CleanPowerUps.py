@@ -61,6 +61,7 @@ MODELS = [
     (15, 'Batch02/rusted_flask', 'GasCan', HAND, 1024, None),
     (16, 'Batch03/futuristic_trap_device', 'SpiderPod', HAND, 1024, None),
     (17, 'Batch04/radiation_grenade', 'Nuke', HAND, 2048, None),
+    (18, 'Batch05/ammo_canister', 'MaxAmmo', HAND, 1024, None),
 ]
 FRONT_NOTE = {
     1: '"UNLIMITED AMMO" label already on -Y; kept',

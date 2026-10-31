@@ -57,7 +57,7 @@ While the owner cannot playtest, in-between work chips away at the top items tha
 
 **Next**
 6. Power-up effects: the new effects from `POWERUP_CATALOG.md` (unlimited ammo, invincibility, slow time, perfect
-   vision, Curse, boss totem, sprint, health) and a Max Ammo model, after the core loop.
+   vision, Curse, boss totem, sprint, health) after the core loop (Max Ammo model arrived: #18).
 7. Ammo economy: buy points (staged in `Scripts/AuthorNukeAmmoStations.py`, waiting on the owner), glint toned down;
    folds into the wall-buy work in item 1 if that comes first.
 8. Weather: migrate Dreamrise from `M:\MultiplayerDynamicWeather`, rain/snow toggle in the menu.

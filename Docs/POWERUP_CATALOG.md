@@ -137,6 +137,15 @@ model as batch 01's `rusted_flask_2` (same 4,740 triangles, same look) with 4K t
 |---|---|---|---|---|
 | 17 | radiation_grenade | The same black-and-gold radiation canister as #12, clean, one piece | 4.8k | **The Nuke model.** Replaces #12 (83k triangles, segmented; kept as a source only). One piece, so the owner's ticking expand/contract is a pulse of the whole body and its glow. |
 
+## Batch 05 (2026-10-31, 1 model)
+
+| # | File | What it is (from the render) | Tris | Use |
+|---|---|---|---|---|
+| 18 | ammo_canister | Gunmetal drum with olive bands and orange trim, "MAX AMMO" embossed, red side lights | 4.6k | **Max Ammo**, the common refill drop (the last missing model). Cleaned as `PU_18_MaxAmmo` (45 cm). Distinct from the green "UNLIMITED AMMO" can (#1, the rare drop). |
+
+Note: "Max Ammo" is also the Call of Duty power-up name and it is embossed on this model; the no-COD-names rule was
+set for perks. Owner to decide whether the label stays.
+
 ## Owner design (2026-10-31, from the numbered sheet)
 
 The owner numbered the 15 tiles in order, so from the eighth tile on the owner's number is one less than the
@@ -167,7 +176,7 @@ Notes for implementation:
   as it is (the Nuke presentation in progress stays as built; the boss-sparing rule and the ticking animation come
   with the power-up pass).
 - Max Ammo stays as a separate drop (vendor refill) and is the MORE COMMON one; the 30 s unlimited ammo (ammo can) is
-  the more uncommon one (owner, corrected 2026-10-31). Max Ammo needs its own model or a variant of the ammo can.
+  the more uncommon one (owner, corrected 2026-10-31). Its model is #18 (batch 05).
   Insta-Kill has no model in the owner's design.
 - Slow time must exclude the player and the vehicle she controls (custom time dilation on both).
 - Perfect vision needs a custom-depth outline pass for zombies and a hook into the weather system's visibility.
