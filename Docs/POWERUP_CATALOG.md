@@ -50,7 +50,7 @@ scarce.
 **Owner on round 2 (2026-10-31):** the moving looks should be shown as GIFs (recorded). A few items need their own
 signature on top of the shared look, starting with the Nuke: it must read as volatile and nuclear, with sparks, tracer
 streaks and micro-explosions; a yellow fog makes it look like toxic waste, not a nuclear device. Round 3: a signature
-pass per item, Nuke first.
+pass per item, Nuke first. Owner after the GIFs: look 16 Arc Crawl is a solid Nuke contender too.
 
 ## Closer references (owner, 2026-10-31)
 
