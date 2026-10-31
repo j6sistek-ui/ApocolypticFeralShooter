@@ -61,6 +61,12 @@ as tan blobs; N3 reads more like ricochets; N4 looks glassy; flashes light an ov
 script-driven (Niagara candidates on disk ignore scale or are rings); the chosen look gets built as real Niagara on
 a display actor (see LESSONS). Owner also named round-2 look 16 Arc Crawl a contender.
 
+**Owner direction for the Nuke (2026-10-31, still thinking):** the GIFs felt too aggressive because of the fast 2.4 s
+loop; "aggressive" meant the look, not the pace. Leaning N6, but wants: N4's shaking (unstable casing), mild sparking
+(a little of N1), and 2-3 spark combos from N2's micro-detonations spread through its dropped life (a power-up sits
+30 s before it despawns, vendor `InitialLifeSpan`). Pace the events over those 30 s, not a 2.4 s loop. Possible
+addition to confirm: intensity rising as the despawn nears, as a warning.
+
 ## Closer references (owner, 2026-10-31)
 
 Seven reference boards the owner found closer to the target (local copies in `Docs/References/PowerUpStyle/`, not in
