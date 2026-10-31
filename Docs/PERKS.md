@@ -5,7 +5,8 @@ jobs (players should recognise what a perk machine gives), original names, ficti
 or copied numbers. Numbers come from `NYC_ZOMBIE_SURVIVAL_DESIGN_20261029.md` (2,500 + 500 per perk owned) and get
 tuned in play.
 
-Working slots from 2026-10-29: Second Wind (revive), Ironhide (max health), Fast Lane (reload), Bullseye (aim and
+Working slots from 2026-10-29 (being replaced by the owner's drafts below): Second Wind (revive) -> Life Blood,
+Ironhide (max health) -> Necrosiphon, Fast Lane (reload), Bullseye (aim and
 headshots), Hair Trigger (fire rate), Marathon (stamina).
 
 ## 1. Necrosiphon (owner draft, 2026-10-31; first called Necroflora): the health perk
@@ -42,13 +43,20 @@ perks but keep your guns and gear. In multiplayer, a normal death (no Life Blood
 match's starting loadout, regardless of difficulty, and without the perk. The owner's own note: "basically the
 familiar quick-revive perk, but it's necessary".
 
+**Owner answers (2026-10-31):**
+- Downed state comes first. Solo: with Life Blood you are revived a moment after going down; without it the run
+  ends.
+- While downed you can crawl and shoot. That has nothing to do with the perk: in multiplayer anyone downed can crawl
+  and shoot as long as someone is still alive.
+- Revived player: revived by someone without Life Blood, no buff. Revived by someone with Life Blood, the revived
+  player gets 3 s of shielding to find their feet and run.
+- Revive speed: 2x.
+- Life Blood replaces the Second Wind working name (Second Wind was the 2026-10-29 placeholder for the revive slot).
+
 **Design notes (AI, for the owner to accept or reject):**
 - Familiar on purpose is right here: players look for a revive perk and its job should read instantly.
 - Small twists that make it AFS without changing the job: the revive shown as blood (the Blood Magic pack: her own
   blood pulls her back up), a short blood shockwave on a self-revive that pushes nearby zombies back so the second
   chance is not instantly lost, and the 3 uses shown as three blood vials on the HUD.
-- Needs the downed state first (Phase 1 core loop, not built yet): how long downed lasts, can she crawl and use the
-  pistol while down, and how a self-revive plays (instant, or a few seconds of vulnerability).
 - Open: is Life Blood itself lost after the revive like the other perks (re-buy to get the next use), and do the 3
-  uses count across re-buys? Revive speed bonus (the familiar value is about twice as fast)? Does it take the
-  Second Wind slot?
+  uses count across re-buys? Is the Second Wind name reused for another perk or dropped?
