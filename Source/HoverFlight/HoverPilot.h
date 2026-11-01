@@ -264,6 +264,11 @@ class HOVERFLIGHT_API AHoverPilot : public ACharacter
     {
         return bLifeEngine;
     }
+    // AFS 2026-11-01 (walking proof): the parkour hand-off flag, read by UHoverIntegrationAuthoring::DescribeWalkState.
+    bool IsLifeEngineTemplateOverride() const
+    {
+        return bLifeEngineTemplateOverride;
+    }
     UPROPERTY(BlueprintReadOnly, Category = "Life Engine") TObjectPtr<UHLRawMovementComponent> LifeMovement;
     UFUNCTION(BlueprintCallable) void SetParkourCrouch(bool Held);
     void CancelPostureInput();

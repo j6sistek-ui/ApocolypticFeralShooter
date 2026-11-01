@@ -11,6 +11,16 @@
 #include "BoneControllers/AnimNode_SpringBone.h"
 #include "UObject/UnrealType.h"
 #include "UObject/EnumProperty.h"
+#include "HLRawMovementComponent.h"
+#include "PoseSearch/AnimNode_MotionMatching.h"
+#include "PoseSearch/PoseSearchLibrary.h"
+#include "PoseSearch/PoseSearchResult.h"
+#include "PoseSearch/PoseSearchDatabase.h"
+#include "GameFramework/PhysicsVolume.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 #if WITH_EDITOR
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
@@ -187,17 +197,30 @@ void UHoverLocomotionBridge::TickComponent(float DT, ELevelTick Type, FActorComp
         // AFS 2026-10-31 (Life Engine x parkour): CLS switches on the movement mode it packages from the character
         // movement, which sits in MOVE_None while the Life Engine solver drives, so her jumps and falls played the
         // standing set (LifeEngine_20261031 on_jump.png vs off_jump.png). Hand CLS the solver's walking / falling.
+        // AFS 2026-11-01 (walking): the field is CLS's own E_CLS_MovementMode (NewEnumerator0 "Ground",
+        // NewEnumerator1 "InAir"), not EMovementMode. Writing MOVE_Walking (1) told CLS she was in the air on every
+        // grounded frame, so the walk played the tucked-legs fall pose with the feet 18-29 cm off the street (the
+        // owner's "hovering in a crunched position"), and MOVE_Falling (3) was out of range. Map by display name.
         if (Pilot->IsLifeEngineActive())
             for (TFieldIterator<FProperty> It(Data->Struct); It; ++It)
                 if (It->GetName().StartsWith(TEXT("MovementMode_")))
                 {
-                    const uint8 Mode = Pilot->GetCharacterMovement()->IsFalling() ? uint8(MOVE_Falling)
-                                                                                : uint8(MOVE_Walking);
-                    if (auto *Byte = CastField<FByteProperty>(*It))
-                        Byte->SetPropertyValue_InContainer(Value, Mode);
-                    else if (auto *Enum = CastField<FEnumProperty>(*It))
-                        Enum->GetUnderlyingProperty()->SetIntPropertyValue(Enum->ContainerPtrToValuePtr<void>(Value),
-                                                                           int64(Mode));
+                    const bool InAir = Pilot->GetCharacterMovement()->IsFalling();
+                    auto *Byte = CastField<FByteProperty>(*It);
+                    auto *EnumProperty = CastField<FEnumProperty>(*It);
+                    const UEnum *ModeEnum =
+                        Byte ? Byte->Enum.Get() : EnumProperty ? EnumProperty->GetEnum() : nullptr;
+                    int64 Mode = InAir ? 1 : 0;
+                    if (ModeEnum)
+                        for (int32 Index = 0; Index < ModeEnum->NumEnums() - 1; ++Index)
+                            if (ModeEnum->GetDisplayNameTextByIndex(Index).ToString() ==
+                                (InAir ? TEXT("InAir") : TEXT("Ground")))
+                                Mode = ModeEnum->GetValueByIndex(Index);
+                    if (Byte)
+                        Byte->SetPropertyValue_InContainer(Value, uint8(Mode));
+                    else if (EnumProperty)
+                        EnumProperty->GetUnderlyingProperty()->SetIntPropertyValue(
+                            EnumProperty->ContainerPtrToValuePtr<void>(Value), Mode);
                 }
         const FQuat BodyRotation = Driver->GetComponentQuat() * FRotator(0, 90, 0).Quaternion();
         for (TFieldIterator<FStructProperty> It(Data->Struct); It; ++It)
@@ -263,6 +286,148 @@ USkeletalMeshComponent *UHoverIntegrationAuthoring::GetCLSDriver(AActor *Owner)
 {
     auto *Bridge = Owner ? Owner->FindComponentByClass<UHoverLocomotionBridge>() : nullptr;
     return Bridge ? Bridge->Driver.Get() : nullptr;
+}
+// AFS 2026-11-01 (walking proof): see the header. Everything here only reads.
+FString UHoverIntegrationAuthoring::DescribeWalkState(AActor *Owner)
+{
+    auto *Pilot = Cast<AHoverPilot>(Owner);
+    if (!Pilot || !Pilot->GetWorld())
+        return TEXT("{}");
+    const auto *Move = Pilot->GetCharacterMovement();
+    const auto *Capsule = Pilot->GetCapsuleComponent();
+    auto Row = MakeShared<FJsonObject>();
+    auto Vec = [](const FVector &V) {
+        TArray<TSharedPtr<FJsonValue>> A;
+        for (double C : {V.X, V.Y, V.Z})
+            A.Add(MakeShared<FJsonValueNumber>(FMath::RoundToDouble(C * 10.) / 10.));
+        return A;
+    };
+    Row->SetNumberField(TEXT("mode"), int32(Move->MovementMode.GetValue()));
+    Row->SetBoolField(TEXT("on_ground"), Move->IsMovingOnGround());
+    Row->SetBoolField(TEXT("falling"), Move->IsFalling());
+    Row->SetBoolField(TEXT("swimming"), Move->IsSwimming());
+    Row->SetBoolField(TEXT("crouched"), Pilot->bIsCrouched);
+    Row->SetBoolField(TEXT("wants_crouch"), Move->bWantsToCrouch);
+    Row->SetArrayField(TEXT("loc"), Vec(Pilot->GetActorLocation()));
+    Row->SetArrayField(TEXT("vel"), Vec(Pilot->GetVelocity()));
+    Row->SetArrayField(TEXT("cmc_accel"), Vec(Move->GetCurrentAcceleration()));
+    Row->SetArrayField(TEXT("pending_input"), Vec(Move->GetLastInputVector()));
+    Row->SetNumberField(TEXT("max_accel"), Move->GetMaxAcceleration());
+    Row->SetNumberField(TEXT("max_speed"), Move->GetMaxSpeed());
+    Row->SetNumberField(TEXT("max_walk"), Move->MaxWalkSpeed);
+    Row->SetNumberField(TEXT("max_braking"), Move->GetMaxBrakingDeceleration());
+    Row->SetNumberField(TEXT("min_analog"), Move->GetMinAnalogSpeed());
+    Row->SetNumberField(TEXT("gravity_scale"), Move->GravityScale);
+    Row->SetNumberField(TEXT("half_height"), Capsule->GetUnscaledCapsuleHalfHeight());
+    Row->SetNumberField(TEXT("mesh_rel_z"), Pilot->GetMesh()->GetRelativeLocation().Z);
+    Row->SetBoolField(TEXT("life_enabled"), Pilot->IsLifeEngineEnabled());
+    Row->SetBoolField(TEXT("life_active"), Pilot->IsLifeEngineActive());
+    Row->SetBoolField(TEXT("template_override"), Pilot->IsLifeEngineTemplateOverride());
+    if (Pilot->LifeMovement)
+    {
+        Row->SetBoolField(TEXT("solver_grounded"), Pilot->LifeMovement->bGrounded);
+        Row->SetArrayField(TEXT("solver_vel"), Vec(Pilot->LifeMovement->GetHLVelocity()));
+    }
+    Row->SetBoolField(TEXT("sliding"), Pilot->IsGroundSliding());
+    Row->SetBoolField(TEXT("prone"), Pilot->IsProne());
+    Row->SetBoolField(TEXT("aim_facing"), Pilot->UsesAimFacing());
+    const auto *Anim = Pilot->GetMesh()->GetAnimInstance();
+    Row->SetBoolField(TEXT("root_motion"), Anim && Anim->GetRootMotionMontageInstance() != nullptr);
+    Row->SetStringField(TEXT("montage"), Anim ? GetNameSafe(Anim->GetCurrentActiveMontage()) : TEXT(""));
+    if (const auto *Volume = Pilot->GetPhysicsVolume())
+    {
+        Row->SetStringField(TEXT("volume"), Volume->GetName());
+        Row->SetBoolField(TEXT("water_volume"), Volume->bWaterVolume);
+    }
+    // Floor under the capsule bottom: distance and surface (physical material, component, material 0).
+    const float Bottom = Pilot->GetActorLocation().Z - Capsule->GetScaledCapsuleHalfHeight();
+    FCollisionQueryParams Query(SCENE_QUERY_STAT(HoverWalkProof), false, Pilot);
+    Query.bReturnPhysicalMaterial = true;
+    FHitResult Hit;
+    const FVector From(Pilot->GetActorLocation().X, Pilot->GetActorLocation().Y, Bottom + 5.f);
+    float FloorZ = Bottom;
+    if (Pilot->GetWorld()->LineTraceSingleByChannel(Hit, From, From - FVector(0, 0, 305.f), ECC_Visibility, Query))
+    {
+        FloorZ = Hit.ImpactPoint.Z;
+        Row->SetNumberField(TEXT("floor_dist"), FMath::RoundToDouble((Bottom - FloorZ) * 10.) / 10.);
+        Row->SetNumberField(TEXT("floor_normal_z"), Hit.ImpactNormal.Z);
+        Row->SetStringField(TEXT("floor_physmat"), GetNameSafe(Hit.PhysMaterial.Get()));
+        Row->SetStringField(TEXT("floor_actor"), GetNameSafe(Hit.GetActor()));
+        if (const UPrimitiveComponent *Floor = Hit.GetComponent())
+        {
+            Row->SetStringField(TEXT("floor_component"), Floor->GetName());
+            Row->SetStringField(TEXT("floor_material"), GetNameSafe(Floor->GetMaterial(0)));
+        }
+    }
+    else
+        Row->SetNumberField(TEXT("floor_dist"), -1);
+    for (const TCHAR *Bone : {TEXT("pelvis"), TEXT("foot_l"), TEXT("foot_r"), TEXT("ball_l"), TEXT("ball_r")})
+        Row->SetNumberField(FString(Bone) + TEXT("_z"),
+                            FMath::RoundToDouble((Pilot->GetMesh()->GetSocketLocation(Bone).Z - FloorZ) * 10.) / 10.);
+    // AFS 2026-11-01 (review fix): the foot-slide metric. World position of each ball / foot and its height over the
+    // floor directly under it (the capsule floor reads a foot over a kerb edge as sunk into the street).
+    for (const TCHAR *Bone : {TEXT("ball_l"), TEXT("ball_r"), TEXT("foot_l"), TEXT("foot_r")})
+    {
+        const FVector At = Pilot->GetMesh()->GetSocketLocation(Bone);
+        Row->SetArrayField(FString(Bone) + TEXT("_w"), Vec(At));
+        FHitResult Under;
+        if (Pilot->GetWorld()->LineTraceSingleByChannel(Under, At + FVector(0, 0, 60.f), At - FVector(0, 0, 150.f),
+                                                        ECC_Visibility, Query))
+            Row->SetNumberField(FString(Bone) + TEXT("_own"),
+                                FMath::RoundToDouble((At.Z - Under.ImpactPoint.Z) * 10.) / 10.);
+    }
+    if (auto *Bridge = Pilot->FindComponentByClass<UHoverLocomotionBridge>())
+    {
+        Row->SetBoolField(TEXT("rifle_stance"), Bridge->bRifleStance);
+        Row->SetBoolField(TEXT("cls_enabled"), Bridge->bEnabled);
+        if (Bridge->Driver && Bridge->Driver->GetAnimInstance())
+            Row->SetStringField(TEXT("cls_montage"),
+                                GetNameSafe(Bridge->Driver->GetAnimInstance()->GetCurrentActiveMontage()));
+        // AFS 2026-11-01 (review fix): what CLS motion matching actually plays (database, clip, play rate), read from
+        // every motion matching node of the CLS driver's animation instances.
+        if (Bridge->Driver)
+        {
+            TArray<TSharedPtr<FJsonValue>> Matches;
+            Bridge->Driver->ForEachAnimInstance([&Matches](UAnimInstance *Instance) {
+                for (TFieldIterator<FStructProperty> It(Instance->GetClass()); It; ++It)
+                    if (It->Struct && It->Struct->IsChildOf(FAnimNode_MotionMatching::StaticStruct()))
+                    {
+                        const auto *Node = It->ContainerPtrToValuePtr<FAnimNode_MotionMatching>(Instance);
+                        const FPoseSearchBlueprintResult &Result = Node->GetMotionMatchingState().SearchResult;
+                        if (!Result.SelectedAnim)
+                            continue;
+                        auto Match = MakeShared<FJsonObject>();
+                        Match->SetStringField(TEXT("db"), GetNameSafe(Result.SelectedDatabase.Get()));
+                        Match->SetStringField(TEXT("anim"), GetNameSafe(Result.SelectedAnim.Get()));
+                        Match->SetNumberField(TEXT("rate"), FMath::RoundToDouble(Result.WantedPlayRate * 100.) / 100.);
+                        Match->SetBoolField(TEXT("mirror"), Result.bIsMirrored);
+                        Matches.Add(MakeShared<FJsonValueObject>(Match));
+                    }
+            });
+            Row->SetArrayField(TEXT("mm"), Matches);
+        }
+        if (UActorComponent *Data = Bridge->Locomotion)
+            if (auto *Struct = FindFProperty<FStructProperty>(Data->GetClass(), TEXT("AnimData")))
+            {
+                auto Fields = MakeShared<FJsonObject>();
+                const void *Value = Struct->ContainerPtrToValuePtr<void>(Data);
+                for (TFieldIterator<FProperty> It(Struct->Struct); It; ++It)
+                {
+                    FString Text;
+                    It->ExportTextItem_InContainer(Text, Value, nullptr, nullptr, PPF_None);
+                    FString Name = It->GetName();
+                    Name.Split(TEXT("_"), &Name, nullptr);
+                    Fields->SetStringField(Name, Text);
+                }
+                Row->SetObjectField(TEXT("anim"), Fields);
+            }
+    }
+    Row->SetBoolField(TEXT("crouch_tag"), GetCLSTags(Pilot).HasTagExact(
+                                              FGameplayTag::RequestGameplayTag(TEXT("State.Movement.Crouch"))));
+    FString Out;
+    auto Writer = TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Out);
+    FJsonSerializer::Serialize(Row, Writer);
+    return Out;
 }
 FGameplayTagContainer UHoverIntegrationAuthoring::GetCLSTags(AActor *Owner)
 {

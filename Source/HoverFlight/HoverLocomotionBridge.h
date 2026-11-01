@@ -75,4 +75,9 @@ class HOVERFLIGHT_API UHoverIntegrationAuthoring : public UBlueprintFunctionLibr
     UFUNCTION(BlueprintPure) static FGameplayTagContainer GetCLSTags(AActor *Owner);
     UFUNCTION(BlueprintPure) static UActorComponent *GetCLSData(AActor *Owner);
     UFUNCTION(BlueprintPure) static USkeletalMeshComponent *GetCLSDriver(AActor *Owner);
+    // AFS 2026-11-01 (Scripts/ProveWalking.py): one JSON row of the walk state for a per-frame receipt: character
+    // movement mode / ground / crouch / acceleration, Life Engine active / grounded / hand-off flag, capsule and mesh
+    // height, floor distance and surface under the capsule, physics volume, foot and pelvis heights over the floor,
+    // and the CLS AnimData fields as packaged this frame. Read-only.
+    UFUNCTION(BlueprintCallable) static FString DescribeWalkState(AActor *Owner);
 };

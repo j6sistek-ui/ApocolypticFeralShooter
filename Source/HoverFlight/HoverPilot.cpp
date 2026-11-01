@@ -420,7 +420,13 @@ void AHoverPilot::BeginPlay()
         LifeMovement->bAutoActivate = false;
         LifeMovement->PrimaryComponentTick.bStartWithTickEnabled = false;
         LifeMovement->bAutoLoadMovementSettings = false;
+        // AFS 2026-11-01 (walking): a movement component asks by default to tick BEFORE its owner (bTickBeforeOwner),
+        // while the solver must tick AFTER the pilot (AddTickPrerequisiteActor below), so the two edges formed a
+        // cycle: the owner's NYC session logged 2583 + 984 "would form a cycle" warnings and the engine dropped a
+        // different edge from frame to frame. One order only: pilot (input feed) -> solver -> mesh.
+        LifeMovement->bTickBeforeOwner = false;
         LifeMovement->RegisterComponent();
+        PrimaryActorTick.RemovePrerequisite(LifeMovement, LifeMovement->PrimaryComponentTick);
         LifeMovement->SetUpdatedComponent(GetCapsuleComponent());
         LifeMovement->bEnableKeyboardMovement = false;
         LifeMovement->bEnableJumpInput = false;
@@ -942,12 +948,16 @@ void AHoverPilot::UpdateLifeEngine(float DT)
         bLifeEngineTemplateOverride = true;
     else if (bLifeEngineTemplateOverride && Move->IsMovingOnGround() && !RootMotion && !WallRunning && !Crouching)
         bLifeEngineTemplateOverride = false;
+    // AFS 2026-11-01 (walking): at Display, so a player session log names the reason for every hand-off (the
+    // owner's NYC run showed 20 suspend / resume switches in 90 s with no reason in the log).
     if (bLifeEngineTemplateOverride != WasOverride)
-        UE_LOG(LogTemp, Verbose,
-               TEXT("HOVER_PARKOUR_%s mode=%d rootmotion=%d wallrun=%d gravity=%.2f crouch=%d z=%.1f v=%s"),
+        UE_LOG(LogTemp, Display,
+               TEXT("HOVER_PARKOUR_%s mode=%d rootmotion=%d (%s) wallrun=%d gravity=%.2f (base %.2f) crouch=%d "
+                    "solver_ground=%d z=%.1f v=%s"),
                bLifeEngineTemplateOverride ? TEXT("YIELD") : TEXT("RESUME"), int32(Move->MovementMode.GetValue()),
-               RootMotion, WallRunning, Move->GravityScale, Crouching, GetActorLocation().Z,
-               *GetVelocity().ToString());
+               RootMotion, RootMotion ? *GetNameSafe(Anim->GetRootMotionMontageInstance()->Montage) : TEXT("-"),
+               WallRunning, Move->GravityScale, LifeEngineGravityScale, Crouching, LifeMovement->bGrounded,
+               GetActorLocation().Z, *GetVelocity().ToString());
     const bool Want = bLifeEngine && !bMounted && !bLifeEngineTemplateOverride && !bDefeated && !bKnockedDown &&
                       TransitionTime <= 0;
     if (Want != bLifeEngineActive)
@@ -1384,8 +1394,12 @@ void AHoverPilot::UpdateGroundPosture(float DT)
     else if (bIsCrouched)
     {
         GroundSlideTime = 0;
+        // AFS 2026-11-01 (owner: crouch "penguin waddle"): Vexa's chooser (CHT_VexaRifle) crouches on
+        // PSD_DirectionalCrouch, whose loops (QA_Crouch_Walk_Fwd / Bwd / Left / Right) are all authored at 300 cm/s
+        // and played at rate ~1.0. At the old 400 cm/s (CrouchedSpeed in DefaultGame.ini and the 400 here) the capsule
+        // outran the steps by a third and the planted feet skated (ProveWalking crouch). Crouch at the clips' speed.
         Move->MaxWalkSpeedCrouched =
-            bProne ? 120.f : (Combat ? GetDefault<UZE_PlayerSettings>()->CrouchedSpeed : 400.f);
+            bProne ? 120.f : (Combat ? GetDefault<UZE_PlayerSettings>()->CrouchedSpeed : 300.f);
         Move->GroundFriction = 8.f;
         Move->BrakingDecelerationWalking = 2048.f;
     }
@@ -2576,11 +2590,20 @@ void AHoverPilot::PlayFootstep(const FVector &At, float Speed)
                                              Query))
     {
         FString Name = GetNameSafe(Hit.PhysMaterial.Get());
+        FString MaterialName;
         if (const UPrimitiveComponent *Floor = Hit.GetComponent())
             if (const UMaterialInterface *Material = Floor->GetMaterial(0))
-                Name += TEXT(" ") + Material->GetName();
-        Name = Name.ToLower();
-        if (Name.Contains(TEXT("water")) || Name.Contains(TEXT("puddle")) || Name.Contains(TEXT("wet")))
+                MaterialName = Material->GetName().ToLower();
+        Name = Name.ToLower() + TEXT(" ") + MaterialName;
+        // AFS 2026-11-01 (owner: wet footsteps on dry NYC ground): the NYC streets are MI_Asphalt_Water (the city
+        // pack's asphalt with an optional puddle layer) on DefaultPhysicalMaterial, so the word "water" in the
+        // material name sent every street step to the puddle set. A paved material counts as dry unless its name says
+        // puddle; water / wet still count from the physical material or any other material.
+        const bool Paved = MaterialName.Contains(TEXT("asphalt")) || MaterialName.Contains(TEXT("concrete")) ||
+                           MaterialName.Contains(TEXT("road")) || MaterialName.Contains(TEXT("pavement")) ||
+                           MaterialName.Contains(TEXT("sidewalk"));
+        const FString WetWords = Paved ? GetNameSafe(Hit.PhysMaterial.Get()).ToLower() : Name;
+        if (Name.Contains(TEXT("puddle")) || WetWords.Contains(TEXT("water")) || WetWords.Contains(TEXT("wet")))
             Surface = 2;
         else if (Name.Contains(TEXT("dirt")) || Name.Contains(TEXT("grass")) || Name.Contains(TEXT("mud")) ||
                  Name.Contains(TEXT("soil")) || Name.Contains(TEXT("sand")) || Name.Contains(TEXT("gravel")) ||
