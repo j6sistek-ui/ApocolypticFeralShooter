@@ -21,8 +21,11 @@ Severity: **G** game-breaking, **M** major (hurts play), **m** minor.
 | Bug | Sev |
 |---|---|
 | Life Engine jumps are low and short: 110 cm peak, 0.6 s in the air, 4.1 m running jump vs Classic 248 cm, 0.9 s, 6.1 m (preset gravity 2032, jump 686) | M |
-| Owner 2026-11-01 (NYC Exploration): holding B to crouch, or crouch/slide, starts a penguin-like waddle instead of a crouch walk or slide (Exploration has no Life Engine, so this is Classic + the CLS parkour template; check NYC Survival too) | M |
+| Owner 2026-11-01: crouch / hold-B "penguin waddle" on the NYC maps. 2026-11-01 walking fix: the in-air pose on standing up is fixed and crouch speed is 300 to match the clips, but scripted tests show the same crouch on NYC Survival, Exploration and PostApo; the test pads start in first person (rifle stance, belly crawl) and NYC Survival in third person (hands-and-knees crawl). Hold B at rest = prone crawl, while moving = dive. Needs the owner's eyes on `walking_before_after.mp4` | m |
 | Life Engine has almost no air steering: 41 cm sideways in a jump vs 236 cm on Classic (Source-style air control needs mouse air-strafing) | M |
+| Lifeblood sign in Unreal: the repainted PERK MACHINE subtitle (texture confirmed in, 2026-11-01) renders with dark doubled edges under the game lighting, unlike Blender; suspect the normal-map relief or the glass material (normal flip is correct). Still `D:/AFS_Comparisons/PerkMachines_20261101/Lifeblood_text/unreal/stills/Lifeblood_sign.png` | m |
+| Life Engine straight-wall run dropped from 0.33 s to 0.1 s after the 2026-11-01 tick-order fix (ProveParkourLifeEngine); Classic unchanged | m |
+| Life Engine planted-foot slide is about 1.4x Classic (104 vs 77 cm/s); lead: the CLS bridge ticks after the pilot but not after the solver | m |
 | Life Engine: running into a wall at an angle stops dead (no wall slide); template wall runs are very short | M |
 | Owner 2026-11-01: the hand goes through the middle of the sword (katana) handle instead of gripping it | m |
 | Spear hits land 1.7-3.4 m out while the visible head reaches about 1 m; the jab points about 40 degrees high | m |
@@ -33,7 +36,6 @@ Severity: **G** game-breaking, **M** major (hurts play), **m** minor.
 | Zombies sink into the ground in PostApo (`AHoverZombie`, recording 0:24) | m |
 | Small-gun muzzle flash too hot within 20 cm (EM21, EM08) | m |
 | Owner 2026-11-01: the muzzle flash blinds the scope when firing, and it is still the blue sci-fi flash, not the warm per-rig flash from 2026-10-31 (that override only covers the 4 rigged guns; which gun and map to confirm) | M |
-| Owner 2026-11-01: every footstep sounds like wet feet on dry ground (the 2026-10-31 audio pass picks footsteps by surface; the surface lookup is likely falling back to a wet set) | M |
 | Owner 2026-11-01: no ambient sound (requested). The crowd ambience by alive count was wired 2026-10-29 for NYC Survival rounds only; no city/weather ambience is wired anywhere (the weather SFX loops pack is in the project) | M |
 | First-person arms fill the view; owner 2026-11-01: the left arm still looks very wrong in first person (`HoverView` is Exec-only; needs an FP capture to tune offset and FOV) | m |
 | Brute, Kid horde round and bosses not yet seen in a rendered run with the new roster | m |
@@ -44,9 +46,12 @@ Owner 2026-10-31: ideas get tabled when they come (logged, not designed); the pr
 While the owner cannot playtest, in-between work chips away at the top items that do not need a playtest.
 
 **Now**
+0b. **Weather** (owner 2026-11-01: right after walking, ahead of everything else, "I want to see how it works"): migrate
+   Dreamrise from `M:\MultiplayerDynamicWeather`, rain/snow toggle in the F6 menu, in NYC Survival.
 0. Power-ups, time-boxed: the live displays are built (`DONE.md` #14), waiting on the owner's look in the
    editor. Open for the owner's eye: the Nuke pops have no smoke puff (it could not read on the black casing), Max
-   Ammo's haze is a little yellow on one edge, and the Nuke reads small from the start. Then the shared look goes to
+   Ammo's haze is a little yellow on one edge, and the Nuke reads small from the start (owner 2026-11-01: make it twice as big and a bit more sparky while idling;
+   staged in `Scripts/AuthorPowerUpLive.py`: item_scale 2.0, events every 1.6-2.6 s, more spark dribble; needs one run). Then the shared look goes to
    the other power-ups, and the display gets attached to the real pickup (`bLoopForEvaluation = false`).
 1. **Phase 1 core loop: perks** (`PERKS.md`; the owner is drafting the ideas). Design the perk mechanics and the machines, then build them: the six perks (owner
    drafts so far: Necrosiphon (health), Life Blood (revive), Headhunter (ammo efficiency), Survivalist (speed,
@@ -58,9 +63,9 @@ While the owner cannot playtest, in-between work chips away at the top items tha
    Headhunter tube fix round (owner liked the look 2026-11-01): show the painted red TubeRing (pool wall inside it),
    bigger drops falling mostly from the cap, the headshot splat landing with the spurt and old splats fading instead
    of vanishing, less pink on the skull crown. Machines go in NYC Survival, spread out, never side by side.
-1b. **Muzzle flash, ambient sound, footsteps** (owner placed it right after perks, 2026-11-01): the warm flash on every gun
+1b. **Muzzle flash, ambient sound** (owner placed it right after perks, 2026-11-01): the warm flash on every gun
    the player holds (no scope whiteout), and city/weather ambience plus a check that the crowd ambience plays in rounds (the 2026-10-31 audio pass
-   lists wind, which the owner did not hear); footsteps play the right surface (all wet now).
+   lists wind, which the owner did not hear).
 2. Owner playtest of everything in `DONE.md` (whenever the owner can); the results re-rank this list.
 3. Life Engine movement feel: measured 2026-10-31 (`Scripts/ProveLifeEngineCompare.py`); waiting on the owner's
    test to choose jump height and air control, then wall slide and wall runs.

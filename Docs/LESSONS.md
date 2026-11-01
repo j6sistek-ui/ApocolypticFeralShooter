@@ -86,3 +86,8 @@ Things that were expensive to find out. Newest first within each group.
   2026-10-31). Do not solve a motion problem with a new mesh.
 - Headless stills taken right after a map loads show low texture mips (the Headhunter sign was unreadable, 2026-11-01).
   Capture scripts set r.Streaming.FullyLoadUsedTextures 1 before shooting; judge texture quality only from such stills.
+- CLS enums are its own, not the engine's: its MovementMode is Ground=0 / InAir=1, so writing MOVE_Walking (1) made
+  Vexa "fly" (2026-11-01). CLS also predicts motion from the movement component's top speed and braking, so a
+  component parked in MOVE_None must still report them, or motion matching picks walk/stop clips.
+- Test pads start in first person (rifle stance, belly crawl); NYC Survival forces third person. Compare movement
+  in the same view.

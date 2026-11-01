@@ -126,6 +126,9 @@ def plan():
         step(0.1, lambda t, n=name, a=aim, d=dist: view_machine(n, d, a + 25, a, 12, 50))
         step(1.0, lambda t, n=name: capture(n + '_close_a'))
         step(0.7, lambda t, n=name: capture(n + '_close_b'))
+        if name == 'Lifeblood':   # 2026-11-01: the repainted PERK MACHINE subtitle, straight on
+            step(0.1, lambda t, n=name: view_machine(n, 95, 135, 133, 0, 40))
+            step(1.0, lambda t, n=name: capture(n + '_sign'))
     if not ONLY or ONLY == 'Headhunter':
         plan_headhunter()
     step(0.3, lambda t: finish())

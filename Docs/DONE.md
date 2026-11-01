@@ -69,10 +69,7 @@ Receipts and stills live under `D:\AFS_Comparisons\` (local, not in git).
   - Animation runs in the editor without Play (life 0 to 6 s).
   - Stills in `D:/AFS_Comparisons/PowerUps_20261031/Live/stills_fix/`.
   - The decided smoke puff is off (it could not read on the black casing).
-
-## Confirmed by the owner
-
-- [x] **13. Perk machines in NYC Exploration** (2026-10-31). Lifeblood and Bioreactor as props (no buying yet),
+- [ ] **13. Perk machines in NYC Exploration** (2026-10-31). Lifeblood and Bioreactor as props (no buying yet),
   about 10 m ahead of the player start, facing it.
   *Check:* LIFEBLOOD reads on the front and both sides; the blood core and heart sign beat; the cabinet colour
   holds up in the street light; the Bioreactor screen and biohazard sign glow, the liquid moves, the stirring
@@ -80,8 +77,18 @@ Receipts and stills live under `D:\AFS_Comparisons\` (local, not in git).
   *AI:* `ImportPerkMachines.py` (12 parts, 4 materials compiled with no link failures, 12 actors after a map
   reload); `CapturePerkMachines.py` stills from the spawn point and close up, 0.7 s apart: the shaft and the beat
   move. Glass is a plain fresnel glass; no bubbles yet.
-  *Owner 2026-11-01:* "perks look great". Placement does not matter here: machines go in NYC Survival and are never
-  side by side. Open tube fixes moved to the backlog (perks, item 1).
+  *Owner 2026-11-01:* Bioreactor looks great; Lifeblood has an issue (details pending). Sent back.
+- [ ] **16. Walking in NYC Survival** (2026-11-01, `0d87cdb`). Under the Life Engine Vexa now jogs like Classic, feet on
+  the ground; the floating crouched (fall) pose is gone; footsteps on the NYC streets sound dry; crouch walks at 300.
+  *Check:* walk and sprint in NYC Survival on Life Engine and Classic (F6); crouch and hold-B; footsteps on the street.
+  *AI:* causes and numbers: CLS was told "in the air" on every grounded frame (116/116), its path prediction read a
+  0 top speed (walk clip, skating), and the pilot and Life Engine ticked in a loop (3,567 warnings in your log, now 0).
+  After: jog clip 110/115 frames (Classic 106/109), feet 0.4 cm off the ground, Classic unchanged, parkour proof
+  passes. Video `D:/AFS_Comparisons/Walking_20261101/walking_before_after.mp4`. Open: the crouch "waddle" was not
+  reproduced as map-specific (see Bugs), Life Engine wall runs got shorter (0.33 to 0.1 s).
+
+## Confirmed by the owner
+
 - [x] **15. Headhunter perk machine in NYC Exploration** (2026-11-01). Your Painter textures (Unreal export, full 4K)
   on the 12 parts, a glass tube with live blood: a deep pool on the red disc, runs and spatter on the inside of the
   glass, drops into the pool with splash rings, a "headshot" spatter every 12-20 s, slow bubbles, a red glow. Third
