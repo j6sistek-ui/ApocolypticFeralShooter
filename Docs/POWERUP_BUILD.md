@@ -49,9 +49,78 @@ item colour, `$c2` a pale highlight.
 | `Scripts/AuthorPowerUpStyles.py`, `AuthorPowerUpStyles2.py`, `MakePowerUpStyleTextures.py` | build the materials, instances and Niagara copies for the looks | UnrealEditor-Cmd |
 | `Scripts/PreviewPowerUpStyles2.py`, `RecordPowerUpGifs.py`, `AssemblePowerUpGifs.py`, `RecordNukeSignatures.py` | the showcase renders and GIFs (motion driven from Python: preview only) | UnrealEditor-Cmd, RenderOffscreen |
 
-Lesson: the Python-driven motion (sparks, embers, bolts, heartbeat echo) is preview only. The shipping version is the
-in-engine display actor (C++ `AHoverPowerUpDisplay`, being built 2026-10-31) with real Niagara or C++ particles,
-placed in NYC Exploration so the owner can watch it live. When that lands this file gets its parameters.
+| `Scripts/AuthorPowerUpLive.py` | **the shipping look**: builds the live materials, Niagara copies and `DA_PU_Live_<Item>` settings, places the displays in NYC Exploration (every tunable is a named value at the top) | UnrealEditor-Cmd, nullrhi |
+| `Scripts/CapturePowerUpLive.py` | stills of the live displays (`PU_LIVE_PLAN=fix` for the short set) | UnrealEditor-Cmd, RenderOffscreen |
+| `Scripts/Blender/MakePowerUpLiveProps.py` | the neon cartridge icon mesh for Max Ammo | Blender `-b --python ...` |
+
+Lesson: the Python-driven motion (sparks, embers, bolts, heartbeat echo) of the GIF rounds was preview only. The
+shipping version is the live display actor below.
+
+## The shipping version: live display actor (built 2026-10-31)
+
+C++ `AHoverPowerUpDisplay` (`Source/HoverFlight/HoverPowerUpDisplay.*`). It is purely visual, so the real pickup can
+attach it later; that pickup must set `bLoopForEvaluation = false`. It handles:
+- spin, bob and casing shudder (new target 30 times a second)
+- the Geiger ticks, pops and spark schedule
+- the neon icon with its buzz and dead-tube stutter
+- the aura shells
+- the last-5-second warning: the heartbeat, plus the arc crawl on the Nuke
+
+The settings live in `/Game/HoverPrototype/PowerUps/Live/<Item>/DA_PU_Live_<Item>`, written by
+`AuthorPowerUpLive.py`. Timing, light and warning values are read every frame; mesh, material, shell and Niagara
+changes need a map reload or a re-run of the script.
+
+**Built from:**
+- **Niagara:** the sparks, single sparks, pop sparks and motes, all copies of the engine DirectionalBurst and
+  RadialBurst templates. `UHoverAuthoring::ConfigurePowerUpLiveEffect` writes their emitter scripts so the authored
+  counts hold (before that fix every burst spawned 20).
+- **Camera-facing planes:** the pop core, glow, rays and glint.
+- **Material time:** the shells, blood rim and arcs.
+
+**Live in NYC Exploration:** outliner folder `AFS_PowerUps`, tag `AFS_PowerUpTrial`. The three displays stand in a
+row 1.5 m apart, about 3 m ahead of the player start: NUKE, MEDKIT, MAX AMMO. In the editor, turn on Realtime
+(Ctrl+R) and keep the editor focused, or press Play.
+
+**All items:**
+- Hover 30 cm, bob 2 cm at 0.5 Hz.
+- Life 30 s, pop-in 0.35 s, fade 0.5 s, then (evaluation only) hidden 2 s and loop.
+- Warning: the last 5 s.
+- Heartbeat swell 12 %, dub at 0.6 of the lub.
+
+**Nuke:**
+- Spin 30°/s, key light 4 cd, emblem and seam glow 1.5. No echo shell: it read as a floating ghost lid.
+- Geiger ticks every 1.6 s on average (0.35-3.5 s apart); 30 % are triples, 0.09 s apart. Each tick flashes 0.07 s
+  (trefoil +9, seams +7, capped at 8 / 7 when it lands on a heartbeat flash), shudders 2.4 cm and adds a 9 cm glint.
+- One event every 2.4-3.6 s from 1.6 s, alternating spark burst and pop.
+- Spark bursts: 6 or 7, with a 13 at 35 %. A single spark about every 1.3 s. Cone 55-65°, speed 140-330, life
+  0.45-0.95 s.
+- Pops: core 3.5 cm, glow 18 cm, 4-6 rays (12 x 0.7 cm), light 12 cd, 3 or 6 sparks, jolt 1.2 cm. The decided
+  dark smoke puff is **off** (`POP_PUFF = False`): it rendered but could not be made to read against the black
+  casing.
+- Warning: heartbeat and arc crawl share one 3 s ease-in. The beat speeds up from 1.0 to 2.4 Hz (power 1.4), with a
+  glow flash of 1.8.
+- Arc crawl: intensity 10 on the skin and 7 on the shell. Its rate rises from 5 to 22 and its coverage from 0.30 to
+  0.50. The light stutters 2 to 14 times a second.
+
+**Medkit and Max Ammo:**
+- Spin 25°/s, key light 3 cd pulsing at 0.45 Hz.
+- Neon icon 92 cm up. The lit tube is 12 with a 14 Hz buzz at 0.12. The dead tube is 0.25 off / 8 on, stuttering in
+  bursts of 0.15-0.6 s every 0.7-2.6 s. Neon light 5 cd, radius 340 cm.
+- Aura shells at 2 / 6 / 11 cm, intensity 0.7 / 0.4 / 0.18. Max Ammo's haze is 0.7x.
+- Blood touch: a red mist shell 1.5 cm out at 0.45, and a red rim of 1.3 (Max Ammo 1.1) breathing at 0.9 Hz.
+- Motes: 5 every 1.1 s.
+- Heartbeat speeds up from 1.25 to 1.55 Hz, with a 1.5 s ease-in and a glow flash of 1.6. Echo shell up to 1.15x at
+  0.35.
+
+**Item colours:**
+- Medkit: red (1, .045, .035), neon cross.
+- Max Ammo: orange amber (1, .42, .03), neon of three cartridges (the middle tip is the dead tube).
+
+**Open (owner's eye):**
+- No smoke puff on the pops.
+- Max Ammo's haze is still a little yellow on one edge.
+- The Nuke reads small from the start.
+- Each tick that lands on a heartbeat is capped, so it shows less.
 
 ## Parked for a later trial
 

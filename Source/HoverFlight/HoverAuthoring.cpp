@@ -101,6 +101,7 @@
 #include "World/ZE_ZombieSpawnPoint.h"
 #include "Engine/LevelStreaming.h"
 #include "FileHelpers.h"
+#include "LevelEditorViewport.h"
 #endif
 
 #if WITH_EDITOR
@@ -784,6 +785,41 @@ FString UHoverAuthoring::ConfigureOffscreenDisplay(int32 Width, int32 Height)
     return TEXT("editor only");
 #endif
 }
+FString UHoverAuthoring::SetLevelViewportsRealtime(bool bRealtime, bool bKeepTickingInBackground)
+{
+#if WITH_EDITOR
+    if (!GEditor)
+        return TEXT("no editor");
+    FString Report = FString::Printf(TEXT("level viewport clients %d\n"), GEditor->GetLevelViewportClients().Num());
+    if (bKeepTickingInBackground)
+    {
+        // this session only (not saved to the ini): an unfocused editor otherwise re-pushes its 'Background Process'
+        // realtime override every frame
+        auto *Perf = GetMutableDefault<UEditorPerformanceSettings>();
+        Report += FString::Printf(TEXT("throttle when not foreground was %d, now 0\n"), int32(Perf->bThrottleCPUWhenNotForeground));
+        Perf->bThrottleCPUWhenNotForeground = false;
+    }
+    for (FLevelEditorViewportClient *Client : GEditor->GetLevelViewportClients())
+    {
+        if (!Client)
+            continue;
+        const FString Before = FString::Printf(TEXT("realtime=%d override='%s'"), int32(Client->IsRealtime()),
+                                               *Client->GetRealtimeOverrideMessage().ToString());
+        Client->SetRealtime(bRealtime);
+        // an override (unattended / remote session / performance) wins over SetRealtime: push ours on top of it
+        static const FText OverrideName = FText::FromString(TEXT("AFS SetLevelViewportsRealtime"));
+        Client->RemoveRealtimeOverride(OverrideName, false);
+        if (Client->IsRealtime() != bRealtime)
+            Client->AddRealtimeOverride(bRealtime, OverrideName);
+        Report += FString::Printf(TEXT("client perspective=%d before(%s) now realtime=%d visible=%d world=%s\n"),
+                                  int32(Client->IsPerspective()), *Before, int32(Client->IsRealtime()),
+                                  int32(Client->IsVisible()), Client->GetWorld() ? *Client->GetWorld()->GetName() : TEXT("none"));
+    }
+    return Report;
+#else
+    return TEXT("editor only");
+#endif
+}
 FIntPoint UHoverAuthoring::GetPlaytestViewportSize()
 {
 #if WITH_EDITOR
@@ -1268,14 +1304,24 @@ FString UHoverAuthoring::DescribeNiagaraEffect(UNiagaraSystem *Effect)
     for (auto &Handle : Effect->GetEmitterHandles())
         if (auto *Data = Handle.GetEmitterData())
         {
-            Report += TEXT("EMITTER ") + Handle.GetName().ToString() + TEXT("\n");
+            Report += TEXT("EMITTER ") + Handle.GetName().ToString() +
+                      FString::Printf(TEXT(" enabled=%d local=%d sim=%d\n"), int32(Handle.GetIsEnabled()),
+                                      int32(Data->bLocalSpace), int32(Data->SimTarget));
+            for (auto *Renderer : Data->GetRenderers())
+                if (auto *Sprite = Cast<UNiagaraSpriteRendererProperties>(Renderer))
+                    Report += FString::Printf(TEXT("SPRITE enabled=%d material=%s alignment=%d facing=%d sort=%d priority=%d\n"),
+                                              int32(Sprite->GetIsEnabled()), Sprite->Material ? *Sprite->Material->GetPathName() : TEXT("none"),
+                                              int32(Sprite->Alignment), int32(Sprite->FacingMode), int32(Sprite->SortMode),
+                                              Sprite->SortOrderHint);
+                else if (Renderer)
+                    Report += TEXT("RENDERER ") + Renderer->GetClass()->GetName() + TEXT("\n");
             TArray<UNiagaraScript *> Scripts;
             Data->GetScripts(Scripts);
             TSet<UNiagaraGraph *> Seen;
             for (auto *Script : Scripts)
             {
                 DescribeStore(Script->RapidIterationParameters);
-                if (Effect->GetName().StartsWith(TEXT("NS_GliderJet")))
+                if (Effect->GetName().StartsWith(TEXT("NS_GliderJet")) || Effect->GetName().StartsWith(TEXT("NS_PU_Live_Pop")))
                     if (auto *Source = Cast<UNiagaraScriptSource>(Script->GetLatestSource());
                         Source && Source->NodeGraph && !Seen.Contains(Source->NodeGraph))
                     {
@@ -1602,6 +1648,122 @@ int32 UHoverAuthoring::ConfigureSurfaceImpact(UNiagaraSystem *Effect, UMaterialI
     return Changed;
 }
 
+FString UHoverAuthoring::ConfigurePowerUpLiveEffect(UNiagaraSystem *Effect, const FString &KeepEmitter,
+                                                   UMaterialInterface *SpriteMaterial, bool bVelocityAligned,
+                                                   const TMap<FString, FString> &Values)
+{
+    FString Report;
+#if WITH_EDITOR
+    // AFS 2026-10-31: only our template copies for the live power-up displays.
+    if (!Effect || !Effect->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/Effects/PowerUps/Live/")))
+        return TEXT("Refused: only /Game/HoverPrototype/Effects/PowerUps/Live/ copies may be edited");
+    Effect->Modify();
+    TSet<FString> Used;
+    auto Apply = [&](UNiagaraScript *Script, const FString &Where, const FString &OnlyEmitter, bool bListSys) {
+        if (!Script)
+            return;
+        Script->Modify();
+        auto &Store = Script->RapidIterationParameters;
+        TArray<FNiagaraVariable> Vars;
+        Store.GetParameters(Vars);
+        bool bChanged = false;
+        for (const auto &V : Vars)
+        {
+            const FString Name = V.GetName().ToString();
+            if (!OnlyEmitter.IsEmpty() && !Name.Contains(TEXT(".") + OnlyEmitter + TEXT(".")))
+                continue;
+            if (bListSys)
+                Report += FString::Printf(TEXT("SYS %s %s\n"), *Name, *V.GetType().GetName());
+            for (const auto &KV : Values)
+            {
+                if (!Name.EndsWith(KV.Key))
+                    continue;
+                const FNiagaraTypeDefinition &T = V.GetType();
+                TArray<FString> P;
+                KV.Value.ParseIntoArray(P, TEXT(","));
+                if (P.Num() == 0)
+                    continue;
+                auto F = [&P](int32 I) { return P.IsValidIndex(I) ? FCString::Atof(*P[I].TrimStartAndEnd()) : 0.f; };
+                bool bOk = true;
+                if (T == FNiagaraTypeDefinition::GetFloatDef())
+                    Store.SetParameterValue(F(0), V);
+                else if (T == FNiagaraTypeDefinition::GetIntDef())
+                    Store.SetParameterValue(int32(FCString::Atoi(*P[0].TrimStartAndEnd())), V);
+                else if (T == FNiagaraTypeDefinition::GetBoolDef())
+                {
+                    FNiagaraBool B;
+                    B.SetValue(P[0].TrimStartAndEnd().ToBool());
+                    Store.SetParameterValue(B, V);
+                }
+                else if (T == FNiagaraTypeDefinition::GetVec2Def())
+                    Store.SetParameterValue(FVector2f(F(0), F(1)), V);
+                else if (T == FNiagaraTypeDefinition::GetVec3Def())
+                    Store.SetParameterValue(FVector3f(F(0), F(1), F(2)), V);
+                else if (T == FNiagaraTypeDefinition::GetVec4Def())
+                    Store.SetParameterValue(FVector4f(F(0), F(1), F(2), F(3)), V);
+                else if (T == FNiagaraTypeDefinition::GetColorDef())
+                    Store.SetParameterValue(FLinearColor(F(0), F(1), F(2), P.Num() > 3 ? F(3) : 1.f), V);
+                else
+                    bOk = false;
+                if (bOk)
+                {
+                    Used.Add(KV.Key);
+                    bChanged = true;
+                    Report += FString::Printf(TEXT("SET %s %s = %s\n"), *Where, *Name, *KV.Value);
+                }
+                else
+                    Report += FString::Printf(TEXT("TYPE %s %s %s\n"), *Where, *Name, *T.GetName());
+            }
+        }
+        if (bChanged)
+            Script->InvalidateCompileResults(TEXT("AFS power-up live tuning"));
+    };
+    for (auto &Handle : Effect->GetEmitterHandles())
+    {
+        const FString EName = Handle.GetName().ToString();
+        if (!KeepEmitter.IsEmpty() && EName != KeepEmitter)
+        {
+            Handle.SetIsEnabled(false, *Effect, false);
+            Report += TEXT("DISABLED ") + EName + TEXT("\n");
+            continue;
+        }
+        auto *Data = Handle.GetEmitterData();
+        if (!Data)
+            continue;
+        Data->bLocalSpace = false;
+        for (auto *Renderer : Data->GetRenderers())
+            if (auto *Sprite = Cast<UNiagaraSpriteRendererProperties>(Renderer))
+            {
+                Sprite->Modify();
+                if (SpriteMaterial)
+                    Sprite->Material = SpriteMaterial;
+                if (bVelocityAligned)
+                {
+                    Sprite->Alignment = ENiagaraSpriteAlignment::VelocityAligned;
+                    Sprite->FacingMode = ENiagaraSpriteFacingMode::FaceCamera;
+                }
+                Report += TEXT("SPRITE ") + EName + TEXT("\n");
+            }
+        TArray<UNiagaraScript *> Scripts;
+        // bCompilableOnly = false: include the emitter spawn / update scripts. Their rapid-iteration values (the
+        // Spawn Burst count, emitter state) are copied over the system scripts' copies when the system compiles, so
+        // setting only the system copy left every burst at the template's 20 particles (fix round 2026-10-31).
+        Data->GetScripts(Scripts, false);
+        for (auto *Script : Scripts)
+            Apply(Script, EName, FString(), false);
+    }
+    Apply(Effect->GetSystemSpawnScript(), TEXT("SystemSpawn"), KeepEmitter, true);
+    Apply(Effect->GetSystemUpdateScript(), TEXT("SystemUpdate"), KeepEmitter, true);
+    for (const auto &KV : Values)
+        if (!Used.Contains(KV.Key))
+            Report += TEXT("MISSING ") + KV.Key + TEXT("\n");
+    Effect->RequestCompile(true);
+    Effect->WaitForCompilationComplete();
+    Effect->MarkPackageDirty();
+#endif
+    return Report;
+}
+
 void UHoverAuthoring::CapturePlaytest(const FString &Filename)
 {
 #if WITH_EDITOR
@@ -1873,6 +2035,46 @@ FString UHoverAuthoring::InspectReviewEffects()
                     }
                 }
         }
+#endif
+    return Report;
+}
+
+FString UHoverAuthoring::InspectActiveEffects(const FString &AssetContains)
+{
+    FString Report;
+#if WITH_EDITOR
+    UWorld *World = GetPlaytestWorld();
+    if (!World)
+        return TEXT("No play world");
+    for (TObjectIterator<UNiagaraComponent> It; It; ++It)
+    {
+        if (It->GetWorld() != World || !It->IsActive() || !GetNameSafe(It->GetAsset()).Contains(AssetContains))
+            continue;
+        auto Controller = It->GetSystemInstanceController();
+        Report += FString::Printf(TEXT("%s %s age=%.3f position=%s bounds=%s visible=%d\n"), *It->GetName(),
+                                  *GetNameSafe(It->GetAsset()), Controller.IsValid() ? Controller->GetAge() : -1.f,
+                                  *It->GetComponentLocation().ToString(), *It->Bounds.GetBox().ToString(),
+                                  int32(It->IsVisible()));
+        if (!Controller.IsValid())
+            continue;
+        if (auto *Instance = Controller->GetSystemInstance_Unsafe())
+        {
+            Instance->WaitForConcurrentTickAndFinalize();
+            for (const auto &Emitter : Instance->GetEmitters())
+            {
+                Report += FString::Printf(TEXT("  %s particles=%d\n"), *Emitter->GetEmitterHandle().GetName().ToString(),
+                                          Emitter->GetNumParticles());
+                if (Emitter->GetSimTarget() == ENiagaraSimTarget::CPUSim)
+                    if (const auto *Buffer = Emitter->GetParticleData().GetCurrentData(); Buffer && Buffer->GetNumInstances() > 0)
+                    {
+                        FNiagaraDataVariableIterator Values(Buffer);
+                        Values.Get();
+                        for (const auto &Value : Values.GetVariables())
+                            Report += TEXT("    ") + Value.ToString() + TEXT("\n");
+                    }
+            }
+        }
+    }
 #endif
     return Report;
 }

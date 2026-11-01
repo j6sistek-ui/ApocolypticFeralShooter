@@ -55,6 +55,10 @@ class HOVERFLIGHT_API UHoverAuthoring : public UBlueprintFunctionLibrary
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static FIntPoint ResizePlaytestWindow(int32 Width, int32 Height);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static FIntPoint GetPlaytestViewportSize();
+    // AFS 2026-10-31: switch every level editor viewport client to realtime (or back) so the editor world ticks with
+    // LEVELTICK_ViewportsOnly (actors that ShouldTickIfViewportsOnly animate without Play). Returns one line per client.
+    // bKeepTickingInBackground also turns off "Use Less CPU when in Background" for this session (not saved).
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static FString SetLevelViewportsRealtime(bool bRealtime, bool bKeepTickingInBackground = false);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static UWorld *GetPlaytestWorld();
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static void TestKey(APlayerController *Controller, FName Key, float Value, bool bAnalog = false);
@@ -105,9 +109,23 @@ class HOVERFLIGHT_API UHoverAuthoring : public UBlueprintFunctionLibrary
     static bool SetNiagaraUserColor(UNiagaraSystem *Effect, FName Parameter, FLinearColor Value);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static bool SetNiagaraUserFloat(UNiagaraSystem *Effect, FName Parameter, float Value);
+    // AFS 2026-10-31 (live power-up displays, Scripts/AuthorPowerUpLive.py): tunes a Niagara copy under
+    // /Game/HoverPrototype/Effects/PowerUps/Live/ (an engine template duplicate; refuses anything else). Disables every
+    // emitter except KeepEmitter (empty = keep all), gives its sprite renderers SpriteMaterial (when set) and velocity
+    // alignment (optional), and writes module inputs in the rapid-iteration stores of the particle and system scripts:
+    // each Values key is a name suffix ("InitializeParticle.Lifetime Min", "SpawnBurst_Instantaneous.Spawn Count"),
+    // each value "x" / "x,y" / "x,y,z" / "r,g,b,a" / "true". Returns a report: SET lines, MISSING keys, and the
+    // kept emitter's system-script inputs (SYS lines) so new keys can be found.
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
+    static FString ConfigurePowerUpLiveEffect(UNiagaraSystem *Effect, const FString &KeepEmitter,
+                                              class UMaterialInterface *SpriteMaterial, bool bVelocityAligned,
+                                              const TMap<FString, FString> &Values);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static void PrepareReviewEffects(const TArray<UNiagaraSystem *> &Effects);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static FString InspectReviewEffects();
+    // AFS 2026-10-31: the active Niagara components of the play world whose asset name contains AssetContains, with
+    // their particle counts and (CPU sims) every particle attribute of the first particle (size, colour, age...).
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static FString InspectActiveEffects(const FString &AssetContains);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static void CapturePlaytest(const FString &Filename);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static void CaptureWorldFrame(const FString &Filename);
     // Raw (parent-space, editor source data) transform of Sequence's track for Bone at each time in seconds, for

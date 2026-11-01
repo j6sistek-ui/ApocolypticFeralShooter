@@ -39,11 +39,10 @@ Owner 2026-10-31: ideas get tabled when they come (logged, not designed); the pr
 While the owner cannot playtest, in-between work chips away at the top items that do not need a playtest.
 
 **Now**
-0. Finishing, time-boxed (owner 2026-10-31: "a few examples of each, no overkill, I don't want to derail on
-   power-ups for days"): the Nuke as a real in-engine display actor in NYC Exploration (the first build run stopped on
-   2026-10-31 before it produced anything; to restart, then set to the decided sequence and drop the test variants), then the decided shared look (Busted Neon + Toxic Aura + a touch of Blood Magic, heartbeat warning) built in-engine for
-   the other power-ups in NYC Exploration, then
-   back to perks. The owner picks later and revisits the round-2 numbers; changing a look later is fine.
+0. Power-ups, time-boxed: the live displays are built (`DONE.md` #14), waiting on the owner's look in the
+   editor. Open for the owner's eye: the Nuke pops have no smoke puff (it could not read on the black casing), Max
+   Ammo's haze is a little yellow on one edge, and the Nuke reads small from the start. Then the shared look goes to
+   the other power-ups, and the display gets attached to the real pickup (`bLoopForEvaluation = false`).
 1. **Phase 1 core loop: perks** (`PERKS.md`; the owner is drafting the ideas). Design the perk mechanics and the machines, then build them: the six perks (owner
    drafts so far: Necrosiphon (health), Life Blood (revive), Headhunter (ammo efficiency), Survivalist (speed,
    melee, carry), Bioreactor (passive damage); one more to decide) with effects, prices (design: 2,500 + 500 per perk

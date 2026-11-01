@@ -63,6 +63,20 @@ Receipts and stills live under `D:\AFS_Comparisons\` (local, not in git).
   *AI:* `ImportPerkMachines.py` (12 parts, 4 materials compiled with no link failures, 12 actors after a map
   reload); `CapturePerkMachines.py` stills from the spawn point and close up, 0.7 s apart: the shaft and the beat
   move. Glass is a plain fresnel glass; no bubbles yet.
+- [ ] **14. Live power-ups in NYC Exploration** (2026-10-31). The decided looks on a live display actor: Nuke,
+  Medkit, Max Ammo, about 3 m ahead of the player start (in the editor: Realtime on, editor focused; or press Play).
+  *Check:*
+  - The Nuke shakes and ticks throughout. Spark bursts and small pops alternate about every 3 s. In the last 5 s
+    the heartbeat and arcs ease in and speed up.
+  - Medkit and Max Ammo have the neon icon, the coloured aura and a touch of red, with a heartbeat in the last 5 s.
+  - They loop every 32.5 s for evaluation.
+  *AI:* independent check of the build and of the fix pass:
+  - Build succeeded; the authoring script ran with ok=True.
+  - No ghost lid on the Nuke.
+  - Hidden-after-save bug fixed, and verified by a reload.
+  - Animation runs in the editor without Play (life 0 to 6 s).
+  - Stills in `D:/AFS_Comparisons/PowerUps_20261031/Live/stills_fix/`.
+  - The decided smoke puff is off (it could not read on the black casing).
 
 ## Confirmed by the owner
 
