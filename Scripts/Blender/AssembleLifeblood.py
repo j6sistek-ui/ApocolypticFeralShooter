@@ -47,6 +47,33 @@ Pass 2 (2026-10-31, owner: "back to the blender clean ups"):
                   only, raw values) and only the difference is added to the texture, so untouched texels and UV
                   seams stay exact; texels just outside the islands around the label are refilled from inside (Tripo's
                   seams cut through it). The normal map is flattened under the old and new letters.
+
+Pass 3 (2026-11-01, owner: "the main words on the top part, under LIFEBLOOD ... needs to be cleaned up"):
+  body textures   kept at the source 4096 (were cut to 2048, which softened the baked sign further); the other parts
+                  keep their sizes. clean.json parts.SM_Lifeblood_Body.textures records the px.
+  front subtitle  "PERK MACHINE", its two divider lines and the heartbeat under it were baked soft, wobbly and smudged
+                  (texel streaks, the line leaning ~0.6 degree). fix_front_subtitle(): the front sign band is rendered
+                  flat and orthographic (Workbench texture colour, 10000 px per source unit over FRONT_VIEW); the old
+                  elements are measured there (letter extent, per-letter cap height, word gap, line ends and height,
+                  heartbeat baseline / beat extent, the three colours) and masked (anything with green in it, the glass
+                  and its red glow have none, but only inside subtitle_seed(): the measured letters, lines and pulse,
+                  padded, so glass detail in the box - the grey stripe at the left frame, the white highlight and
+                  specks on the lower edge - stays; where a stripe crosses a divider line only the line's pink is cut;
+                  the baseline's faint red tails, which have no green, are followed out and cut along the baseline),
+                  inpainted (cv2 TELEA, then smoothed; the divider-line holes are filled column by column from the
+                  glass just above and below instead, so the stripe runs on through) and redrawn crisp: the text level in
+                  SUB_FONT (Arial Bold, best of ten Windows sans by overlap with the old letters) at the measured size,
+                  centre, ink extent and word gap (uniform tracking solved for both); the divider lines symmetric and
+                  level with their outward fade, the outer SUB_LINE_TAPER of each narrowing to a point; the heartbeat as a clean polyline (SUB_BEAT) on a tapered baseline;
+                  faint screen-blended halos (SUB_GLOW) for the lit-glass look. LIFEBLOOD and the heart are untouched
+                  (SUB_BOX stops 6 mm under LIFEBLOOD). Texels: every texel within 2.5 texels of a front-skin triangle
+                  whose position falls in SUB_BOX (nearest island wins, so seam padding is ours unless another island
+                  owns it) takes the new colour, sampled with a box filter over its own sheared footprint; texels where
+                  nothing changed keep their exact values. The old relief in the normal map sits off the old colour, so
+                  the normal map is replaced over the box (feathered) with the new elements embossed (SUB_RELIEF), in
+                  each texel's own tangent frame. ORM has no letter imprint and is left alone. Debug images
+                  front_sub_before.png / _after_view.png / _masks.png in the render folder; numbers in clean.json
+                  parts.SM_Lifeblood_Body.front_subtitle.
 """
 import json
 import math
@@ -95,9 +122,26 @@ SIDE_SKIN_X = 0.17                                            # outer side skin 
 SIDE_PX_PER_UNIT = 2000                                       # flat side renders: 1000 x 2000 px over y +-0.25, z 0..1
 SIDE_TEXT_BAND = {'z': (0.405, 0.485), 'y': (-0.045, 0.165)}  # the burgundy side panel around the garbled label
 SIDE_FONT = 'C:/Windows/Fonts/timesbd.ttf'
+# front subtitle (pass 3): flat front view of the sign band, measured and repainted, then pushed into the texels
+FRONT_PX_PER_UNIT = 10000                                     # 3600 x 1000 px over FRONT_VIEW (~4.7 px per 4K texel)
+FRONT_VIEW = {'x': (-0.18, 0.18), 'z': (0.54, 0.64)}
+SUB_BOX = {'x': (-0.1405, 0.1405), 'z': (0.5555, 0.6085)}    # under LIFEBLOOD (its bottom is z 0.6145), inside the frame
+SUB_FONT = 'C:/Windows/Fonts/arialbd.ttf'                     # best of 10 Windows sans against the old letters (IoU 0.53)
+SUB_LINE_T, SUB_PULSE_T = 0.0012, 0.0017                      # crisp stroke widths
+SUB_LINE_FADE = 0.30                                          # divider line alpha at its outer end (the old ones fade out)
+SUB_LINE_TAPER = 0.35                                         # outer part of each divider narrowing to a point (as the old)
+SUB_SEED_PAD = 0.003                                          # old-element search reaches this far past the measured extents
+SUB_LINE_BAND = 0.004                                         # ... and this far above / below each divider line's height
+SUB_PULSE_BAND = 0.0008                                       # half height of the old baseline's faint red tails (always cut)
+SUB_GLOW = {'text': (0.0009, 0.16, (0.95, 0.40, 0.34)),       # (sigma, strength, colour) of the screen-blended halos
+            'lines': (0.0013, 0.35, (1.0, 0.16, 0.10))}
+SUB_RELIEF = 0.00035                                          # emboss height of the new elements in the normal map
+SUB_NRM_FEATHER = 0.0015                                      # the normal map is replaced over the box, feathered inside
+# heartbeat, stroke centres: x across the measured beat, z as a fraction of the measured up / down excursion
+SUB_BEAT = ((0.0, 0.0), (0.08, 0.31), (0.225, -0.78), (0.38, 1.0), (0.55, -1.0), (0.76, 0.68), (0.91, -0.46), (1.0, 0.0))
 
 PARTS = [  # (object name, source file, texture size)
-    ('SM_Lifeblood_Body', 'lifeblood_machine', 2048),
+    ('SM_Lifeblood_Body', 'lifeblood_machine', 4096),        # full source size: the sign text needs every texel
     ('SM_Lifeblood_CoinPanel', 'coin_slot_panel', 1024),
     ('SM_Lifeblood_Tagline', 'first_aid_kit', 1024),
     ('SM_Lifeblood_Core', 'red_energy_core', 2048),
@@ -756,6 +800,520 @@ def fix_side_text(o, others):
     return rep_
 
 
+# ---- pass 3: front subtitle ("PERK MACHINE", divider lines, heartbeat) -------------------------------------------
+def measure_subtitle(V, P, XR, ZR):
+    """Find the old subtitle elements in the flat front view V (rows top-down, sRGB 0..1)."""
+    H, W = V.shape[:2]
+    xc = (XR[0] + XR[1]) / 2
+
+    def R(z): return int(round((ZR[1] - z) * P - 0.5))
+    def C(x): return int(round((x - xc) * P + W / 2 - 0.5))
+    def Xc(c): return (c + 0.5 - W / 2) / P + xc
+    def Zr(r): return ZR[1] - (r + 0.5) / P
+    lum, sat, G = V.mean(2), V.max(2) - V.min(2), V[..., 1]
+    m = {}
+    # letters: white, low saturation, between the divider lines; one column run per letter
+    r0, r1, c0, c1 = R(0.607), R(0.583), C(-0.093), C(0.093)
+    wh = (lum[r0:r1, c0:c1] > 0.45) & (sat[r0:r1, c0:c1] < 0.3)
+    on = wh.sum(0) > 2
+    segs, s = [], None
+    for c in range(len(on) + 1):
+        v = c < len(on) and on[c]
+        if v and s is None:
+            s = c
+        elif not v and s is not None:
+            if c - s > 0.0015 * P:
+                rr = np.where(wh[:, s:c].any(1))[0]
+                segs.append((Xc(c0 + s), Xc(c0 + c - 1), Zr(r0 + rr.max()), Zr(r0 + rr.min())))
+            s = None
+    gaps = [b[0] - a[1] for a, b in zip(segs[:-1], segs[1:])]
+    hgt = float(np.median([t[3] - t[2] for t in segs]))          # per letter: the old line is tilted
+    mid = float(np.median([(t[3] + t[2]) / 2 for t in segs]))
+    m['letters'] = len(segs)
+    m['text_x'] = [segs[0][0], segs[-1][1]]
+    m['baseline_z'], m['cap_top_z'] = mid - hgt / 2, mid + hgt / 2
+    m['word_gap'] = max(gaps)
+    m['old_tilt_z_right_minus_left'] = segs[-1][2] - segs[0][2]
+    core = (lum[r0:r1, c0:c1] > 0.7) & (sat[r0:r1, c0:c1] < 0.2)
+    m['text_rgb'] = np.median(V[r0:r1, c0:c1][core], 0).tolist()
+    # divider lines: pink rows either side of the text
+    m['lines'] = []
+    lr0, lr1 = R(0.599), R(0.591)
+    for sg in (-1, 1):
+        a_, b_ = sorted((C(sg * 0.090), C(sg * 0.140)))
+        g = G[lr0:lr1, a_:b_]
+        pk = g > 0.10
+        cols = np.where(pk.any(0))[0]
+        xs = sorted((Xc(a_ + cols.min()), Xc(a_ + cols.max())), key=abs)
+        gw = g * pk
+        m['lines'].append({'inner_x': xs[0], 'outer_x': xs[1],
+                           'z': Zr(float((gw * np.arange(lr0, lr1)[:, None]).sum() / gw.sum()))})
+    lp = np.zeros_like(G, bool)
+    lp[lr0:lr1] = True
+    lp[:, C(-0.09):C(0.09)] = False
+    lp[:, :C(SUB_BOX['x'][0])] = False
+    lp[:, C(SUB_BOX['x'][1]):] = False
+    sel = lp & (G > 0.10)
+    m['line_rgb'] = np.median(V[sel & (G > 0.85 * G[sel].max())], 0).tolist()
+    # heartbeat: tapered baseline with a beat in the middle
+    pr0, pr1, pc0, pc1 = R(0.5845), R(0.556), C(-0.065), C(0.065)
+    g = G[pr0:pr1, pc0:pc1]
+    pk = g > 0.15
+    rows = np.arange(pr0, pr1)
+    cz = []
+    for j in range(pk.shape[1]):
+        rr = np.where(pk[:, j])[0]
+        if len(rr):
+            gw = g[:, j] * pk[:, j]
+            cz.append((Xc(pc0 + j), Zr(pr0 + rr.max()), Zr(pr0 + rr.min()), Zr(float((gw * rows).sum() / gw.sum()))))
+    cz = np.array(cz)
+    thick = cz[:, 2] - cz[:, 1]
+    flat = thick < 2.5 * np.median(thick)
+    half = float(np.median(thick[flat])) / 2
+    m['pulse_base_z'] = float(np.median(cz[flat, 3]))
+    m['pulse_x'] = [float(cz[:, 0].min()), float(cz[:, 0].max())]
+    m['beat_x'] = [float(cz[~flat, 0].min()), float(cz[~flat, 0].max())]
+    m['beat_up'] = float(cz[:, 2].max() - m['pulse_base_z'] - half)
+    m['beat_down'] = float(m['pulse_base_z'] - cz[:, 1].min() - half)
+    sel = np.zeros_like(G, bool)
+    sel[pr0:pr1, pc0:pc1] = pk
+    m['pulse_rgb'] = np.median(V[sel & (G > 0.85 * G[sel].max())], 0).tolist()
+    # the baseline's faint red tails (no green) run on past the measured pulse: follow the red until it is glass
+    rb0, rb1 = R(m['pulse_base_z'] + 0.001), R(m['pulse_base_z'] - 0.001) + 1
+    red = V[rb0:rb1, :, 0].max(0)
+    m['pulse_tail_x'] = []
+    for sg, xe in ((-1, m['pulse_x'][0]), (1, m['pulse_x'][1])):
+        a_, b_ = sorted((C(sg * 0.075), C(sg * 0.090)))
+        bgr = float(np.median(V[rb0:rb1, a_:b_, 0]))
+        c = C(xe)
+        while abs(Xc(c + sg)) < 0.085 and red[c + sg] > bgr + 0.010:
+            c += sg
+        m['pulse_tail_x'].append(float(Xc(c)))
+    return m
+
+
+def subtitle_seed(m, P, XR, ZR, H, W):
+    """Where old elements may be (view grid): the letters, the two divider lines and the heartbeat with its baseline
+    tails, from the measurements and padded. Glass detail elsewhere in SUB_BOX (the grey stripe at the left frame, the
+    white highlight and specks on the lower edge) is never treated as old."""
+    xc = (XR[0] + XR[1]) / 2
+    seed = np.zeros((H, W), bool)
+
+    def rect(x0, x1, z0, z1):
+        seed[max(0, int((ZR[1] - z1) * P)):max(0, int((ZR[1] - z0) * P)),
+             max(0, int((x0 - xc) * P + W / 2)):max(0, int((x1 - xc) * P + W / 2))] = True
+    p = SUB_SEED_PAD
+    rect(m['text_x'][0] - p, m['text_x'][1] + p, m['baseline_z'] - p, m['cap_top_z'] + p)
+    for l_ in m['lines']:
+        a_, b_ = sorted((l_['inner_x'], l_['outer_x']))
+        rect(a_ - p, b_ + p, l_['z'] - SUB_LINE_BAND, l_['z'] + SUB_LINE_BAND)
+    x0, x1 = min(m['pulse_x'][0], m['pulse_tail_x'][0]), max(m['pulse_x'][1], m['pulse_tail_x'][1])
+    rect(x0 - p, x1 + p, m['pulse_base_z'] - m['beat_down'] - p, m['pulse_base_z'] + m['beat_up'] + p)
+    return seed
+
+
+def draw_subtitle(m, P, XR, ZR, W, H, S=2):
+    """New crisp elements as alpha layers on the view grid (drawn at S x, box-filtered down): text, lines + pulse."""
+    from PIL import Image, ImageDraw, ImageFont
+    xc = (XR[0] + XR[1]) / 2
+
+    def cx(x): return ((x - xc) * P + W / 2) * S
+    def rz(z): return (ZR[1] - z) * P * S
+    text_l = Image.new('L', (W * S, H * S), 0)
+    lp_l = Image.new('L', (W * S, H * S), 0)
+    # text: level, measured cap height and ink extent, uniform tracking + word space solved for extent and word gap
+    cap = m['cap_top_z'] - m['baseline_z']
+    f = ImageFont.truetype(SUB_FONT, 600)
+    g = {}
+    for ch in set('PERKMACHINE'):
+        im = Image.new('L', (1200, 1200), 0)
+        ImageDraw.Draw(im).text((200, 200), ch, font=f, fill=255)
+        g[ch] = (im, im.getbbox(), f.getlength(ch))
+    hb = g['H'][1]
+    k = cap / (hb[3] - hb[1])
+    words = ('PERK', 'MACHINE')
+
+    def ink(t, s):
+        pen, res = 0.0, []
+        for wi, wd in enumerate(words):
+            if wi:
+                pen += s
+            for ch in wd:
+                im, bb, adv = g[ch]
+                res.append((ch, pen + (bb[0] - 200) * k, pen + (bb[2] - 200) * k))
+                pen += adv * k + t
+        return res
+
+    def meas(t, s):
+        r = ink(t, s)
+        return np.array([r[-1][2] - r[0][1], r[len(words[0])][1] - r[len(words[0]) - 1][2]])
+    b0 = meas(0, 0)
+    A = np.c_[meas(1e-3, 0) - b0, meas(0, 1e-3) - b0] / 1e-3
+    t, s = np.linalg.solve(A, np.array([m['text_x'][1] - m['text_x'][0], m['word_gap']]) - b0)
+    res = ink(t, s)
+    off = (m['text_x'][0] + m['text_x'][1]) / 2 - (res[0][1] + res[-1][2]) / 2
+    for ch, a, _ in res:
+        im, bb, _ = g[ch]
+        sz = (max(1, int(round((bb[2] - bb[0]) * k * P * S))), max(1, int(round((bb[3] - bb[1]) * k * P * S))))
+        gl = im.crop(bb).resize(sz, Image.LANCZOS)
+        ztop = m['baseline_z'] + cap - (bb[1] - hb[1]) * k
+        text_l.paste(gl, (int(round(cx(a + off))), int(round(rz(ztop)))), gl)
+    lay = {'font': SUB_FONT.split('/')[-1], 'tracking_of_cap': round(float(t / cap), 4),
+           'space_of_cap': round(float(s / cap), 4), 'cap_height': round(cap, 5), 'baseline_z': round(m['baseline_z'], 5),
+           'text_x': [round(float(res[0][1] + off), 5), round(float(res[-1][2] + off), 5)]}
+    # divider lines: level at the mean old height, symmetric (mean inner / outer ends), fading outwards, the outer
+    # SUB_LINE_TAPER of each narrowing to a point like the old ones (drawn at 4x for the thin tip)
+    zl = float(np.mean([l_['z'] for l_ in m['lines']]))
+    xin = float(np.mean([abs(l_['inner_x']) for l_ in m['lines']]))
+    xout = float(np.mean([abs(l_['outer_x']) for l_ in m['lines']]))
+    n = 200
+    top = int(rz(zl + SUB_LINE_T)) - 2                         # a strip around the lines only
+    hs = int(rz(zl - SUB_LINE_T)) + 2 - top
+    ln_l = Image.new('L', (W * S * 4, hs * 4), 0)
+    d4 = ImageDraw.Draw(ln_l)
+
+    def hw(u): return SUB_LINE_T / 2 * min(1.0, (1 - u) / SUB_LINE_TAPER)
+
+    def q(x, z): return (cx(x) * 4, (rz(z) - top) * 4)
+    for sg in (-1, 1):
+        for i in range(n):
+            u0, u1 = i / n, (i + 1) / n
+            a = 1 - (1 - SUB_LINE_FADE) * ((u0 + u1) / 2) ** 1.3
+            xa, xb = sg * (xin + (xout - xin) * u0), sg * (xin + (xout - xin) * u1)
+            d4.polygon([q(xa, zl + hw(u0)), q(xb, zl + hw(u1)), q(xb, zl - hw(u1)), q(xa, zl - hw(u0))],
+                       fill=int(255 * a))
+    lp_l.paste(ln_l.resize((W * S, hs), Image.BOX), (0, top))
+    d = ImageDraw.Draw(lp_l)
+    lay.update({'line_z': round(zl, 5), 'line_inner_x': round(xin, 5), 'line_outer_x': round(xout, 5),
+                'line_width': SUB_LINE_T, 'line_taper': SUB_LINE_TAPER})
+    # heartbeat: baseline fading out from the beat, beat as one polyline with round joins
+    zb = m['pulse_base_z']
+    bx0, bx1 = m['beat_x']
+    pc = (bx0 + bx1) / 2
+    hl = max(pc - m['pulse_x'][0], m['pulse_x'][1] - pc) + 0.004
+    for i in range(n):
+        u0, u1 = i / n, (i + 1) / n
+        a = (1 - (u0 + u1) / 2) ** 1.5
+        for sg in (-1, 1):
+            xa, xb = pc + sg * (bx1 - pc + (hl - (bx1 - pc)) * u0), pc + sg * (bx1 - pc + (hl - (bx1 - pc)) * u1)
+            d.rectangle([cx(min(xa, xb)), rz(zb + SUB_PULSE_T / 2), cx(max(xa, xb)), rz(zb - SUB_PULSE_T / 2) - 1],
+                        fill=int(255 * a))
+    pts = [(cx(bx0 + u * (bx1 - bx0)), rz(zb + (v * m['beat_up'] if v > 0 else v * m['beat_down']))) for u, v in SUB_BEAT]
+    pw = SUB_PULSE_T * P * S
+    d.line(pts, fill=255, width=int(round(pw)), joint='curve')
+    for p in pts:
+        d.ellipse([p[0] - pw / 2, p[1] - pw / 2, p[0] + pw / 2, p[1] + pw / 2], fill=255)
+    lay.update({'pulse_z': round(zb, 5), 'beat_x': [round(bx0, 5), round(bx1, 5)], 'pulse_half_len': round(hl, 5),
+                'beat_up': round(m['beat_up'], 5), 'beat_down': round(m['beat_down'], 5), 'pulse_width': SUB_PULSE_T})
+    text = np.asarray(text_l.resize((W, H), Image.BOX)).astype(np.float32) / 255
+    lp = np.asarray(lp_l.resize((W, H), Image.BOX)).astype(np.float32) / 255
+    return text, lp, lay
+
+
+def subtitle_composite(bg, text, lp, glow, lp_rgb, text_rgb):
+    out = 1 - (1 - bg) * (1 - glow)
+    out = out * (1 - lp[..., None]) + lp_rgb * lp[..., None]
+    out = out * (1 - text[..., None]) + text_rgb * text[..., None]
+    return np.clip(out, 0, 1)
+
+
+def subtitle_view(V, P, XR, ZR):
+    """In the flat front view: old-element mask, inpainted glass behind them, the new layers and halos."""
+    import cv2
+    H, W = V.shape[:2]
+    xc = (XR[0] + XR[1]) / 2
+    m = measure_subtitle(V, P, XR, ZR)
+    text, lp, lay = draw_subtitle(m, P, XR, ZR, W, H)
+    box = np.zeros((H, W), np.float32)
+    r0, r1 = int((ZR[1] - SUB_BOX['z'][1]) * P), int((ZR[1] - SUB_BOX['z'][0]) * P)
+    c0, c1 = int((SUB_BOX['x'][0] - xc) * P + W / 2), int((SUB_BOX['x'][1] - xc) * P + W / 2)
+    box[r0:r1, c0:c1] = 1
+    lum, sat, G = V.mean(2), V.max(2) - V.min(2), V[..., 1]
+    Xs = (np.arange(W) + 0.5 - W / 2) / P + xc
+    Zs = ZR[1] - (np.arange(H) + 0.5) / P
+    seed = subtitle_seed(m, P, XR, ZR, H, W)
+    # old elements: anything with green in it (the glass and its red glow have none) or light and unsaturated, but only
+    # where the measured elements are (seed)
+    old = ((G > 0.03) | ((lum > 0.25) & (sat < 0.4))) & (box > 0) & seed
+    # grey glass stripes (columns that are greenish down the whole box, off the line rows) cross the divider lines'
+    # outer ends: there only the line's own pink counts as old
+    zl = float(np.mean([l_['z'] for l_ in m['lines']]))
+    off_line = np.abs(Zs - zl) > SUB_LINE_BAND
+    rows = np.arange(H)[(box[:, c0] > 0) & off_line]
+    stripe = (np.median(G[rows], 0) > 0.03) & (np.abs(Xs) > 0.10)
+    stripe = cv2.dilate(stripe.astype(np.uint8)[None], np.ones((1, 7), np.uint8))[0] > 0
+    pink = (G > 0.10) | (V[..., 0] - G > 0.05)
+    old &= ~stripe[None, :] | pink
+    # the baseline's faint red tails have no green: always cut along the baseline out to where the red ends
+    tz = (np.abs(Zs - m['pulse_base_z']) < SUB_PULSE_BAND)[:, None]
+    tx = ((Xs > m['pulse_tail_x'][0] - 0.0005) & (Xs < m['pulse_tail_x'][1] + 0.0005))[None, :]
+    old |= tz & tx & (box > 0)
+    old = cv2.morphologyEx(old.astype(np.uint8), cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    hole = cv2.dilate(old, np.ones((11, 11), np.uint8))
+    hole[box == 0] = 0
+    pad = 40
+    sl = (slice(r0 - pad, r1 + pad), slice(c0 - pad, c1 + pad))
+    clean = V.copy()
+    clean[sl] = cv2.inpaint((V[sl] * 255 + 0.5).astype(np.uint8), hole[sl] * 255, 15,
+                            cv2.INPAINT_TELEA).astype(np.float32) / 255
+    # TELEA leaves blotches where the old letters' dark shadow fed it: smooth the filled part
+    soft = cv2.GaussianBlur(cv2.dilate(hole, np.ones((7, 7), np.uint8)).astype(np.float32), (0, 0), 3)[..., None]
+    clean = clean * (1 - soft) + cv2.GaussianBlur(clean, (0, 0), 0.0012 * P) * soft
+    # the divider lines are horizontal over vertically-running glass (the stripe): fill their holes column by column
+    # between the glass just above and below instead, and keep the untouched glass there exact
+    nfill = 0
+    for l_ in m['lines']:
+        a_, b_ = sorted((l_['inner_x'], l_['outer_x']))
+        ca = max(c0, int((max(a_ - SUB_SEED_PAD, -0.5) - xc) * P + W / 2))
+        cb = min(c1, int((b_ + SUB_SEED_PAD - xc) * P + W / 2))
+        ra = max(r0, int((ZR[1] - l_['z'] - SUB_LINE_BAND - 0.001) * P))
+        rb = min(r1, int((ZR[1] - l_['z'] + SUB_LINE_BAND + 0.001) * P))
+        for c in range(ca, cb):
+            if abs(Xs[c]) < m['text_x'][1] + SUB_SEED_PAD:
+                continue                                       # the letters' hole, TELEA's
+            hr = np.nonzero(hole[ra:rb, c])[0]
+            if len(hr) and (hr[0] < 3 or hr[-1] > rb - ra - 4):
+                continue                                       # hole runs off the band: leave it to TELEA
+            clean[ra:rb, c] = V[ra:rb, c]
+            if not len(hr):
+                continue
+            u, v = ra + hr[0] - 1, ra + hr[-1] + 1
+            t = ((np.arange(u + 1, v) - u) / (v - u))[:, None]
+            clean[u + 1:v, c] = V[u - 2:u + 1, c].mean(0) * (1 - t) + V[v:v + 3, c].mean(0) * t
+            nfill += 1
+    lay.update({'stripe_columns': int(stripe[c0:c1].sum()), 'line_fill_columns': nfill,
+                'pulse_tail_x': [round(v_, 5) for v_ in m['pulse_tail_x']]})
+    oldm = cv2.GaussianBlur(cv2.dilate(hole, np.ones((5, 5), np.uint8)).astype(np.float32), (0, 0), 2.0) * box
+    (gt, gts, gtc), (gl, gls, glc) = SUB_GLOW['text'], SUB_GLOW['lines']
+    glow = np.clip(cv2.GaussianBlur(text, (0, 0), gt * P)[..., None] * gts * np.array(gtc, np.float32) +
+                   cv2.GaussianBlur(lp, (0, 0), gl * P)[..., None] * gls * np.array(glc, np.float32), 0, 1)
+    # the lines are dimmer and pinker than the pulse in the old sign: colour the line/pulse layer by height
+    zz = ZR[1] - (np.arange(H) + 0.5) / P
+    is_pulse = (zz < (lay['line_z'] + lay['pulse_z']) / 2).astype(np.float32)[:, None, None]
+    lp_rgb = (np.array(m['pulse_rgb'], np.float32) * is_pulse + np.array(m['line_rgb'], np.float32) * (1 - is_pulse))
+    lp_rgb = np.broadcast_to(lp_rgb, (H, W, 3)).astype(np.float32)
+    L = {'text': text, 'lp': lp, 'glow': glow.astype(np.float32), 'lp_rgb': lp_rgb,
+         'text_rgb': np.array(m['text_rgb'], np.float32)}
+    return m, lay, clean, oldm, hole, L
+
+
+def front_texel_map(o, w, h, XR, ZR):
+    """Texel -> triangle map for the front-most skin in the view (any normal: Tripo folds slivers into the glass).
+    Every face competes for the texels within 2.5 texels of its UV triangle, nearest edge wins, so texels just outside
+    our islands are ours (seam padding) unless they belong to another island. Returns tid (-1 none, -2 foreign, else a
+    row of tris: uv0, inverse UV jacobian, P0, dP/du, dP/dv, face normal) and the candidate face count."""
+    import cv2
+    bm = bmesh.new()
+    bm.from_mesh(o.data)
+    tree = BVHTree.FromBMesh(bm)
+    uvl = bm.loops.layers.uv[0]
+    GS = 0.0005           # front-most depth on a 0.5 mm grid, min over 3 x 3 so a ray through a crack does not count
+    gx = np.arange(XR[0] - 0.012, XR[1] + 0.012, GS)
+    gz = np.arange(ZR[0] - 0.012, ZR[1] + 0.012, GS)
+    yf = np.full((len(gz), len(gx)), 9.0, np.float32)
+    for j, zz in enumerate(gz):
+        for i, xx in enumerate(gx):
+            hh = tree.ray_cast(Vector((xx, -2, zz)), Vector((0, 1, 0)))
+            if hh[0] is not None:
+                yf[j, i] = hh[0].y
+    yf = cv2.erode(yf, np.ones((3, 3), np.uint8))
+    best = np.full((h, w), -1e9, np.float32)
+    tid = np.full((h, w), -1, np.int32)
+    tris, ncand = [], 0
+    for f in bm.faces:
+        c = f.calc_center_median()
+        cand = False
+        if XR[0] - 0.01 < c.x < XR[1] + 0.01 and ZR[0] - 0.01 < c.z < ZR[1] + 0.01:
+            cand = c.y < yf[int(round((c.z - gz[0]) / GS)), int(round((c.x - gx[0]) / GS))] + 0.002
+        ncand += cand
+        ls = list(f.loops)
+        for k in range(1, len(ls) - 1):
+            tri = (ls[0], ls[k], ls[k + 1])
+            uv = np.array([[l_[uvl].uv.x * w - 0.5, l_[uvl].uv.y * h - 0.5] for l_ in tri])
+            d = np.array([[uv[1, 0] - uv[0, 0], uv[2, 0] - uv[0, 0]], [uv[1, 1] - uv[0, 1], uv[2, 1] - uv[0, 1]]])
+            if abs(np.linalg.det(d)) < 1e-9:
+                continue
+            di = np.linalg.inv(d)
+            if cand:
+                co = np.array([l_.vert.co[:] for l_ in tri])
+                J = np.c_[co[1] - co[0], co[2] - co[0]] @ di
+                ti = len(tris)
+                tris.append(np.r_[uv[0], di.ravel(), co[0], J[:, 0], J[:, 1], np.array(f.normal[:])])
+            else:
+                ti = -2
+            c0, c1 = max(int(math.floor(uv[:, 0].min() - 3)), 0), min(int(math.ceil(uv[:, 0].max() + 3)), w - 1)
+            r0, r1 = max(int(math.floor(uv[:, 1].min() - 3)), 0), min(int(math.ceil(uv[:, 1].max() + 3)), h - 1)
+            if c1 < c0 or r1 < r0:
+                continue
+            cc, rr = np.meshgrid(np.arange(c0, c1 + 1), np.arange(r0, r1 + 1))
+            px, py = cc - uv[0, 0], rr - uv[0, 1]
+            b1 = di[0, 0] * px + di[0, 1] * py
+            b2 = di[1, 0] * px + di[1, 1] * py
+            g0 = math.hypot(di[0, 0] + di[1, 0], di[0, 1] + di[1, 1])
+            sd = np.minimum(np.minimum((1 - b1 - b2) / g0, b1 / math.hypot(di[0, 0], di[0, 1])),
+                            b2 / math.hypot(di[1, 0], di[1, 1]))          # signed distance to the triangle, texels
+            sub = best[r0:r1 + 1, c0:c1 + 1]
+            ok = (sd > sub) & (sd > -2.5)
+            sub[ok] = sd[ok]
+            tid[r0:r1 + 1, c0:c1 + 1][ok] = ti
+    bm.free()
+    return tid, np.array(tris), ncand
+
+
+def subtitle_texels(V, P, XR, ZR, base_px, nrm_px, tid, tris, view):
+    """Push the view-space repaint into the texels whose front-skin position is in SUB_BOX (arrays bottom-up)."""
+    import cv2
+    m, lay, clean, oldm, hole, L = view
+    H, W = V.shape[:2]
+    xc = (XR[0] + XR[1]) / 2
+    rr, cc = np.nonzero(tid >= 0)
+    T = tris[tid[rr, cc]]
+    du, dv = cc - T[:, 0], rr - T[:, 1]
+    pos = T[:, 6:9] + T[:, 9:12] * du[:, None] + T[:, 12:15] * dv[:, None]
+    x, z = pos[:, 0], pos[:, 2]
+    pad = 0.003
+    inb = ((x > SUB_BOX['x'][0] - pad) & (x < SUB_BOX['x'][1] + pad) &
+           (z > SUB_BOX['z'][0] - pad) & (z < SUB_BOX['z'][1] + pad))
+    rr, cc, T, x, z = rr[inb], cc[inb], T[inb], x[inb], z[inb]
+    nn = len(x)
+    padn = -nn % 1024              # cv2.remap wants maps under 32767 per side
+    vc = (x - xc) * P + W / 2 - 0.5
+    vr = (ZR[1] - z) * P - 0.5
+
+    def remap(img, mc, mr):
+        mc = np.r_[mc, np.zeros(padn)].astype(np.float32).reshape(-1, 1024)
+        mr = np.r_[mr, np.zeros(padn)].astype(np.float32).reshape(-1, 1024)
+        o_ = cv2.remap(img, mc, mr, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        return o_.reshape(-1, 1 if o_.ndim == 2 else o_.shape[2])[:nn]
+    tpu = 1.0 / float(np.median(np.linalg.norm(T[:, 9:12], axis=1)))     # texels per unit here
+
+    def samp(img, blur=False):
+        if blur:
+            img = cv2.GaussianBlur(img, (0, 0), 0.45 * P / tpu)
+        return remap(img, vc, vr)
+
+    def samp_fp(img, k=4):
+        """Box filter over the texel's own parallelogram (the islands are sheared up to ~40 degrees)."""
+        acc = 0
+        for i in range(k):
+            for j in range(k):
+                p_ = T[:, 9:12] * ((i + 0.5) / k - 0.5) + T[:, 12:15] * ((j + 0.5) / k - 0.5)
+                acc = acc + remap(img, vc + p_[:, 0] * P, vr - p_[:, 2] * P)
+        return acc / (k * k)
+    t0 = base_px[rr, cc, :3]
+    om = samp(oldm, True)[:, 0]
+    vb = samp(V)
+    plain = (om < 1e-3) & (samp(hole.astype(np.float32), True)[:, 0] < 1e-3)
+    off = np.median(t0[plain] - vb[plain], 0) if plain.any() else np.zeros(3, np.float32)
+    bg = t0 * (1 - om[:, None]) + (samp(clean) + off) * om[:, None]
+    new = subtitle_composite(bg, samp_fp(L['text'])[:, 0], samp_fp(L['lp'])[:, 0], samp(L['glow'], True),
+                             samp(L['lp_rgb']), L['text_rgb'])
+    changed = int((np.abs(new - t0).max(1) > 1 / 512).sum())
+    base_px[rr, cc, :3] = new
+    # normal map: replaced over the box (the old relief is offset from the old colour), the new elements embossed:
+    # surface P + h N has normal N - grad h; written in each texel's own tangent frame (dP/du, dP/dv, N)
+    hgt = cv2.GaussianBlur(np.maximum(L['text'], L['lp']), (0, 0), 0.6 * P / tpu)
+    hx = cv2.Sobel(hgt, cv2.CV_32F, 1, 0, ksize=3) / 8 * P * SUB_RELIEF
+    hz = -cv2.Sobel(hgt, cv2.CV_32F, 0, 1, ksize=3) / 8 * P * SUB_RELIEF
+    N = T[:, 15:18] / np.linalg.norm(T[:, 15:18], axis=1, keepdims=True)
+    n_obj = N.copy()
+    n_obj[:, 0] -= samp(hx)[:, 0]
+    n_obj[:, 2] -= samp(hz)[:, 0]
+    n_obj /= np.linalg.norm(n_obj, axis=1, keepdims=True)
+    Tu = T[:, 9:12] - N * (T[:, 9:12] * N).sum(1, keepdims=True)
+    Tu /= np.linalg.norm(Tu, axis=1, keepdims=True)
+    Bv = np.cross(N, Tu)
+    Bv *= np.sign((Bv * T[:, 12:15]).sum(1, keepdims=True))
+    new_n = np.c_[(n_obj * Tu).sum(1), (n_obj * Bv).sum(1), (n_obj * N).sum(1)] * 0.5 + 0.5
+    front = N[:, 1] < -0.9
+    new_n[~front] = (0.5, 0.5, 1.0)                    # folded slivers in the glass: flat
+    nm = np.clip(np.minimum(np.minimum(x - SUB_BOX['x'][0], SUB_BOX['x'][1] - x),
+                            np.minimum(z - SUB_BOX['z'][0], SUB_BOX['z'][1] - z)) / SUB_NRM_FEATHER, 0, 1)
+    nm = nm * nm * (3 - 2 * nm)
+    nm = np.where(front | (np.abs(x) < SUB_BOX['x'][1] - 0.004), nm, 0.0)     # tilted faces at the frame keep theirs
+    nchanged = 0
+    if nrm_px is not None:
+        n0 = nrm_px[rr, cc, :3]
+        nrm_px[rr, cc, :3] = n0 * (1 - nm[:, None]) + new_n * nm[:, None]
+        nchanged = int((nm > 1e-3).sum())
+    return {'view_to_texture_offset': [round(float(v), 4) for v in off], 'texels_per_unit': round(tpu, 1),
+            'texels_in_box': nn, 'texels_changed': changed, 'normal_texels_replaced': nchanged}
+
+
+def fix_front_subtitle(o, others):
+    """Repaint the soft, smudged front subtitle (docstring, pass 3). Source units, after the side labels."""
+    from PIL import Image
+    sc = bpy.context.scene
+    hidden = [(x, x.hide_render) for x in others]
+    for x, _ in hidden:
+        x.hide_render = True
+    eng, vt = sc.render.engine, sc.view_settings.view_transform
+    sc.render.engine = 'BLENDER_WORKBENCH'
+    sc.display.shading.light = 'FLAT'
+    sc.display.shading.color_type = 'TEXTURE'
+    sc.display.shading.show_cavity = False
+    sc.display.shading.show_shadows = False
+    sc.view_settings.view_transform = 'Standard'
+    sc.world = sc.world or bpy.data.worlds.new('w')
+    sc.world.color = (1, 0, 1)
+    P, XR, ZR = FRONT_PX_PER_UNIT, FRONT_VIEW['x'], FRONT_VIEW['z']
+    W, H = int(round((XR[1] - XR[0]) * P)), int(round((ZR[1] - ZR[0]) * P))
+    cd = bpy.data.cameras.new('front_cam')
+    cd.type, cd.ortho_scale = 'ORTHO', W / P
+    cam = bpy.data.objects.new('front_cam', cd)
+    sc.collection.objects.link(cam)
+    sc.camera = cam
+    cam.location = ((XR[0] + XR[1]) / 2, -2, (ZR[0] + ZR[1]) / 2)
+    cam.rotation_euler = (math.pi / 2, 0, 0)
+    sc.render.resolution_x, sc.render.resolution_y = W, H
+    sc.render.resolution_percentage = 100
+    sc.render.filepath = OUT + 'front_sub_before.png'
+    bpy.ops.render.render(write_still=True)
+    bpy.data.objects.remove(cam)
+    bpy.data.cameras.remove(cd)
+    sc.render.engine, sc.view_settings.view_transform = eng, vt
+    for x, hr in hidden:
+        x.hide_render = hr
+    V = np.asarray(Image.open(OUT + 'front_sub_before.png').convert('RGB')).astype(np.float32) / 255
+    view = subtitle_view(V, P, XR, ZR)
+    m, lay, clean, oldm, hole, L = view
+    after = subtitle_composite(clean, L['text'], L['lp'], L['glow'], L['lp_rgb'], L['text_rgb'])
+    Image.fromarray((after * 255 + 0.5).astype(np.uint8)).save(OUT + 'front_sub_after_view.png')
+    Image.fromarray((np.dstack([oldm, L['text'], L['lp']]) * 255).astype(np.uint8)).save(OUT + 'front_sub_masks.png')
+    mat = o.material_slots[0].material
+    texs = [n_.image for n_ in mat.node_tree.nodes if n_.type == 'TEX_IMAGE' and n_.image]
+    base = next(i for i in texs if i.name.endswith('_BaseColor'))
+    nrmi = next((i for i in texs if i.name.endswith('_Normal')), None)
+    w, h = base.size
+    tid, tris, ncand = front_texel_map(o, w, h, XR, ZR)
+    a = np.empty(w * h * 4, np.float32)
+    base.pixels.foreach_get(a)
+    a = a.reshape(h, w, 4)
+    b = None
+    if nrmi is not None and tuple(nrmi.size) == (w, h):
+        b = np.empty(w * h * 4, np.float32)
+        nrmi.pixels.foreach_get(b)
+        b = b.reshape(h, w, 4)
+    rep = subtitle_texels(V, P, XR, ZR, a, b, tid, tris, view)
+    base.pixels.foreach_set(a.ravel())
+    base.update()
+    if b is not None:
+        nrmi.pixels.foreach_set(b.ravel())
+        nrmi.update()
+
+    def rnd(v):
+        if isinstance(v, dict):
+            return {k_: rnd(x_) for k_, x_ in v.items()}
+        if isinstance(v, (list, tuple)):
+            return [rnd(x_) for x_ in v]
+        return round(float(v), 5) if isinstance(v, (float, np.floating)) else v
+    rep.update({'measured_old': rnd(m), 'new_layout': rnd(lay), 'front_skin_faces': int(ncand),
+                'texture_px': [w, h], 'box_yz': SUB_BOX, 'glow': SUB_GLOW, 'relief': SUB_RELIEF,
+                'normal_replaced': b is not None,
+                'files': {k_: OUT + 'front_sub_%s.png' % k_ for k_ in ('before', 'after_view', 'masks')}})
+    return rep
+
+
 def overlap_report(a, b):
     pairs = bvh_of(a).overlap(bvh_of(b))
     return len(pairs)
@@ -806,7 +1364,8 @@ def export_glb(objs, path):
 # ---- build ----------------------------------------------------------------------------------------------------------
 bpy.ops.wm.read_homefile(use_empty=True)
 K_EST = TARGET_HEIGHT / 0.98
-rec = {'script': 'Scripts/Blender/AssembleLifeblood.py', 'date': '2026-10-31', 'parts': {}}
+rec = {'script': 'Scripts/Blender/AssembleLifeblood.py', 'date': '2026-10-31',
+       'pass3': '2026-11-01: body textures at 4096, front subtitle repainted', 'parts': {}}
 objs = {}
 for name, fn, size in PARTS:
     o, nsrc = import_part(fn)
@@ -825,6 +1384,9 @@ body = objs['SM_Lifeblood_Body']
 rec['parts']['SM_Lifeblood_Body']['rods'] = remove_rods(body)
 rec['parts']['SM_Lifeblood_Body']['side_labels'] = fix_side_text(body, [o for o in objs.values() if o is not body])
 print('SIDE_LABELS', rec['parts']['SM_Lifeblood_Body']['side_labels'], flush=True)
+rec['parts']['SM_Lifeblood_Body']['front_subtitle'] = fix_front_subtitle(body, [o for o in objs.values() if o is not body])
+print('FRONT_SUBTITLE', {k_: v for k_, v in rec['parts']['SM_Lifeblood_Body']['front_subtitle'].items()
+                         if k_ not in ('measured_old', 'files')}, flush=True)
 lo, hi = vbounds(body)
 K = TARGET_HEIGHT / (hi.z - lo.z)
 K_EST = K

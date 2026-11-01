@@ -411,7 +411,8 @@ def import_part(machine, part):
             target = mesh
     sm = u.load_asset(target)
     for r, t in maps.items():
-        fix_texture(t, r)
+        # AFS 2026-11-01: the Lifeblood body carries the repainted PERK MACHINE subtitle at 4096; the rest stay 2048
+        fix_texture(t, r, 4096 if (machine, part) == ('Lifeblood', 'Body') else 2048)
         rec['textures'][r] = t.get_path_name()
     box = sm.get_bounding_box()
     rec.update({'mesh': target, 'tris': sm.get_num_triangles(0),

@@ -60,3 +60,7 @@ tell which is newer.
 - **Controller problems are Steam first.** The DualSense reaches Unreal only through Steam Input; grep `AFS.log` for
   `RegisterDevice` before touching input code.
 - **Docs record decisions with dates.** When the owner reverses something, the newer line wins and says so.
+- **Walking and movement tests run in a test-pad map, not NYC Survival** (owner, 2026-11-01). NYC Survival is the
+  product; proofs drive Vexa on a test pad (NYC Exploration first, the desert PostApo map for comparison), turning the
+  Life Engine on there by exec when the test needs it. The 2026-11-01 walking fix still measures NYC Survival once,
+  because that is where the owner saw the bug.
