@@ -84,3 +84,5 @@ Things that were expensive to find out. Newest first within each group.
 - The Feral pack is an all-fours feral, not a belly crawler; the Kid is a feral by owner decision.
 - Character bodies were not the problem for the SpaceSurvival pole routine; the routine's retargeting was (owner,
   2026-10-31). Do not solve a motion problem with a new mesh.
+- Headless stills taken right after a map loads show low texture mips (the Headhunter sign was unreadable, 2026-11-01).
+  Capture scripts set r.Streaming.FullyLoadUsedTextures 1 before shooting; judge texture quality only from such stills.

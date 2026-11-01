@@ -30,7 +30,9 @@ Severity: **G** game-breaking, **M** major (hurts play), **m** minor.
 | Vendor swing and death timers ignore the per-zombie animation-rate roll (up to 9 % early or late) | m |
 | Zombies sink into the ground in PostApo (`AHoverZombie`, recording 0:24) | m |
 | Small-gun muzzle flash too hot within 20 cm (EM21, EM08) | m |
-| First-person arms fill the view (`HoverView` is Exec-only; needs an FP capture to tune offset and FOV) | m |
+| Owner 2026-11-01: the muzzle flash blinds the scope when firing, and it is still the blue sci-fi flash, not the warm per-rig flash from 2026-10-31 (that override only covers the 4 rigged guns; which gun and map to confirm) | M |
+| Owner 2026-11-01: no ambient sound (requested). The crowd ambience by alive count was wired 2026-10-29 for NYC Survival rounds only; no city/weather ambience is wired anywhere (the weather SFX loops pack is in the project) | M |
+| First-person arms fill the view; owner 2026-11-01: the left arm still looks very wrong in first person (`HoverView` is Exec-only; needs an FP capture to tune offset and FOV) | m |
 | Brute, Kid horde round and bosses not yet seen in a rendered run with the new roster | m |
 
 ## Priority to-do (ranked; owner confirmed the direction 2026-10-31)
@@ -50,6 +52,8 @@ While the owner cannot playtest, in-between work chips away at the top items tha
    `DONE.md` #13; the other four await the owner's Tripo parts), placement in NYC, and how buying works. Then the rest of the loop: doors and zones, the power objective, wall buys, vests, the
    upgrade machine (Pack-a-Punch equivalent, original name), the downed state (comes first for Life Blood: crawl
    and shoot while down; solo without the perk ends the run), the HUD.
+1b. **Muzzle flash and ambient sound** (owner placed it right after perks, 2026-11-01): the warm flash on every gun
+   the player holds (no scope whiteout), and city/weather ambience plus a check that the crowd ambience plays in rounds.
 2. Owner playtest of everything in `DONE.md` (whenever the owner can); the results re-rank this list.
 3. Life Engine movement feel: measured 2026-10-31 (`Scripts/ProveLifeEngineCompare.py`); waiting on the owner's
    test to choose jump height and air control, then wall slide and wall runs.
@@ -66,7 +70,7 @@ While the owner cannot playtest, in-between work chips away at the top items tha
 9. ZESP in-game settings menu in the pause menu: the owner says what it should expose.
 10. Vehicles: drivable Doomsday pickup (owner adds the pack to the project); gas can if rides need fuel.
 11. Dead-body poses: corpse dressing and dormant ambush zombies that rise (owner adds the Unreal Engine format).
-12. Visuals: rifle at 4K (owner re-exports GUN.spp at 4096), first-person arms, small-gun flash.
+12. Visuals: rifle at 4K (the 4096 source is in; the import still caps it at 2048, see the 2026-11-01 texture audit), first-person arms (left arm), small-gun flash.
 
 **Later (tabled ideas, not designed)**
 - Tacticals: Silk spider drone with modes (mini-nuke hunter, electrical defence field, healing pulse waves for nearby

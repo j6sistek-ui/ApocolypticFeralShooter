@@ -77,6 +77,15 @@ Receipts and stills live under `D:\AFS_Comparisons\` (local, not in git).
   - Animation runs in the editor without Play (life 0 to 6 s).
   - Stills in `D:/AFS_Comparisons/PowerUps_20261031/Live/stills_fix/`.
   - The decided smoke puff is off (it could not read on the black casing).
+- [ ] **15. Headhunter perk machine in NYC Exploration** (2026-11-01). Your Painter textures (Unreal export, full 4K)
+  on the 12 parts, a glass tube with live blood: a deep pool on the red disc, runs and spatter on the inside of the
+  glass, drops into the pool with splash rings, a "headshot" spatter every 12-20 s, slow bubbles, a red glow. Third
+  machine, about 3.6 m right of the Bioreactor and 2 m forward of the row. Select `AFS Perk Trial Headhunter TubeFX`
+  (folder `AFS_PerkMachines`); its Details panel fires a headshot or a drop on demand.
+  *AI:* build succeeded; materials compile; Lifeblood/Bioreactor unchanged after save and reload; stills with full
+  textures forced in `D:/AFS_Comparisons/PerkMachines_20261101/Headhunter/fix1/stills/`. Known open (fix round
+  pending): the pool hides the painted TubeRing, drops are small, the splat lands before the spurt and a new
+  headshot wipes the old splat, a pink tint on the skull crown from the added fill light, boxes may overlap.
 
 ## Confirmed by the owner
 
