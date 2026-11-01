@@ -6,12 +6,18 @@ Finds the machines by the tag Scripts/ImportPerkMachines.py gives them (AFS_Perk
   <machine>_34     each machine three-quarter, full height
   <machine>_close  the glowing part close (Lifeblood core, Bioreactor tube) at two moments 0.7 s apart
                    (_a/_b: the heartbeat pulse and the shaft spin should differ)
+  Headhunter (2026-11-01, Scripts/ImportHeadhunter.py): Headhunter_34, Headhunter_tube_a/_b (1 s apart, natural
+                   schedule), Headhunter_drop (waits for a drop in free fall), Headhunter_shot_0p06/_0p4/_3 (after
+                   AHoverBloodTube.TriggerHeadshot: spurt, splash + fresh splat, splat running down). The harness only
+                   triggers; all motion is the actor's own (C++ tick, materials, Niagara).
+Env: PERK_CAPTURE_ONLY=Headhunter (only that machine's shots), PERK_CAPTURE_OUT=<dir> (default below).
 Out: D:/AFS_Comparisons/PerkMachines_20261031/Unreal/stills/*.png + capture.json
 Usage: UnrealEditor-Cmd.exe AFS.uproject -unattended -RenderOffscreen -nosplash -ResX=1280 -ResY=720 -stdout
        -FullStdOutLogOutput -DisablePlugins=NwiroIntegrationKit -ExecutePythonScript=<this>
 """
 import json
 import math
+import os
 import time
 import traceback
 from pathlib import Path
@@ -20,13 +26,14 @@ import unreal as u
 
 MAP = '/Game/HoverPrototype/Maps/L_NYC_Explore'
 TAG = 'AFS_PerkMachineTrial'
-OUT = Path('D:/AFS_Comparisons/PerkMachines_20261031/Unreal')
+OUT = Path(os.environ.get('PERK_CAPTURE_OUT', 'D:/AFS_Comparisons/PerkMachines_20261031/Unreal'))
+ONLY = os.environ.get('PERK_CAPTURE_ONLY', '')
 STILLS = OUT / 'stills'
 STILLS.mkdir(parents=True, exist_ok=True)
 WIDTH, HEIGHT = 1280, 720
 R = {'ok': True, 'errors': [], 'frames': [], 'machines': {}, 'time': time.strftime('%Y-%m-%d %H:%M:%S')}
 S = {'start': time.monotonic(), 'play': False, 'busy': False, 'end': None, 'pc': None, 'cam': None, 'queue': [],
-     'next': None, 'last_step_t': None, 'done': False, 't_first': None, 'm': {}}
+     'next': None, 'last_step_t': None, 'done': False, 't_first': None, 'm': {}, 'tube': None}
 LEVEL = u.get_editor_subsystem(u.LevelEditorSubsystem)
 assert LEVEL.load_level(MAP), 'load_level failed'
 
@@ -83,8 +90,19 @@ def find_machines():
         if len(parts) >= 5 and parts[-1] in ('Body', 'Frame'):
             l, r = a.get_actor_location(), a.get_actor_rotation()
             S['m'][parts[-2]] = {'loc': (l.x, l.y, l.z), 'yaw': r.yaw, 'front_mesh_yaw': 90.0}
+    tubes = u.GameplayStatics.get_all_actors_of_class(world(), u.HoverBloodTube) if hasattr(u, 'HoverBloodTube') else []
+    S['tube'] = tubes[0] if tubes else None
     R['machines'] = S['m']
-    log('machines', json.dumps(S['m']))
+    log('machines', json.dumps(S['m']), 'tube', bool(S['tube']))
+
+
+def tube_state():
+    st = json.loads(S['tube'].describe_state()) if S['tube'] else {}
+    try:
+        st['niagara'] = u.HoverAuthoring.inspect_active_effects('NS_HH')[:600]
+    except Exception as ex:  # noqa: BLE001
+        st['niagara'] = str(ex)
+    return st
 
 
 def plan():
@@ -101,12 +119,56 @@ def plan():
     step(1.0, spawn_view)
     step(2.0, lambda t: capture('spawn_view'))
     for name, aim, dist in (('Lifeblood', 92.0, 170.0), ('Bioreactor', 112.0, 240.0)):
+        if ONLY and name != ONLY:
+            continue
         step(0.1, lambda t, n=name: view_machine(n, 360, 150, 110, 32, 55))
         step(1.0, lambda t, n=name: capture(n + '_34'))
         step(0.1, lambda t, n=name, a=aim, d=dist: view_machine(n, d, a + 25, a, 12, 50))
         step(1.0, lambda t, n=name: capture(n + '_close_a'))
         step(0.7, lambda t, n=name: capture(n + '_close_b'))
+    if not ONLY or ONLY == 'Headhunter':
+        plan_headhunter()
     step(0.3, lambda t: finish())
+
+
+def plan_headhunter():
+    def has():
+        return 'Headhunter' in S['m'] and S['tube'] is not None
+
+    def shot(n):
+        if has():
+            capture(n)
+            R.setdefault('tube_states', {})[n] = tube_state()
+    step(0.1, lambda t: has() and view_machine('Headhunter', 360, 150, 110, 32, 55))
+    step(1.0, lambda t: shot('Headhunter_34'))
+    step(0.1, lambda t: has() and view_machine('Headhunter', 125, 132, 128, 8, 42))
+    step(1.0, lambda t: shot('Headhunter_tube_a'))
+    step(1.0, lambda t: shot('Headhunter_tube_b'))
+    # a drop from the cap lip (front-left, the longest fall) and one from the jaw; shoot when one is in free fall
+    step(0.1, lambda t: has() and (S['tube'].trigger_drop(2), S['tube'].trigger_drop(0)))
+    step(0.1, lambda t: wait_fall('Headhunter_drop'))
+    step(0.2, lambda t: has() and S['tube'].trigger_headshot())
+    step(0.06, lambda t: shot('Headhunter_shot_0p06'))
+    step(0.34, lambda t: shot('Headhunter_shot_0p4'))
+    step(2.6, lambda t: shot('Headhunter_shot_3'))
+    step(0.1, lambda t: has() and view_machine('Headhunter', 230, 140, 125, 30, 45))
+    step(0.5, lambda t: shot('Headhunter_tube_side'))
+    step(0.1, lambda t: has() and view_machine('Headhunter', 110, 185, 185, 0, 45))
+    step(1.0, lambda t: shot('Headhunter_sign'))
+    step(0.1, lambda t: has() and view_machine('Headhunter', 110, 95, 85, 0, 45))
+    step(1.0, lambda t: shot('Headhunter_panel'))
+
+
+def wait_fall(name, tries=[0]):
+    """Re-queues itself each step until a drop is in free fall well above the pool (then captures), at most ~3 s."""
+    st = tube_state()
+    falling = [d for d in st.get('drops', []) if d['state'] == 2 and d['t'] >= 0.05 and d['local'][2] > 126]
+    tries[0] += 1
+    if falling or tries[0] > 90:
+        capture(name)
+        R.setdefault('tube_states', {})[name] = st
+        return
+    S['queue'].insert(0, (0.033, lambda t: wait_fall(name)))
 
 
 def finish():
@@ -158,6 +220,8 @@ def tick(dt):
             if t - S['t_first'] < 3.0:
                 return
             u.HoverAuthoring.set_playtest_fixed_step(True)
+            for cmd in ('r.Streaming.FullyLoadUsedTextures 1', 'r.Streaming.PoolSize 6000', 'r.ScreenPercentage 100'):
+                u.SystemLibrary.execute_console_command(w, cmd)   # stills right after load showed low texture mips
             S['cam'] = u.HoverAuthoring.spawn_playtest_actor(u.CameraActor, u.Transform(location=u.Vector(0, 0, 500),
                                                                                        rotation=u.Rotator()))
             S['cam'].camera_component.set_editor_property('constrain_aspect_ratio', False)

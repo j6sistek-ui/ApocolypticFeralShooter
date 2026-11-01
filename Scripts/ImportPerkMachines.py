@@ -19,7 +19,8 @@ about 7 m in front of the player start, facing it, each on a flat 1.2 m footprin
 try stood the Lifeblood on a parked car) in clear sight from the start at eye height and clear of small props on the spot and in the last 3 m of the view line (bounds check: barrels, cones),
 as StaticMeshActors in the outliner folder
 AFS_PerkMachines, labels "AFS Perk Trial <Machine> <Part>", tag AFS_PerkMachineTrial, parts attached to the body.
-Re-runnable: re-imports, rebuilds the masters, replaces the tagged actors. PERK_PLACE=0 skips the map.
+Re-runnable: re-imports, rebuilds the masters, replaces its own tagged actors (Lifeblood / Bioreactor labels only;
+the Headhunter, Scripts/ImportHeadhunter.py, shares the tag and is left alone). PERK_PLACE=0 skips the map.
 Receipt: D:/AFS_Comparisons/PerkMachines_20261031/Unreal/import_receipt.json
 Usage: UnrealEditor-Cmd.exe AFS.uproject -unattended -nullrhi -stdout -FullStdOutLogOutput
        -DisablePlugins=NwiroIntegrationKit -ExecutePythonScript=M:/UnrealProjects/AFS/Scripts/ImportPerkMachines.py
@@ -345,7 +346,7 @@ def import_file(src, folder):
     return sorted(found)
 
 
-def fix_texture(t, role):
+def fix_texture(t, role, max_size=2048):
     want = {'base': (True, TC.TC_DEFAULT), 'normal': (False, TC.TC_NORMALMAP), 'mr': (False, TC.TC_MASKS),
             'mask': (False, TC.TC_MASKS)}[role]
     changed = False
@@ -355,8 +356,8 @@ def fix_texture(t, role):
     if t.get_editor_property('compression_settings') != want[1]:
         t.set_editor_property('compression_settings', want[1])
         changed = True
-    if t.get_editor_property('max_texture_size') != 2048:
-        t.set_editor_property('max_texture_size', 2048)
+    if t.get_editor_property('max_texture_size') != max_size:
+        t.set_editor_property('max_texture_size', max_size)
         changed = True
     if changed:
         EAL.save_loaded_asset(t)
@@ -554,13 +555,18 @@ def find_spots(w, sl, fx, fy):
     raise RuntimeError('no flat spot pair found near the player start')
 
 
+def is_own_actor(a):
+    """AFS 2026-11-01: a tagged actor of one of MACHINES (the Headhunter shares the tag but not this script)."""
+    return any(a.get_actor_label().startswith('AFS Perk Trial %s ' % m) for m in MACHINES)
+
+
 def place(meshes, mats):
     level = u.get_editor_subsystem(u.LevelEditorSubsystem)
     assert level.load_level(MAP), 'load_level failed'
     w = u.get_editor_subsystem(u.UnrealEditorSubsystem).get_editor_world()
     ss = u.get_editor_subsystem(u.EditorActorSubsystem)
-    for a in ss.get_all_level_actors():
-        if a.actor_has_tag(TAG):
+    for a in ss.get_all_level_actors():   # only this script's machines (Scripts/ImportHeadhunter.py owns the Headhunter)
+        if a.actor_has_tag(TAG) and is_own_actor(a):
             ss.destroy_actor(a)
     starts = u.GameplayStatics.get_all_actors_of_class(w, u.PlayerStart)
     assert starts, 'no PlayerStart in ' + MAP
@@ -608,7 +614,8 @@ def place(meshes, mats):
     R['map_saved'] = bool(saved)
     # verify from disk
     assert level.load_level(MAP), 'reload failed'
-    n = sum(1 for a in u.get_editor_subsystem(u.EditorActorSubsystem).get_all_level_actors() if a.actor_has_tag(TAG))
+    n = sum(1 for a in u.get_editor_subsystem(u.EditorActorSubsystem).get_all_level_actors()
+            if a.actor_has_tag(TAG) and is_own_actor(a))
     R['actors_after_reload'] = n
     if n != sum(len(s['parts']) for s in MACHINES.values()):
         err('after reload %d tagged actors, expected %d' % (n, sum(len(s['parts']) for s in MACHINES.values())))
@@ -673,13 +680,16 @@ def main():
         place(meshes, mats)
 
 
-try:
-    main()
-except Exception:  # noqa: BLE001
-    err(traceback.format_exc())
-finally:
-    os.makedirs(OUT, exist_ok=True)
-    with open(OUT + '/import_receipt.json', 'w', encoding='utf-8') as f:
-        json.dump(R, f, indent=1, default=str)
-    log('DONE ok=%s errors=%d warnings=%d' % (R['ok'], len(R['errors']), len(R['warnings'])))
-    u.SystemLibrary.quit_editor()
+# AFS 2026-11-01: Scripts/ImportHeadhunter.py imports this file for its helpers (MB, import_part, make_mi, the
+# placement traces) with builtins.AFS_PERK_IMPORT_AS_LIBRARY set; then nothing below runs.
+if not getattr(__import__('builtins'), 'AFS_PERK_IMPORT_AS_LIBRARY', False):
+    try:
+        main()
+    except Exception:  # noqa: BLE001
+        err(traceback.format_exc())
+    finally:
+        os.makedirs(OUT, exist_ok=True)
+        with open(OUT + '/import_receipt.json', 'w', encoding='utf-8') as f:
+            json.dump(R, f, indent=1, default=str)
+        log('DONE ok=%s errors=%d warnings=%d' % (R['ok'], len(R['errors']), len(R['warnings'])))
+        u.SystemLibrary.quit_editor()

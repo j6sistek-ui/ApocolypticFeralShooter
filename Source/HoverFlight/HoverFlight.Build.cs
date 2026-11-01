@@ -7,6 +7,6 @@ public class HoverFlight : ModuleRules
         PublicDependencyModuleNames.AddRange(new[] { "Core", "CoreUObject", "Engine", "InputCore", "AnimGraphRuntime", "EnhancedInput", "ChaosVehicles", "UMG", "Niagara", "IKRig", "PoseSearch", "GameplayTags", "ZombieEngineStudio", "AIModule", "NavigationSystem", "ImageCore", "HLMovementSystem" });
         PrivateDependencyModuleNames.AddRange(new[] { "SlateCore", "Slate", "ApplicationCore", "Json", "DLSSBlueprint", "StreamlineBlueprint", "StreamlineDLSSGBlueprint", "StreamlineReflexBlueprint" });
         if (Target.bBuildEditor)
-            PrivateDependencyModuleNames.AddRange(new[] { "UnrealEd", "VirtualTexturingEditor", "BlueprintGraph", "KismetCompiler", "AnimGraph", "PhysicsUtilities", "NiagaraEditor" });
+            PrivateDependencyModuleNames.AddRange(new[] { "UnrealEd", "VirtualTexturingEditor", "BlueprintGraph", "KismetCompiler", "AnimGraph", "PhysicsUtilities", "NiagaraEditor", "RHI" }); // AFS 2026-11-01: RHI for UHoverAuthoring::MaterialCompileErrors
     }
 }

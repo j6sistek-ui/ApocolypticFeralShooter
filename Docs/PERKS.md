@@ -124,6 +124,9 @@ With five drafted, one more makes six; decide whether it is Bullseye, Hair Trigg
 
 ## Machines (owner concept art, 2026-10-31)
 
+**Placement rule (owner, 2026-11-01):** the machines go in NYC Survival and are never side by side; each stands on
+its own somewhere in the map. The row in NYC Exploration is only a viewing stand.
+
 Preliminary concepts for five machines (local copies in `Docs/References/PerkMachines/`, not in git): Bioreactor
 (dark tech tower, cyan bubbling liquid tube, brain "perk active" screen), Survivalist (rusted olive military vending
 unit, CRT biohazard screen, green formula canister on pipes), Lifeblood (burgundy and brass cabinet, glowing anatomical

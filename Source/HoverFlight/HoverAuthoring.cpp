@@ -1,4 +1,6 @@
 #include "HoverAuthoring.h"
+#include "MaterialShared.h"
+#include "Materials/Material.h"
 #include "Engine/DirectionalLight.h"
 #include "EngineUtils.h"
 #include "HoverTestController.h"
@@ -1655,8 +1657,10 @@ FString UHoverAuthoring::ConfigurePowerUpLiveEffect(UNiagaraSystem *Effect, cons
     FString Report;
 #if WITH_EDITOR
     // AFS 2026-10-31: only our template copies for the live power-up displays.
-    if (!Effect || !Effect->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/Effects/PowerUps/Live/")))
-        return TEXT("Refused: only /Game/HoverPrototype/Effects/PowerUps/Live/ copies may be edited");
+    // AFS 2026-11-01: and the perk-machine effect copies (Headhunter blood, Scripts/ImportHeadhunter.py).
+    if (!Effect || !(Effect->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/Effects/PowerUps/Live/")) ||
+                     Effect->GetPathName().StartsWith(TEXT("/Game/HoverPrototype/Effects/PerkMachines/"))))
+        return TEXT("Refused: only /Game/HoverPrototype/Effects/PowerUps/Live/ and /Effects/PerkMachines/ copies may be edited");
     Effect->Modify();
     TSet<FString> Used;
     auto Apply = [&](UNiagaraScript *Script, const FString &Where, const FString &OnlyEmitter, bool bListSys) {
@@ -1762,6 +1766,22 @@ FString UHoverAuthoring::ConfigurePowerUpLiveEffect(UNiagaraSystem *Effect, cons
     Effect->MarkPackageDirty();
 #endif
     return Report;
+}
+
+FString UHoverAuthoring::MaterialCompileErrors(UMaterialInterface *Material)
+{
+#if WITH_EDITOR
+    UMaterial *M = Material ? Material->GetMaterial() : nullptr;
+    if (!M)
+        return TEXT("no material");
+    FMaterialResource *Res = M->GetMaterialResource(GMaxRHIShaderPlatform);
+    if (!Res)
+        return TEXT("no resource for the running shader platform");
+    Res->FinishCompilation();
+    return FString::Join(Res->GetCompileErrors(), TEXT(" | "));
+#else
+    return FString();
+#endif
 }
 
 void UHoverAuthoring::CapturePlaytest(const FString &Filename)

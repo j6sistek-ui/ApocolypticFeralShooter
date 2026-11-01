@@ -55,14 +55,6 @@ Receipts and stills live under `D:\AFS_Comparisons\` (local, not in git).
 - [ ] **12. Fill light on Vexa, texture pass** (2026-10-31, `21eb065`).
   *Check:* Vexa a little brighter, zombies beside her not; console `HoverFillLight 0` / `1` to compare.
   *AI:* `ProveVisualPass.py`: torso +54 % at 2.5 cd, a zombie beside her unchanged.
-- [ ] **13. Perk machines in NYC Exploration** (2026-10-31). Lifeblood and Bioreactor as props (no buying yet),
-  about 10 m ahead of the player start, facing it.
-  *Check:* LIFEBLOOD reads on the front and both sides; the blood core and heart sign beat; the cabinet colour
-  holds up in the street light; the Bioreactor screen and biohazard sign glow, the liquid moves, the stirring
-  shaft turns behind the glass; you cannot walk through either machine.
-  *AI:* `ImportPerkMachines.py` (12 parts, 4 materials compiled with no link failures, 12 actors after a map
-  reload); `CapturePerkMachines.py` stills from the spawn point and close up, 0.7 s apart: the shaft and the beat
-  move. Glass is a plain fresnel glass; no bubbles yet.
 - [ ] **14. Live power-ups in NYC Exploration** (2026-10-31). The decided looks on a live display actor: Nuke,
   Medkit, Max Ammo, about 3 m ahead of the player start (in the editor: Realtime on, editor focused; or press Play).
   *Check:*
@@ -77,7 +69,20 @@ Receipts and stills live under `D:\AFS_Comparisons\` (local, not in git).
   - Animation runs in the editor without Play (life 0 to 6 s).
   - Stills in `D:/AFS_Comparisons/PowerUps_20261031/Live/stills_fix/`.
   - The decided smoke puff is off (it could not read on the black casing).
-- [ ] **15. Headhunter perk machine in NYC Exploration** (2026-11-01). Your Painter textures (Unreal export, full 4K)
+
+## Confirmed by the owner
+
+- [x] **13. Perk machines in NYC Exploration** (2026-10-31). Lifeblood and Bioreactor as props (no buying yet),
+  about 10 m ahead of the player start, facing it.
+  *Check:* LIFEBLOOD reads on the front and both sides; the blood core and heart sign beat; the cabinet colour
+  holds up in the street light; the Bioreactor screen and biohazard sign glow, the liquid moves, the stirring
+  shaft turns behind the glass; you cannot walk through either machine.
+  *AI:* `ImportPerkMachines.py` (12 parts, 4 materials compiled with no link failures, 12 actors after a map
+  reload); `CapturePerkMachines.py` stills from the spawn point and close up, 0.7 s apart: the shaft and the beat
+  move. Glass is a plain fresnel glass; no bubbles yet.
+  *Owner 2026-11-01:* "perks look great". Placement does not matter here: machines go in NYC Survival and are never
+  side by side. Open tube fixes moved to the backlog (perks, item 1).
+- [x] **15. Headhunter perk machine in NYC Exploration** (2026-11-01). Your Painter textures (Unreal export, full 4K)
   on the 12 parts, a glass tube with live blood: a deep pool on the red disc, runs and spatter on the inside of the
   glass, drops into the pool with splash rings, a "headshot" spatter every 12-20 s, slow bubbles, a red glow. Third
   machine, about 3.6 m right of the Bioreactor and 2 m forward of the row. Select `AFS Perk Trial Headhunter TubeFX`
@@ -86,7 +91,5 @@ Receipts and stills live under `D:\AFS_Comparisons\` (local, not in git).
   textures forced in `D:/AFS_Comparisons/PerkMachines_20261101/Headhunter/fix1/stills/`. Known open (fix round
   pending): the pool hides the painted TubeRing, drops are small, the splat lands before the spurt and a new
   headshot wipes the old splat, a pink tint on the skull crown from the added fill light, boxes may overlap.
-
-## Confirmed by the owner
-
-(none yet)
+  *Owner 2026-11-01:* "perks look great". Placement does not matter here: machines go in NYC Survival and are never
+  side by side. Open tube fixes moved to the backlog (perks, item 1).

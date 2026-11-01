@@ -110,7 +110,8 @@ class HOVERFLIGHT_API UHoverAuthoring : public UBlueprintFunctionLibrary
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static bool SetNiagaraUserFloat(UNiagaraSystem *Effect, FName Parameter, float Value);
     // AFS 2026-10-31 (live power-up displays, Scripts/AuthorPowerUpLive.py): tunes a Niagara copy under
-    // /Game/HoverPrototype/Effects/PowerUps/Live/ (an engine template duplicate; refuses anything else). Disables every
+    // /Game/HoverPrototype/Effects/PowerUps/Live/ or (2026-11-01) /Effects/PerkMachines/ (an engine template
+    // duplicate; refuses anything else). Disables every
     // emitter except KeepEmitter (empty = keep all), gives its sprite renderers SpriteMaterial (when set) and velocity
     // alignment (optional), and writes module inputs in the rapid-iteration stores of the particle and system scripts:
     // each Values key is a name suffix ("InitializeParticle.Lifetime Min", "SpawnBurst_Instantaneous.Spawn Count"),
@@ -122,6 +123,10 @@ class HOVERFLIGHT_API UHoverAuthoring : public UBlueprintFunctionLibrary
                                               const TMap<FString, FString> &Values);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
     static void PrepareReviewEffects(const TArray<UNiagaraSystem *> &Effects);
+    // AFS 2026-11-01 (Scripts/ImportHeadhunter.py): waits for Material's shader map on the running shader platform and
+    // returns its compile errors, one per line ("" = compiled cleanly).
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor")
+    static FString MaterialCompileErrors(class UMaterialInterface *Material);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static FString InspectReviewEffects();
     // AFS 2026-10-31: the active Niagara components of the play world whose asset name contains AssetContains, with
     // their particle counts and (CPU sims) every particle attribute of the first particle (size, colour, age...).

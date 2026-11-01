@@ -21,8 +21,10 @@ Severity: **G** game-breaking, **M** major (hurts play), **m** minor.
 | Bug | Sev |
 |---|---|
 | Life Engine jumps are low and short: 110 cm peak, 0.6 s in the air, 4.1 m running jump vs Classic 248 cm, 0.9 s, 6.1 m (preset gravity 2032, jump 686) | M |
+| Owner 2026-11-01 (NYC Exploration): holding B to crouch, or crouch/slide, starts a penguin-like waddle instead of a crouch walk or slide (Exploration has no Life Engine, so this is Classic + the CLS parkour template; check NYC Survival too) | M |
 | Life Engine has almost no air steering: 41 cm sideways in a jump vs 236 cm on Classic (Source-style air control needs mouse air-strafing) | M |
 | Life Engine: running into a wall at an angle stops dead (no wall slide); template wall runs are very short | M |
+| Owner 2026-11-01: the hand goes through the middle of the sword (katana) handle instead of gripping it | m |
 | Spear hits land 1.7-3.4 m out while the visible head reaches about 1 m; the jab points about 40 degrees high | m |
 | Ammo pickup glint lights the area like a lamp (and nearby zombies) | m |
 | Kid swarm: only 2 attack tokens, about 3 in 20 kids hang back at 3 m | m |
@@ -31,6 +33,7 @@ Severity: **G** game-breaking, **M** major (hurts play), **m** minor.
 | Zombies sink into the ground in PostApo (`AHoverZombie`, recording 0:24) | m |
 | Small-gun muzzle flash too hot within 20 cm (EM21, EM08) | m |
 | Owner 2026-11-01: the muzzle flash blinds the scope when firing, and it is still the blue sci-fi flash, not the warm per-rig flash from 2026-10-31 (that override only covers the 4 rigged guns; which gun and map to confirm) | M |
+| Owner 2026-11-01: every footstep sounds like wet feet on dry ground (the 2026-10-31 audio pass picks footsteps by surface; the surface lookup is likely falling back to a wet set) | M |
 | Owner 2026-11-01: no ambient sound (requested). The crowd ambience by alive count was wired 2026-10-29 for NYC Survival rounds only; no city/weather ambience is wired anywhere (the weather SFX loops pack is in the project) | M |
 | First-person arms fill the view; owner 2026-11-01: the left arm still looks very wrong in first person (`HoverView` is Exec-only; needs an FP capture to tune offset and FOV) | m |
 | Brute, Kid horde round and bosses not yet seen in a rendered run with the new roster | m |
@@ -52,8 +55,12 @@ While the owner cannot playtest, in-between work chips away at the top items tha
    `DONE.md` #13; the other four await the owner's Tripo parts), placement in NYC, and how buying works. Then the rest of the loop: doors and zones, the power objective, wall buys, vests, the
    upgrade machine (Pack-a-Punch equivalent, original name), the downed state (comes first for Life Blood: crawl
    and shoot while down; solo without the perk ends the run), the HUD.
-1b. **Muzzle flash and ambient sound** (owner placed it right after perks, 2026-11-01): the warm flash on every gun
-   the player holds (no scope whiteout), and city/weather ambience plus a check that the crowd ambience plays in rounds.
+   Headhunter tube fix round (owner liked the look 2026-11-01): show the painted red TubeRing (pool wall inside it),
+   bigger drops falling mostly from the cap, the headshot splat landing with the spurt and old splats fading instead
+   of vanishing, less pink on the skull crown. Machines go in NYC Survival, spread out, never side by side.
+1b. **Muzzle flash, ambient sound, footsteps** (owner placed it right after perks, 2026-11-01): the warm flash on every gun
+   the player holds (no scope whiteout), and city/weather ambience plus a check that the crowd ambience plays in rounds (the 2026-10-31 audio pass
+   lists wind, which the owner did not hear); footsteps play the right surface (all wet now).
 2. Owner playtest of everything in `DONE.md` (whenever the owner can); the results re-rank this list.
 3. Life Engine movement feel: measured 2026-10-31 (`Scripts/ProveLifeEngineCompare.py`); waiting on the owner's
    test to choose jump height and air control, then wall slide and wall runs.
