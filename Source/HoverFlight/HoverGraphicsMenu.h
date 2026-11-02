@@ -34,6 +34,11 @@ class HOVERFLIGHT_API UHoverGraphicsMenu : public UUserWidget
     {
         return PendingLifeEngine;
     }
+    // AFS 2026-11-01: weather row (EHoverWeatherKind as int). -1 when the level has no AHoverWeather.
+    int32 GetSelectedWeather() const
+    {
+        return PendingWeather;
+    }
 
   protected:
     virtual void NativeOnInitialized() override;
@@ -50,7 +55,10 @@ class HOVERFLIGHT_API UHoverGraphicsMenu : public UUserWidget
     UPROPERTY() TObjectPtr<UTextBlock> DetailText;
     UPROPERTY() TObjectPtr<UTextBlock> ImageHelpText;
     UPROPERTY() TObjectPtr<UTextBlock> MovementText;
+    UPROPERTY() TObjectPtr<UTextBlock> WeatherText;
     int32 PendingLifeEngine = -1;
+    int32 PendingWeather = -1;
+    int32 GetWeatherRow() const;
     int32 GetRowCount() const;
     FHoverZombieTuning PendingZombies;
     bool bZombiePage = false;

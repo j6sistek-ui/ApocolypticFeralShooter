@@ -22,6 +22,8 @@ class HOVERFLIGHT_API AHoverTestController : public APlayerController
     virtual void PlayerTick(float DeltaSeconds) override;
     UFUNCTION(Exec) void HoverGraphics();
     UFUNCTION(Exec) void HoverLoadLevel(int32 Level);
+    // AFS 2026-11-01: "Weather Rain" / "Weather Snow 0" / "Weather" (report). Same path as the F6 weather row.
+    UFUNCTION(Exec) void Weather(const FString &Mode);
     // Test level menu: 0 PostApo, 1 Cyber City, 2 Lakeside, 3 NYC Exploration, 4 NYC Survival.
     static constexpr int32 TestLevelCount = 5;
     static int32 GetTestLevelIndex(const FString &MapName);

@@ -16,7 +16,7 @@ cached under `D:\FABDOWNLOADS\VaultCache` but not imported into AFS.
 | NIAGARA Blood VFX Pack (Rimaye) | `Blood_VFX_Pack` | all blood: hit splashes, bursts, ground splashes, artery bleeds |
 | Blood Magic Skill VFX | `sA_BloodMagic_1` | blood-magic boss, horde haze, Blood Bomb core |
 | Sci-Fi Explosives SFX (Stormwave) | `SF_Explosives_SFX` | grenades, Nuke, Robot Mine |
-| Weather Sound FX Loops (cplomedia) | `cplomedia_WeatherSFXLoops` | wind bed now; rain and thunder with the weather toggle |
+| Weather Sound FX Loops (cplomedia) | `cplomedia_WeatherSFXLoops` | wind bed now; the weather toggle uses the Dreamrise pack's own rain / wind / thunder (swap in here if they sound thin) |
 | Niagara Footstep VFX (Sidearm) | `A_Surface_Footstep` | footstep puffs and physical materials |
 | Robot Mine | `SilkTrap` | tactical seeker mine |
 | Life Engine | `Plugins/HLMovementSystem` | Source-style movement in NYC Survival |
@@ -28,9 +28,10 @@ cached under `D:\FABDOWNLOADS\VaultCache` but not imported into AFS.
 
 ## Weather
 
-The Dreamrise Multiplayer Dynamic Weather System V4 is already downloaded and set up as its own project,
-`M:\MultiplayerDynamicWeather`. It is the source for the rain/snow menu toggle, queued after the big bugs: migrate its
-`Content/MultiplayerDynamicWeatherSystem` folder into AFS. No other weather kit is needed.
+The Dreamrise Multiplayer Dynamic Weather System V4 is downloaded and set up as its own project,
+`M:\MultiplayerDynamicWeather` (read-only source). Migrated 2026-11-01 to `/Game/MultiplayerDynamicWeatherSystem`
+and driving NYC Survival's rain / snow through `AHoverWeather` and the F6 menu row: see `WEATHER.md`. No other
+weather kit is needed.
 
 ## Animations
 

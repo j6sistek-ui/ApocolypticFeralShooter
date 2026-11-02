@@ -19,6 +19,7 @@
 #include "Blueprint/WidgetLayoutLibrary.h"
 #include "HoverGraphicsMenu.h"
 #include "HoverGraphicsSettings.h"
+#include "HoverWeather.h"
 #include "GameFramework/PlayerInput.h"
 #include "InputKeyEventArgs.h"
 #include "PhysicsEngine/PhysicsThrusterComponent.h"
@@ -44,6 +45,26 @@ void AHoverTestController::EndPlay(const EEndPlayReason::Type Reason)
     if (GraphicsSettings)
         GraphicsSettings->RestoreRenderer();
     Super::EndPlay(Reason);
+}
+
+void AHoverTestController::Weather(const FString &Mode)
+{
+    // AFS 2026-11-01: test hook for the F6 weather row ("Weather Rain", "Weather Snow 0" = no blend, "Weather" =
+    // report). The owner uses the menu; this is for scripted proofs.
+    auto *Found = AHoverWeather::FindWeather(this);
+    if (!Found)
+    {
+        UE_LOG(LogTemp, Display, TEXT("HOVER_WEATHER none in this level"));
+        return;
+    }
+    TArray<FString> Words;
+    Mode.ParseIntoArrayWS(Words);
+    EHoverWeatherKind Wanted;
+    if (Words.Num() && AHoverWeather::ParseWeather(Words[0], Wanted))
+        Found->SetWeather(Wanted, Words.Num() > 1 ? FCString::Atof(*Words[1]) : -1.f);
+    else if (Words.Num())
+        UE_LOG(LogTemp, Display, TEXT("HOVER_WEATHER unknown '%s' (Clear, Cloudy, Rain, Storm, Snow)"), *Words[0]);
+    UE_LOG(LogTemp, Display, TEXT("HOVER_WEATHER %s"), *Found->DescribeState());
 }
 
 void AHoverTestController::HoverGraphics()
@@ -88,6 +109,14 @@ void AHoverTestController::CloseGraphicsMenu(bool bApply)
         if (const int32 Life = GraphicsMenu->GetSelectedLifeEngine(); Life >= 0)
             if (auto *LifePilot = Cast<AHoverPilot>(GetPawn()); LifePilot && LifePilot->IsLifeEngineEnabled() != (Life == 1))
                 LifePilot->LifeEngine(Life);
+        // AFS 2026-11-01: the weather row, applied on close like the Life Engine (blends over the weather's own
+        // transition time once play resumes).
+        if (const int32 Wanted = GraphicsMenu->GetSelectedWeather(); Wanted >= 0)
+            if (auto *Weather = AHoverWeather::FindWeather(this); Weather && Weather->GetWeather() != EHoverWeatherKind(Wanted))
+            {
+                Weather->SetWeather(EHoverWeatherKind(Wanted));
+                UE_LOG(LogTemp, Display, TEXT("HOVER_WEATHER menu applied %s"), AHoverWeather::WeatherName(EHoverWeatherKind(Wanted)));
+            }
     }
     GraphicsMenu->RemoveFromParent();
     GraphicsMenu = nullptr;

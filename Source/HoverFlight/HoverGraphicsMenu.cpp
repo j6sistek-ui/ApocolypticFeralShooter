@@ -2,6 +2,7 @@
 #include "HoverPilot.h"
 #include "HoverTestController.h"
 #include "HoverTestLevelPolicy.h"
+#include "HoverWeather.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/CanvasPanel.h"
@@ -52,6 +53,7 @@ void UHoverGraphicsMenu::NativeOnInitialized()
     LevelText = AddText(TEXT(""), 23, FLinearColor::White);
     HealthText = AddText(TEXT(""), 23, FLinearColor::White);
     MovementText = AddText(TEXT(""), 23, FLinearColor::White);
+    WeatherText = AddText(TEXT(""), 23, FLinearColor::White);
     DetailText = AddText(TEXT("Invincible off: take damage. At zero health, reset at the start after 3 seconds."), 16,
                          FLinearColor(.7f, .76f, .84f));
     AddText(TEXT("NYC - Exploration has no zombies. NYC - Survival is the third-person wave mode with no bike. "
@@ -75,6 +77,9 @@ void UHoverGraphicsMenu::Open(UHoverGraphicsSettings *InSettings)
     bZombiePage = false;
     const auto *Pilot = Cast<AHoverPilot>(GetOwningPlayerPawn());
     PendingLifeEngine = Pilot && Pilot->HasLifeEngine() ? int32(Pilot->IsLifeEngineEnabled()) : -1;
+    // AFS 2026-11-01: the weather row reads back what the level's weather is heading to now.
+    const auto *Weather = AHoverWeather::FindWeather(this);
+    PendingWeather = Weather ? int32(Weather->GetWeather()) : -1;
     if (const auto *Mode = GetWorld()->GetAuthGameMode<AHoverCyberCityGameMode>())
         PendingZombies = Mode->Tuning;
     Refresh();
@@ -82,7 +87,13 @@ void UHoverGraphicsMenu::Open(UHoverGraphicsSettings *InSettings)
 
 int32 UHoverGraphicsMenu::GetRowCount() const
 {
-    return !bZombiePage && PendingLifeEngine >= 0 ? 5 : 4;
+    return bZombiePage ? 4 : 4 + (PendingLifeEngine >= 0) + (PendingWeather >= 0);
+}
+
+int32 UHoverGraphicsMenu::GetWeatherRow() const
+{
+    // After Movement when the Life Engine row shows, else in its place.
+    return PendingWeather >= 0 ? 4 + (PendingLifeEngine >= 0) : -1;
 }
 
 void UHoverGraphicsMenu::ChangePage()
@@ -130,6 +141,8 @@ void UHoverGraphicsMenu::Adjust(int32 Direction)
     else if (SelectedRow == 2)
         PendingLevel = (PendingLevel + Direction + AHoverTestController::TestLevelCount) %
                        AHoverTestController::TestLevelCount;
+    else if (SelectedRow == GetWeatherRow())
+        PendingWeather = (PendingWeather + Direction + int32(EHoverWeatherKind::Count)) % int32(EHoverWeatherKind::Count);
     else if (SelectedRow == 4)
         PendingLifeEngine = PendingLifeEngine >= 0 ? 1 - PendingLifeEngine : -1;
     else if (const auto *Policy = IHoverTestLevelPolicy::Get(GetWorld()); !Policy || !Policy->ForcesMortal())
@@ -148,6 +161,7 @@ void UHoverGraphicsMenu::Refresh()
     if (bZombiePage)
     {
         MovementText->SetVisibility(ESlateVisibility::Collapsed);
+        WeatherText->SetVisibility(ESlateVisibility::Collapsed);
         UTextBlock *Labels[] = {ModeText, FramesText, LevelText, HealthText};
         const TCHAR *Names[] = {TEXT("Zombie health"), TEXT("Zombie speed"), TEXT("Wave size"), TEXT("Spawn interval")};
         const float Values[] = {PendingZombies.Health, PendingZombies.Speed, PendingZombies.Count,
@@ -199,4 +213,11 @@ void UHoverGraphicsMenu::Refresh()
         PendingLifeEngine == 1 ? TEXT("Life Engine") : TEXT("Classic (parkour pack)"))));
     MovementText->SetColorAndOpacity(
         FSlateColor(SelectedRow == 4 ? FLinearColor(.3f, .8f, 1) : FLinearColor::White));
+    const int32 WeatherRow = GetWeatherRow();
+    WeatherText->SetVisibility(WeatherRow >= 0 ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+    WeatherText->SetText(FText::FromString(FString::Printf(
+        TEXT("%s Weather:  < %s >"), SelectedRow == WeatherRow ? TEXT(">") : TEXT("  "),
+        AHoverWeather::WeatherName(EHoverWeatherKind(FMath::Max(PendingWeather, 0))))));
+    WeatherText->SetColorAndOpacity(
+        FSlateColor(SelectedRow == WeatherRow ? FLinearColor(.3f, .8f, 1) : FLinearColor::White));
 }

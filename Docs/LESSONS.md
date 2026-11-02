@@ -91,3 +91,18 @@ Things that were expensive to find out. Newest first within each group.
   component parked in MOVE_None must still report them, or motion matching picks walk/stop clips.
 - Test pads start in first person (rifle stance, belly crawl); NYC Survival forces third person. Compare movement
   in the same view.
+
+## Weather (2026-11-01)
+
+- Cascade caps every CPU emitter at `fx.MaxCPUParticlesPerEmitter` (1000). The first snow sat at exactly 1,000
+  flakes and denser rain could not pass it; `AHoverWeather` raises the cap. Python can edit a Cascade copy's
+  distributions (spawn rate, size, lifetime, collision delay) but not its modules (`bEnabled`, collision range).
+- Cascade collision traces every particle every frame: 6,000 traced flakes cost ~3x the rain. Trace only a volume
+  near the camera; a long collision delay stops a copy from tracing at all.
+- A decal has no GBuffer normal; `cross(ddx(P), ddy(P))` of the world position points UP on a floor. The swapped
+  order wet only ceilings.
+- NYC's sun has light-shaft occlusion on: under heavy fog it draws hard rays at the sun. Fade
+  `OcclusionMaskDarkness` toward 1 for overcast weather.
+- A PIE run that hangs while quitting keeps `UnrealEditor-HoverFlight.dll` locked (the build fails with LNK1104);
+  the locked file can be renamed and the build then succeeds. Write capture frames to a fast drive: with D: busy,
+  each `capture_world_frame` took 2-6 s.
