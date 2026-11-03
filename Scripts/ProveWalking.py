@@ -17,7 +17,7 @@ Re-run (one map per run; no AFS editor may be open; one rendered capture at a ti
   WALK_PHASE before | after (output subfolder)
   WALK_FRAMES 0 skips the rendered frames (logic only; -nullrhi then works too)
   WALK_TESTS  comma list to run a subset (walk,curve,kerb,jump,sprintjump,hops,crouch,crouchstrafe,slide,crawl,
-             holdmove)
+             holdmove, crouchhalf). crouchhalf tests the controller at 55% left-stick travel after tapping B at rest.
   WALK_VIEW  third (default: the test pads are toggled to the third-person view NYC Survival uses) | first
   WALK_TRAJ  1 (default, the review fix) | 0: hover.LifeEngineMoveLimits 0, the pre-fix MOVE_None max speed 0
   PROOF_OUT  output root (default D:/AFS_Comparisons/Walking_20261101)
@@ -112,9 +112,18 @@ def key(name, down):
     (S['hold'].add if down else S['hold'].discard)(name)
 
 
+def forward_stick(value):
+    def apply(t):
+        S['stick_y'] = value
+        u.HoverAuthoring.test_key(S['pc'], 'Gamepad_LeftY', value, True)
+    return apply
+
+
 def release_all():
     for k in list(S['hold']):
         key(k, False)
+    if S.get('stick_y'):
+        forward_stick(0)(None)
     S['yaw_rate'] = 0.0
 
 
@@ -423,6 +432,10 @@ def plan(modes):
             test('crouch', 'walk_yaw', [(0.0, press(CROUCH)), (0.15, lift(CROUCH)), (0.8, mark('walk')),
                                         (0.0, press('W')), (0.3, shoot(True)), (3.0, shoot(False)), (0.0, lift('W')),
                                         (0.8, idle)])
+        if 'crouchhalf' in TESTS:
+            test('crouchhalf', 'walk_yaw', [(0., press(CROUCH)), (.15, lift(CROUCH)), (.85, mark('walk')),
+                                            (0., forward_stick(.55)), (.3, shoot(True)), (2.5, mark('stop')),
+                                            (0., forward_stick(0)), (0., shoot(False)), (.3, idle)])
         if 'crouchstrafe' in TESTS:
             # Crouched, move right (D) then back (S): the CLS crouch database has a single forward clip.
             test('crouchstrafe', 'walk_yaw', [(0.0, press(CROUCH)), (0.15, lift(CROUCH)), (0.8, mark('walk')),
@@ -461,6 +474,14 @@ def analyse(tr):
     t_walk = tr['marks'].get('walk', 0.0)
     moving = [r for r in rows if r['t'] >= t_walk + 0.6 and r.get('vel') and math.hypot(*r['vel'][:2]) > 50]
     out['moving_samples'] = len(moving)
+    if tr['name'] == 'crouchhalf':
+        # Restrict the gate to unique ticks under sustained input, excluding deceleration.
+        steady = {r['t']: r for r in moving if r['t'] < tr['marks']['stop']}
+        walking = sum(any(m.get('anim') == 'QA_Crouch_SlowWalk_Fwd' for m in r.get('mm', []))
+                      for r in steady.values() if r.get('crouched'))
+        out['slow_crouch'] = {'samples': len(steady), 'walking_samples': walking}
+        if PHASE == 'after' and (not steady or walking < .8 * len(steady)):
+            R['errors'].append(f"{S['mode']} partial crouch: {walking}/{len(steady)} moving walk samples")
 
     def stat(key, rs=None, f=None):
         vals = [f(r) if f else r.get(key) for r in (rs if rs is not None else moving)]
@@ -762,6 +783,8 @@ def tick(dt):
             plan(['life', 'classic'] if KEY == 'survival' and R['setup']['life_engine'] else ['classic'])
             S['next'] = t
             return
+        if S.get('stick_y'):
+            u.HoverAuthoring.test_key(pc, 'Gamepad_LeftY', S['stick_y'], True)
         if S['yaw_rate']:
             r = pc.get_control_rotation()
             pc.set_control_rotation(u.Rotator(roll=0.0, pitch=r.pitch, yaw=r.yaw + S['yaw_rate'] / 30.0))
