@@ -172,8 +172,10 @@ bool AHoverCyberCityGameMode::CanReachPlayer(AActor *Spawn, APawn *Player)
 }
 
 bool AHoverCyberCityGameMode::CanReachPoint(AActor *From, const FVector &Target, const FVector &TargetExtent,
-                                            const UObject *Querier) const
+                                            const UObject *Querier, FNavPathSharedPtr *OutPath) const
 {
+    if (OutPath)
+        OutPath->Reset();
     bool Reachable = false;
     if (!From)
         return Reachable;
@@ -186,7 +188,12 @@ bool AHoverCyberCityGameMode::CanReachPoint(AActor *From, const FVector &Target,
             {
                 FPathFindingQuery Query(Querier ? Querier : From, *Data, Start.Location, End.Location);
                 Query.SetAllowPartialPaths(false);
-                Reachable = Navigation->TestPathSync(Query);
+                if (!OutPath)
+                    return Navigation->TestPathSync(Query);
+                const FPathFindingResult Result = Navigation->FindPathSync(Query);
+                Reachable = Result.IsSuccessful() && Result.Path.IsValid() && !Result.Path->IsPartial();
+                if (Reachable)
+                    *OutPath = Result.Path;
             }
         }
     return Reachable;
@@ -471,6 +478,17 @@ void AHoverCyberZombie::InitializeZombieStats()
         SurvivalComponent->SetMaxHealth(ZombieData->Stats.MaxHealth);
         SurvivalComponent->SetHealth(ZombieData->Stats.MaxHealth);
     }
+}
+
+bool AHoverCyberZombie::CanOccupyCapsuleAt(const FVector &Center) const
+{
+    const UCapsuleComponent *Capsule = GetCapsuleComponent();
+    FCollisionQueryParams Query(SCENE_QUERY_STAT(HoverZombieClearance), false, this);
+    FCollisionResponseParams Response;
+    Capsule->InitSweepCollisionParams(Query, Response);
+    return !GetWorld()->OverlapBlockingTestByChannel(Center, Capsule->GetComponentQuat(),
+                                                     Capsule->GetCollisionObjectType(), Capsule->GetCollisionShape(),
+                                                     Query, Response);
 }
 
 AHoverCyberZombie::AHoverCyberZombie()

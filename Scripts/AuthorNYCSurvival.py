@@ -1,10 +1,11 @@
 """Author L_NYC_Survival under NullRHI: map copy, navmesh, zones, spawners and start.
 
-Editor-only authoring with no rendered-quality claim. Every layout row is a
-placeholder until the survey freezes Scripts/nyc_survival_layout.json.
+Editor-only authoring with no rendered-quality claim. The zone layout may be
+overridden by a frozen survey. The two ground entries use measured floor positions.
 
 Flags (after the script path on -ExecutePythonScript):
   --nav-only            stop after the navmesh build, then save
+  --ground-only         update only the two surveyed ground entries in an existing survival map
   --dry-run             validate the table and print the plan; no asset is touched
   --layout <json>       override the embedded table with a frozen layout file
   --game-mode <class>   default /Script/HoverFlight.HoverNYCSurvivalGameMode
@@ -98,11 +99,21 @@ SPAWNERS = [
 EXPECTED_ZONES = 7
 EXPECTED_SPAWNERS = 25
 MIN_PER_ZONE = 3
+# Supplemental entrance markers, separate from the 25 validated zone-layout rows.
+# The vendor spawns 50 cm above the marker. Leave 2 cm below the tallest surveyed capsule (half-height 160).
+GROUND_MARKER_Z = 160 - 50 + 2
+GROUND_FLOORS = {
+    'AFS NYC Ground StartEast': (1402.37, 6372.37, 9.28),
+    'AFS NYC Ground IntersectionWest': (-135.64, 6450.00, 0.54),
+}
+GROUND_TAGS = ['AFS_NYCSpawn', 'AFS_GroundEntry']
 
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(prog='AuthorNYCSurvival.py', add_help=False)
-    parser.add_argument('--nav-only', action='store_true')
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument('--nav-only', action='store_true')
+    scope.add_argument('--ground-only', action='store_true')
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--layout', default=None)
     parser.add_argument('--game-mode', default=DEFAULT_GAME_MODE)
@@ -204,13 +215,14 @@ TABLE_ERRORS, TABLE_WARNINGS = validate_table(TABLE)
 REPORT = {'errors': [], 'warnings': list(TABLE_WARNINGS), 'flags': vars(ARGS), 'unknown_args': UNKNOWN,
           'map': MAP, 'source_map': SRC, 'creation': None, 'streaming': [], 'game_mode': None,
           'nav_agent': None, 'nav': {}, 'actors': {}, 'table': TABLE, 'saved': False,
-          'claim': 'NullRHI authoring only; no rendered-quality claim; every row is a placeholder'}
+          'claim': 'Editor authoring and marker readback only; ground-entry playback requires a rendered check'}
 
 
 def write_dump():
     try:
         OUT.mkdir(parents=True, exist_ok=True)
-        (OUT / 'layout_dump.json').write_text(json.dumps(REPORT, indent=2, default=str))
+        filename = 'ground_entries.json' if ARGS.ground_only else 'layout_dump.json'
+        (OUT / filename).write_text(json.dumps(REPORT, indent=2, default=str))
     except Exception:
         print('NYC_AUTHOR dump failed', traceback.format_exc(), flush=True)
 
@@ -224,7 +236,9 @@ except ImportError:  # the dry run also works outside the editor
 def dry_run():
     plan = {'map': MAP, 'nav_center': TABLE['nav_center'], 'nav_size': TABLE['nav_size'],
             'nav_params': NAV_PARAMS, 'game_mode': ARGS.game_mode, 'zones': len(TABLE['zones']),
-            'spawners': len(TABLE['spawners']), 'errors': TABLE_ERRORS, 'warnings': TABLE_WARNINGS}
+            'layout_spawners': len(TABLE['spawners']), 'ground_entries': GROUND_FLOORS,
+            'spawners': len(TABLE['spawners']) + len(GROUND_FLOORS), 'ground_only': ARGS.ground_only,
+            'errors': TABLE_ERRORS, 'warnings': TABLE_WARNINGS}
     print('NYC_AUTHOR_PLAN', json.dumps(plan), flush=True)
     print('NYC_AUTHOR', not TABLE_ERRORS, TABLE_ERRORS, flush=True)
     if u:
@@ -471,6 +485,36 @@ def author_spawners(world):
         check_owned(actor, row['label'])
 
 
+def author_ground_entries(world):
+    actors = u.GameplayStatics.get_all_actors_of_class(world, u.Actor)
+    assert not any(a.actor_has_tag('AFS_GroundEntry') and a.get_actor_label() not in GROUND_FLOORS
+                   for a in actors), 'Unexpected existing ground-entry marker'
+    legacy = [a for a in actors if a.actor_has_tag('AFS_NYCSpawn') and a.get_actor_label() not in GROUND_FLOORS]
+    assert len(legacy) == EXPECTED_SPAWNERS, 'Expected 25 regular spawn markers, found %d' % len(legacy)
+    updated = []
+    for label, (x, y, z) in GROUND_FLOORS.items():
+        matches = [a for a in actors if a.get_actor_label() == label]
+        assert len(matches) <= 1, 'Duplicate ground entry: ' + label
+        actor = matches[0] if matches else None
+        location = (x, y, z + GROUND_MARKER_Z)
+        if actor:
+            assert isinstance(actor, u.ZE_ZombieSpawnPoint) and actor.get_path_name().startswith(ACTOR_PREFIX), label
+        if not (actor and all(actor.actor_has_tag(tag) for tag in GROUND_TAGS)
+                and math.dist(actor.get_actor_location().to_tuple(), location) < 0.1
+                and actor.get_editor_property('is_enabled')):
+            actor = u.HoverAuthoring.add_survival_actor(
+                world, u.ZE_ZombieSpawnPoint, u.Transform(location=vec(location)), label, GROUND_TAGS)
+            assert actor, 'Ground entry could not be authored: ' + label
+            actor.set_editor_property('is_enabled', True)
+            updated.append(label)
+        check_owned(actor, label)
+        assert all(actor.actor_has_tag(tag) for tag in GROUND_TAGS), label
+        assert math.dist(actor.get_actor_location().to_tuple(), location) < 0.1, label
+        REPORT['actors'][label]['marker_cm'] = list(actor.get_actor_location().to_tuple())
+        REPORT['actors'][label]['floor_cm'] = [x, y, z]
+    REPORT['ground_updated'] = updated
+
+
 def main():
     global LEVEL, EDITOR, EA
     assert u, 'AuthorNYCSurvival must run inside the Unreal Editor (use --dry-run elsewhere)'
@@ -478,19 +522,34 @@ def main():
     EDITOR = u.get_editor_subsystem(u.UnrealEditorSubsystem)
     EA = u.EditorAssetLibrary
     assert not TABLE_ERRORS, 'Layout table invalid: %s' % TABLE_ERRORS
-    ensure_map()
+    if ARGS.ground_only:
+        assert EA.does_asset_exist(MAP), 'Ground-only authoring requires the existing survival map'
+        assert not dirty_packages(), 'Clean editor required before ground-only authoring'
+        REPORT['creation'] = 'existing'
+    else:
+        ensure_map()
     assert LEVEL.load_level(MAP), 'Loading %s failed' % MAP
     world = editor_world()
     assert world.get_path_name().startswith(MAP + '.'), world.get_path_name()
     assert LEVEL.set_current_level_by_name(MAP_NAME), 'set_current_level_by_name failed'
     check_streaming(world)
-    set_game_mode(world)
-    build_navigation(world)
+    if ARGS.ground_only:
+        assert not dirty_packages(), 'Map load dirtied packages; refusing ground-only edits'
+    else:
+        set_game_mode(world)
+        build_navigation(world)
+        if not ARGS.nav_only:
+            author_player_start(world)
+            author_zones(world)
+            author_spawners(world)
     if not ARGS.nav_only:
-        author_player_start(world)
-        author_zones(world)
-        author_spawners(world)
+        author_ground_entries(world)
     check_streaming(world)
+    if ARGS.ground_only:
+        assert set(dirty_packages()) <= {MAP}, 'Unrelated package is dirty; refusing map save'
+        if not REPORT['ground_updated']:
+            REPORT['unchanged'] = True
+            return
     assert u.HoverAuthoring.save_survival_map(world), 'save_survival_map refused or failed'
     REPORT['saved'] = True
 
@@ -502,7 +561,7 @@ def run():
         # Nothing is saved after an error: save_survival_map is the last step of main().
         REPORT['errors'].append(traceback.format_exc())
     finally:
-        REPORT['ok'] = not REPORT['errors'] and REPORT['saved']
+        REPORT['ok'] = not REPORT['errors'] and (REPORT['saved'] or REPORT.get('unchanged', False))
         write_dump()
         print('NYC_AUTHOR', REPORT['ok'], REPORT['errors'], flush=True)
         if u:

@@ -25,7 +25,8 @@ BAND_NYC = (800, 6000)  # provisional, Section 8.3
 BAND_CYBER = (1400, 10000)  # HoverCyberCity.cpp spawn band
 MODES = ('HoverNYCSurvivalGameMode', 'BP_NYCSurvival_C')
 NAV_SYSTEM = 'HoverNYCNavigationSystem'
-EXPECT = {'spawners': 25, 'zones': 7, 'starts': 1, 'recast': 1}
+EXPECT = {'spawners': 27, 'regular_spawners': 25, 'ground_entries': 2, 'zones': 7, 'starts': 1, 'recast': 1}
+GROUND_LABELS = {'AFS NYC Ground StartEast', 'AFS NYC Ground IntersectionWest'}
 PROBES = ['Plaza', 'SouthAve', 'NorthAve', 'Uptown', 'Plaza']
 EDGES = [
     ('Plaza', 'SouthAve'),
@@ -112,10 +113,17 @@ def setup(w, pc):
         raise RuntimeError('Wrong game mode %s (want one of %s on HoverCyberCityGameMode)' % (mode, MODES))
     actors = u.GameplayStatics.get_all_actors_of_class(w, u.Actor)
     spawners = sorted([a for a in actors if a.actor_has_tag('AFS_NYCSpawn')], key=lambda a: a.get_name())
+    ground = [a for a in actors if a.actor_has_tag('AFS_GroundEntry')]
+    REPORT['checks']['surveyed_ground_entries'] = (
+        {a.get_actor_label() for a in ground} == GROUND_LABELS
+        and all(a.actor_has_tag('AFS_NYCSpawn') and isinstance(a, u.ZE_ZombieSpawnPoint) for a in ground))
+    if not REPORT['checks']['surveyed_ground_entries']:
+        REPORT['errors'].append('Ground entry labels, classes or spawn tags differ from the surveyed pair')
     zones = [a for a in actors if a.actor_has_tag('AFS_NYCZone')]
     starts = [a for a in actors if a.actor_has_tag('AFS_SurvivalStart')]
     recasts = u.GameplayStatics.get_all_actors_of_class(w, u.RecastNavMesh)
-    counts = {'spawners': len(spawners), 'zones': len(zones), 'starts': len(starts), 'recast': len(recasts)}
+    counts = {'spawners': len(spawners), 'regular_spawners': sum(not a.actor_has_tag('AFS_GroundEntry') for a in spawners),
+              'ground_entries': len(ground), 'zones': len(zones), 'starts': len(starts), 'recast': len(recasts)}
     REPORT['setup']['counts'] = counts
     # Section 2 section 10: the per-map agent (55 x 320) and UHoverNYCCrowdManager come from the WorldSettings
     # navigation_system_config. A default system means the bake is the 190 cm agent and invalid for Brutes.
@@ -151,6 +159,7 @@ def setup(w, pc):
         REPORT['spawners'].append({'name': a.get_name(), 'label': a.get_actor_label() if hasattr(a, 'get_actor_label')
                                    else a.get_name(), 'zone': tags[0] if tags else None, 'spawn_tags': tags,
                                    'enabled': a.get_editor_property('is_enabled'),
+                                   'ground_entry': a.actor_has_tag('AFS_GroundEntry'),
                                    'placeholder': a.actor_has_tag('AFS_NYCSpawn_Placeholder'),
                                    'location': list(loc.to_tuple()), 'path_valid': len(path) > 1,
                                    'path_length': length, 'dist2d_to_start': dist2d(loc, start), 'used': 0})

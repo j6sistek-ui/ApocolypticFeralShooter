@@ -21,7 +21,6 @@ Severity: **G** game-breaking, **M** major (hurts play), **m** minor.
 | Bug | Sev |
 |---|---|
 | Life Engine jumps are low and short: 110 cm peak, 0.6 s in the air, 4.1 m running jump vs Classic 248 cm, 0.9 s, 6.1 m (preset gravity 2032, jump 686) | M |
-| Owner 2026-11-01: crouch / hold-B "penguin waddle" on the NYC maps. 2026-11-01 walking fix: the in-air pose on standing up is fixed and crouch speed is 300 to match the clips, but scripted tests show the same crouch on NYC Survival, Exploration and PostApo; the test pads start in first person (rifle stance, belly crawl) and NYC Survival in third person (hands-and-knees crawl). Hold B at rest = prone crawl, while moving = dive. Needs the owner's eyes on `walking_before_after.mp4` | m |
 | Life Engine has almost no air steering: 41 cm sideways in a jump vs 236 cm on Classic (Source-style air control needs mouse air-strafing) | M |
 | Lifeblood sign in Unreal: the repainted PERK MACHINE subtitle (texture confirmed in, 2026-11-01) renders with dark doubled edges under the game lighting, unlike Blender; suspect the normal-map relief or the glass material (normal flip is correct). Still `D:/AFS_Comparisons/PerkMachines_20261101/Lifeblood_text/unreal/stills/Lifeblood_sign.png` | m |
 | Life Engine straight-wall run dropped from 0.33 s to 0.1 s after the 2026-11-01 tick-order fix (ProveParkourLifeEngine); Classic unchanged | m |

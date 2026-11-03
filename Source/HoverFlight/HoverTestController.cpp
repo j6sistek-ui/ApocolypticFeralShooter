@@ -28,6 +28,33 @@
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 
+namespace
+{
+void ConfigurePickupSteering(UChaosWheeledVehicleMovementComponent &Move)
+{
+    // The pickup squares the stick by default. Retain fine control near center but give
+    // a partial stick more authority, and shorten the ramp into a turn.
+    FVehicleInputRateConfig &Input = Move.SteeringInputRate;
+    Input.InputCurveFunction = EInputFunctionType::CustomCurve;
+    Input.RiseRate = 4.f;
+    Input.UserCurve = FRuntimeFloatCurve();
+    for (const float Stick : {0.f, .25f, .5f, .75f, 1.f})
+        Input.UserCurve.EditorCurveData.AddKey(Stick, FMath::Lerp(Stick * Stick, Stick, .4f));
+
+    // Keep the vendor's parking lock and highway speed curve; add lock for city corners.
+    FRuntimeFloatCurve &SpeedCurve = Move.SteeringSetup.SteeringCurve;
+    const FRichCurve Original = *SpeedCurve.GetRichCurveConst();
+    SpeedCurve.ExternalCurve = nullptr;
+    SpeedCurve.EditorCurveData = Original;
+    SpeedCurve.EditorCurveData.UpdateOrAddKey(50.f, Original.Eval(50.f));
+    SpeedCurve.EditorCurveData.UpdateOrAddKey(35.f, FMath::Min(1.f, Original.Eval(35.f) + .18f));
+    SpeedCurve.EditorCurveData.UpdateOrAddKey(20.f, FMath::Min(1.f, Original.Eval(20.f) + .18f));
+    // Chaos copies the steering-vs-MPH table into its simulation at physics-state creation.
+    if (Move.IsPhysicsStateCreated())
+        Move.RecreatePhysicsState();
+}
+} // namespace
+
 void AHoverTestController::BeginPlay()
 {
     Super::BeginPlay();
@@ -671,11 +698,13 @@ void AHoverTestController::PlayerTick(float DT)
             {
                 Truck->AutoPossessPlayer = EAutoReceiveInput::Disabled;
                 UGameplayStatics::FinishSpawningActor(Truck, Transform);
+                auto *Move = Truck->FindComponentByClass<UChaosWheeledVehicleMovementComponent>();
+                if (Move && (!Policy || Policy->AllowsTruckMount()))
+                    ConfigurePickupSteering(*Move);
                 // Vendor BeginPlay only initializes this reference when already possessed.
                 if (auto *Property = FindFProperty<FObjectProperty>(Truck->GetClass(),
                                                                     TEXT("Chaos Wheeled Vehicle Movement Component")))
-                    Property->SetObjectPropertyValue_InContainer(
-                        Truck, Truck->FindComponentByClass<UChaosWheeledVehicleMovementComponent>());
+                    Property->SetObjectPropertyValue_InContainer(Truck, Move);
             }
         }
     }

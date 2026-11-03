@@ -97,6 +97,18 @@ Receipts and stills live under `D:\AFS_Comparisons\` (local, not in git).
   on characters during rain and snow. Cost, player running, quiet machine: snow +1.2 ms game thread, rain/storm about
   +2-3.7 ms game thread, GPU under +0.5 ms. Video `D:/AFS_Comparisons/Weather_20261101/weather_nyc.mp4`.
 
+- [ ] **18. Directional spawns and full-health re-entry** (2026-11-03). New waves favor underused reachable approach routes and give extra weight to the player's travel direction. Two marked street sites use the authored ground-rise montage.
+  *Check:* stand at the survival start, then run away from the horde. Watch for an eastern approach, a grounded rise followed by pursuit, and wounded stragglers returning out of sight at full health.
+  *Proof:* fixed-step rendered rounds 1–2 produced one eastern 8 m arrival at the start where the baseline had none. At the three-arm intersection all 14 reached 3 m in both runs and eight arrived from the north in both. The moving test stranded one of six zombies 170 m away at 73/100 HP. The same actor returned at 100/100 after 5.2 game seconds and resumed pursuit. Counts and kills held. In a separate trial, all 27 gate centers had verified blockers. The wounded zombie stayed at 73 HP for 12 seconds, returned at 100 HP 2.1 seconds after the gates cleared and advanced another 4.1 m over the next 15 seconds. Receipts under `D:/AFS_Comparisons/DirectionalSpawns_20261103/`.
+
+- [ ] **19. Crouch walking with a partial thumbstick** (2026-11-03). At 55% forward stick, Vexa now selects a slower directional walk. Four owned slow clips cover forward, backward, left and right. The existing standing and full-speed crouch clips are preserved.
+  *Check:* on the NYC Exploration pad in third person, tap B, push the stick halfway forward, then tap B again to stand. Hold B while moving to check the separate dive/prone action.
+  *Proof:* at 120 cm/s in Classic, all 67 steady samples changed from idle to the slow walk. Left and right toes now rise approximately 12 and 9 cm. Freshly reloaded final assets reproduced those steps. NYC Survival also selected the walk on all 67 steady samples in each of Life Engine and Classic. Full stick kept its original walk and the held-B sequence reached prone in both runs. The serialized foot-speed curves matched their stretched and speed-scaled source at 181 checked phases per curve and direction. [Two-second before/after video](<D:/AFS_Comparisons/DirectionalSpawns_20261103/gait-proposal/crouch_half_stick_before_after.mp4>).
+
+- [ ] **20. Crossroad pickup steering** (2026-11-03). The drivable pickup responds sooner near center and gives partial-stick turns more wheel angle at city speeds.
+  *Check:* on the PostApo or NYC Exploration pad, mount the pickup and turn into a street corner at about 45 km/h. Compare halfway stick with full lock and ease the stick back to center.
+  *Proof:* on the PostApo pad at 45 km/h, 65% stick tightened the measured radius from 28.44 m to 20.41 m in both directions. At full stick the first half-second turned the truck 11.3° versus 8.3° before, but the sustained circle was slightly wider (19.50 vs 19.02 m). At 85 km/h the matched 35% turns kept all four wheels down. One full-stick emergency turn briefly lifted one wheel. Receipts in `steering-proposal/baseline01` and `production01` under the Nov 3 directional-spawn evidence folder.
+
 ## Confirmed by the owner
 
 - [x] **15. Headhunter perk machine in NYC Exploration** (2026-11-01). Your Painter textures (Unreal export, full 4K)

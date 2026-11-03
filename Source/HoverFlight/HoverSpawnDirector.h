@@ -82,7 +82,8 @@ class HOVERFLIGHT_API UHoverSpawnDirector : public UObject
     FHoverSpawnTarget GetTarget();
     float GetSpawnInterval() const;
     // Full gate pipeline. bPackReuse tests only Chosen without cooldown/cap/recent gates.
-    AZE_ZombieSpawnPoint *Pick(const FHoverSpawnTarget &Target, bool bRelax, bool bPackReuse, int32 &OutCandidates);
+    AZE_ZombieSpawnPoint *Pick(const FHoverSpawnTarget &Target, bool bRelax, bool bPackReuse, int32 &OutCandidates,
+                               const AHoverCyberZombie *ReturningZombie = nullptr);
     void Rescore();
     void EnableOnly(AZE_ZombieSpawnPoint *Point);
     FHoverSpawnerState *FindState(const AZE_ZombieSpawnPoint *Point);
@@ -90,7 +91,8 @@ class HOVERFLIGHT_API UHoverSpawnDirector : public UObject
     // crowd of zombie meshes (Pawn) never counts as cover.
     bool IsOccluded(const FHoverSpawnTarget &Target, const FVector &Point, const AActor *Ignore) const;
     bool IsVisible(const FHoverSpawnTarget &Target, const FVector &Point, const AActor *Ignore) const;
-    bool CanReachCached(AZE_ZombieSpawnPoint *Point, const FHoverSpawnTarget &Target);
+    // World-cardinal incoming side, or INDEX_NONE if no complete route exists.
+    int32 GetApproachSideCached(AZE_ZombieSpawnPoint *Point, const FHoverSpawnTarget &Target);
     void UpdateStragglers();
     void UpdateForcedSprinters();
     // AFS 2026-10-31 (kid swarm): cuts the parked NYC pickup out of the navmesh (null-area nav modifier).
@@ -106,7 +108,15 @@ class HOVERFLIGHT_API UHoverSpawnDirector : public UObject
     TMap<TWeakObjectPtr<AHoverCyberZombie>, float> HiddenSince;
     TArray<TWeakObjectPtr<AZE_ZombieSpawnPoint>> Recent;
     TWeakObjectPtr<AZE_ZombieSpawnPoint> Chosen;
-    TMap<TWeakObjectPtr<AZE_ZombieSpawnPoint>, bool> Reachable;
+    // Evidence from the winning round-spawn pick, before any later relocation or rescore.
+    int32 ChosenApproachSide = INDEX_NONE;
+    uint8 ChosenEligibleSides = 0; // bits 0..3 = E, N, W, S
+    uint8 ChosenDrawSides = 0;     // after lane balancing, or the single deterministic boss lane
+    FVector2D ChosenTravelVelocity = FVector2D::ZeroVector;
+    float ChosenForwardWeight = 1.f;
+    TMap<TWeakObjectPtr<AZE_ZombieSpawnPoint>, int32> ApproachSides;
+    // Entries are successful births or pack starts, oldest first. Reclassify their routes as the target moves.
+    TArray<TWeakObjectPtr<AZE_ZombieSpawnPoint>, TInlineAllocator<4>> ServedApproaches;
     FVector ReachTarget = FVector::ZeroVector;
     FVector LastGrounded = FVector::ZeroVector;
     bool bHasGrounded = false;
