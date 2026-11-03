@@ -11,8 +11,10 @@ How a fresh chat or a new machine picks this project up without re-learning it.
 3. `Docs/BACKLOG.md` (bugs, ranked to-do, owner decisions; maintained first) and `Docs/DONE.md` (finished work
    waiting on the owner's in-game review)
 4. `Docs/LESSONS.md` (what already went wrong)
-5. `Docs/POWERUP_CATALOG.md` and `Docs/ASSET_KITS.md` (power-up designs; which packs exist and where)
-6. `Docs/NYC_ZOMBIE_SURVIVAL_DESIGN_20261029.md` (the design, by section)
+5. `Docs/POWERUP_CATALOG.md`, `Docs/POWERUP_BUILD.md` and `Docs/ASSET_KITS.md` (power-up designs and how the
+   decided looks are built; which packs exist and where)
+6. `Docs/PERKS.md` (the perk drafts and machines) and `Docs/WEATHER.md` (the weather system)
+7. `Docs/NYC_ZOMBIE_SURVIVAL_DESIGN_20261029.md` (the design, by section)
 
 ## Build and run
 
@@ -49,6 +51,37 @@ Play NYC Survival from the launcher or the editor: `/Game/HoverPrototype/Maps/L_
 | `Scripts/ProveLifeEngineAudio.py` | play proof for the Life Engine toggle and the audio pass |
 | `Scripts/FixNYCLights.py` | directional-light priority in the NYC map |
 | `Scripts/Blender/*.py` | headless Blender rig, cut, split and audit tools |
+| `Scripts/ProveWalking.py`, `MakeWalkingVideo.py` | walking / crouch proof (`WALK_MAP` survival, explore or postapo) and its video |
+| `Scripts/ImportWeather.py`, `ProveWeather.py`, `MakeWeatherVideo.py` | weather placement in NYC Survival, its proof (stills, moving camera, cost) and video |
+| `Scripts/ImportPerkMachines.py`, `ImportHeadhunter.py`, `CapturePerkMachines.py` | perk machines into NYC Exploration and their stills |
+| `Scripts/Blender/AssembleLifeblood.py`, `AssembleBioreactor.py`, `ExportHeadhunter.py` | machine assembly from the owner's parts |
+| `Scripts/AuthorPowerUpLive.py`, `CapturePowerUpLive.py` | the live power-up displays (Nuke, Medkit, Max Ammo) and their stills |
+
+## State on 2026-11-03 (hand-off)
+
+Everything below is committed and pushed (last code commit `7f0041c`); `Docs/DONE.md` lists what waits on the
+owner's in-game check (items 1-17), `Docs/BACKLOG.md` the ranked open work.
+
+Done 2026-11-01 to 11-03:
+- **Walking (DONE 16, `0d87cdb`).** Under the Life Engine CLS was told "in the air" on every grounded frame (engine
+  movement-mode numbers written into CLS's own enum) and its trajectory read a 0 top speed, so Vexa floated in the
+  fall pose and skated. Fixed in `HoverLocomotionBridge.cpp` / `HoverMovementComponent.cpp`; the pilot / Life Engine
+  tick cycle is one-way; NYC "Water" asphalt no longer plays puddle footsteps; crouch 300.
+- **Weather (DONE 17, `4bd9148`, `7f0041c`).** The owner's Multiplayer Dynamic Weather pack copied into
+  `Content/MultiplayerDynamicWeatherSystem`, driven by `AHoverWeather` in NYC Survival only; F6 row and `Weather`
+  exec. The pack's own manager is not used (it would replace NYC's sun, sky and fog).
+- **Perk machines.** Headhunter in NYC Exploration with the live blood tube (`AHoverBloodTube`, DONE 15, owner
+  confirmed the look); Lifeblood's PERK MACHINE subtitle repainted at 4K (in Unreal; renders with dark doubled edges,
+  see Bugs). Machines go in NYC Survival, never side by side (`PERKS.md`).
+- **Nuke display** doubled and sparkier (DONE 14 note).
+- **Texture caps audited** (2026-11-01): headless stills used to show low mips; capture scripts now force full
+  textures. Real 2K caps remain on the M4A1 (16 maps), zombie variants (38) and grenades (owner to decide on 4K).
+
+Being finished when this was written: a small weather round that stops snowflakes drawing as big discs at the lens.
+
+Machine notes: Unreal's local cache server holds about 999 saved sessions and can take ~10 minutes to start; runs
+then wait on it (do not kill it). Two SpaceSurvival editors from other sessions sometimes run alongside; one Unreal
+process at a time keeps the owner's PC usable.
 
 ## State on 2026-10-31 evening (hand-off)
 
@@ -61,7 +94,8 @@ with DA_NYC_Pistol in slot 2; fixed-distance survival camera; sprint 680. The ow
 Next by owner priority: the big bugs (zombie diversity / behaviour, kid clumping, Nuke presentation, ammo readout),
 then the pause-menu weather toggle.
 
-**Local-only changes (not in git, by the ignore rules):** `Config/DefaultGame.ini` SprintSpeed 680, and the patches
+**Local-only changes (not in git, by the ignore rules):** `Config/DefaultGame.ini` SprintSpeed 680 and
+`CrouchedSpeed=300` (2026-11-01), and the patches
 to the purchased `Plugins/HLMovementSystem` solver (each marked `AFS 2026-10-31`): PollInput keeps fed inputs,
 substepped tick, start-penetration rejection in the ground checks, the snap-down floor hit kept, pawns never floor or
 step (`IsPawnHit`), step-up retries while input is held, slide on the sweep normal, `HL_GROUND` / `HL_BLOCK` Verbose
@@ -70,7 +104,8 @@ logs. Back up the plugin folder with the project.
 ## Where the proofs go
 
 `D:\AFS_Comparisons\<Topic>_<date>\` with a JSON receipt per run (`capture.json`, `proof.json`, `*_report.json`).
-Stills are 1280x720 or 1920x1080 PNG; the owner looks at stills, not videos.
+Stills are 1280x720 or 1920x1080 PNG. Short labelled MP4s when the owner is away (walking, weather); compress a
+copy under 30 MB to send to the phone.
 
 ## Conventions
 

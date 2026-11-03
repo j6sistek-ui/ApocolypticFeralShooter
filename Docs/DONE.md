@@ -55,7 +55,7 @@ Receipts and stills live under `D:\AFS_Comparisons\` (local, not in git).
 - [ ] **12. Fill light on Vexa, texture pass** (2026-10-31, `21eb065`).
   *Check:* Vexa a little brighter, zombies beside her not; console `HoverFillLight 0` / `1` to compare.
   *AI:* `ProveVisualPass.py`: torso +54 % at 2.5 cd, a zombie beside her unchanged.
-- [ ] **14. Live power-ups in NYC Exploration** (2026-10-31). The decided looks on a live display actor: Nuke,
+- [ ] **14. Live power-ups in NYC Exploration** (2026-10-31; Nuke doubled and sparkier 2026-11-03, `7f0041c`). The decided looks on a live display actor: Nuke,
   Medkit, Max Ammo, about 3 m ahead of the player start (in the editor: Realtime on, editor focused; or press Play).
   *Check:*
   - The Nuke shakes and ticks throughout. Spark bursts and small pops alternate about every 3 s. In the last 5 s
@@ -86,6 +86,16 @@ Receipts and stills live under `D:\AFS_Comparisons\` (local, not in git).
   After: jog clip 110/115 frames (Classic 106/109), feet 0.4 cm off the ground, Classic unchanged, parkour proof
   passes. Video `D:/AFS_Comparisons/Walking_20261101/walking_before_after.mp4`. Open: the crouch "waddle" was not
   reproduced as map-specific (see Bugs), Life Engine wall runs got shorter (0.33 to 0.1 s).
+- [ ] **17. Weather in NYC Survival** (2026-11-01/03, `4bd9148`, `7f0041c`). The owner's Multiplayer Dynamic Weather
+  pack, driven by `AHoverWeather` (`Docs/WEATHER.md`). F6 menu row "Weather": Clear / Cloudy / Rain / Storm / Snow
+  (6 s blend; Cancel keeps the current weather); exec `Weather Rain`, `Weather Snow 0` (instant). Clear is the default
+  and looks as before.
+  *Check:* each weather from the player view and while running; wet streets and snow cover; thunder flashes in Storm;
+  blood still lands on zombies in rain/snow; the rain and wind sound.
+  *AI:* two independent reviews. Pack copied intact (130 packages, source project untouched); no second sun; wet/snow
+  layer fades out (no edge); snow holds while running (-18 %) and turning (-10 %); particle cap restored; blood decals
+  on characters during rain and snow. Cost, player running, quiet machine: snow +1.2 ms game thread, rain/storm about
+  +2-3.7 ms game thread, GPU under +0.5 ms. Video `D:/AFS_Comparisons/Weather_20261101/weather_nyc.mp4`.
 
 ## Confirmed by the owner
 

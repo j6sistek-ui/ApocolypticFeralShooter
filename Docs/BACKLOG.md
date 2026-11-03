@@ -1,6 +1,6 @@
 # AFS: backlog
 
-Only open work: bugs, the ranked to-do list, and decisions waiting on the owner. Last update: 2026-10-31.
+Only open work: bugs, the ranked to-do list, and decisions waiting on the owner. Last update: 2026-11-03.
 
 ## How this list works (owner rules, 2026-10-31)
 
@@ -46,12 +46,10 @@ Owner 2026-10-31: ideas get tabled when they come (logged, not designed); the pr
 While the owner cannot playtest, in-between work chips away at the top items that do not need a playtest.
 
 **Now**
-0b. **Weather** (owner 2026-11-01: right after walking, ahead of everything else, "I want to see how it works"): migrate
-   Dreamrise from `M:\MultiplayerDynamicWeather`, rain/snow toggle in the F6 menu, in NYC Survival.
 0. Power-ups, time-boxed: the live displays are built (`DONE.md` #14), waiting on the owner's look in the
    editor. Open for the owner's eye: the Nuke pops have no smoke puff (it could not read on the black casing), Max
-   Ammo's haze is a little yellow on one edge, and the Nuke reads small from the start (owner 2026-11-01: make it twice as big and a bit more sparky while idling;
-   staged in `Scripts/AuthorPowerUpLive.py`: item_scale 2.0, events every 1.6-2.6 s, more spark dribble; needs one run). Then the shared look goes to
+   Ammo's haze is a little yellow on one edge, and the Nuke reads small from the start (fixed 2026-11-03: twice the size, sparks every ~0.9 s, `DONE.md` #14;
+   from 3.5 m the sparks still read faint, the owner's call whether to make them bigger or brighter). Then the shared look goes to
    the other power-ups, and the display gets attached to the real pickup (`bLoopForEvaluation = false`).
 1. **Phase 1 core loop: perks** (`PERKS.md`; the owner is drafting the ideas). Design the perk mechanics and the machines, then build them: the six perks (owner
    drafts so far: Necrosiphon (health), Life Blood (revive), Headhunter (ammo efficiency), Survivalist (speed,
@@ -78,7 +76,8 @@ While the owner cannot playtest, in-between work chips away at the top items tha
    vision, Curse, boss totem, sprint, health) after the core loop (Max Ammo model arrived: #18).
 7. Ammo economy: buy points (staged in `Scripts/AuthorNukeAmmoStations.py`, waiting on the owner), glint toned down;
    folds into the wall-buy work in item 1 if that comes first.
-8. Weather: migrate Dreamrise from `M:\MultiplayerDynamicWeather`, rain/snow toggle in the menu.
+8. Weather follow-ups (`DONE.md` #17): owner's call on rain cost and snowflake look; saved menu choice; day/night,
+   seasons and clouds from the pack (not used); wet walls.
 9. ZESP in-game settings menu in the pause menu: the owner says what it should expose.
 10. Vehicles: drivable Doomsday pickup (owner adds the pack to the project); gas can if rides need fuel.
 11. Dead-body poses: corpse dressing and dormant ambush zombies that rise (owner adds the Unreal Engine format).
@@ -101,6 +100,13 @@ While the owner cannot playtest, in-between work chips away at the top items tha
 
 ## Waiting on the owner
 
+- (2026-11-03) Rain cost: about +2-3.7 ms on the game thread while running; accept, or thin the rain further?
+- (2026-11-03) Snow and Nuke sparks read faint at play distance: bigger / brighter flakes and sparks?
+- (2026-11-01) Crouch "penguin waddle": still there after the walking fix? (`walking_before_after.mp4`)
+- (2026-11-01) Sword grip (hand through the katana handle): rank it (asked: with melee feel #5?).
+- (2026-11-01) Muzzle-flash scope whiteout: which gun and map?
+- (2026-11-01) Raise the M4A1 (16) and zombie (38) textures from 2K to 4K, with the texture pool at about 3 GB?
+- (2026-11-03) Clear Unreal's local cache of ~999 saved sessions (slow starts)?
 - Ammo buy points: place 2-3 in NYC (Cyber City's supply crate)? Price?
 - Kid swarm: truck to the Garage? a closer horde-only spawn band? more horde attack tokens?
 - Nuke banner text (placeholder "STREET SWEEP"); keep the slow-motion beat? Later per the power-up design: ticking
