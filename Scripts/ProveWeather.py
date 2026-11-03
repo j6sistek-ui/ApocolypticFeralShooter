@@ -34,7 +34,7 @@ WEATHER_QUICK=1: the stills without video frames.
 WEATHER_BASELINE=1: before ImportWeather.py placed the actor (or for a reference run): shoots only the Clear stills
 (clear_player / clear_street at the same moments) into <out>/baseline/.
 Out: <root>/{stills,frames,baseline}/ + prove.json / perf.json / move.json; root D:/AFS_Comparisons/Weather_20261101
-(WEATHER_OUT overrides it; the fix round 1 receipts are in its fix1/ subfolder).
+(WEATHER_OUT overrides it; the fix round 1 / 2 receipts are in its fix1/ and fix2/ subfolders).
 """
 import json
 import math

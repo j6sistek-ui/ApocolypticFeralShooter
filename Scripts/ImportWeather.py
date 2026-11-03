@@ -23,7 +23,12 @@ What it does (and nothing else):
      camera, longer streaks, collision kept), P_Rain_AFS_Far (same from 20 m, never traced, 1.25 s life), P_Snow_AFS
      (400 flakes/s over 18 x 18 m, 2.5-11 m above the camera, 2.5-6 cm flakes, traced) and P_Snow_AFS_Far (850/s
      over 32 x 32 m, 1.5-12 m up, never traced, 2.5-3.5 s life). The pack's assets stay as shipped.
-  3. Reloads the map and checks: actor count = before + (0 or 1), exactly one AHoverWeather, its references.
+  2c. Fix round 2: M_WeatherFlake, a copy of the pack's M_RadialGradient (the rain and snow sprite material) whose
+     opacity fades out with the particle's distance from the camera (0 inside 1 m, full from 2 m), so flakes and drops
+     passing the lens no longer draw as big soft discs; the snow copies use it, the rain copies its instance
+     MI_WeatherRainDrop (fades 1.5 m -> 3.5 m: the streaks are long).
+  3. Reloads the map and checks: actor count = before + (0 or 1), exactly one AHoverWeather, its references, and
+     the material each particle copy draws with.
 Receipt: D:/AFS_Comparisons/Weather_20261101/import_receipt.json (WEATHER_OUT overrides the folder). WEATHER_DRY=1
 reports without saving.
 """
@@ -244,12 +249,100 @@ VARIANTS = {
 }
 
 
+# Fix round 2 (2026-11-03 review, fix1 frames v05_to_snow_player_0059/0060): with the near snow 2 m ahead and spawned
+# through the whole volume height, flakes pass right in front of the lens and draw as big soft white discs (up to
+# ~100 px: a 6 cm flake 40 cm from the camera). Rain drops share the pack's material. M_WeatherFlake is a copy of the
+# pack's M_RadialGradient (lit translucent, opacity = particle alpha x radial gradient) whose opacity also fades with
+# the PARTICLE's distance from the camera (its centre, so a flake fades as a whole): 0 inside NearFadeStart (1 m),
+# full from NearFadeEnd (2 m, half at 1.5 m). The sphere it empties is ~0.03 % of the near snow volume, so the
+# density gained in fix round 1 stays. The pack's M_RadialGradient stays as shipped.
+# Rain drops are 60-90 cm streaks: at 1-2 m they still drew as 20-25 px wide soft pillars (fix2 first pass), so the
+# rain copies use MI_WeatherRainDrop, an instance of the same material fading 1.5 m -> 3.5 m (half at 2.5 m; ~4 % of
+# the near rain column).
+FLAKE_SRC = '/Game/MultiplayerDynamicWeatherSystem/Materials/M_RadialGradient'
+FLAKE = FOLDER + '/M_WeatherFlake'
+FLAKE_FADE = (100.0, 200.0)
+RAIN_MI = FOLDER + '/MI_WeatherRainDrop'
+RAIN_FADE = (150.0, 350.0)
+
+
+def build_flake_material():
+    if EA.does_asset_exist(FLAKE):
+        EA.delete_asset(FLAKE)
+    mat = EA.duplicate_asset(FLAKE_SRC, FLAKE)
+    assert mat, 'duplicate failed ' + FLAKE
+    prop = u.MaterialProperty.MP_OPACITY
+    src = MEL.get_material_property_input_node(mat, prop)
+    src_out = MEL.get_material_property_input_node_output_name(mat, prop)
+    assert src, 'M_RadialGradient has no opacity input'
+
+    def ex(cls, x, y, **props):
+        e = MEL.create_material_expression(mat, cls, x, y)
+        for k, v in props.items():
+            e.set_editor_property(k, v)
+        return e
+
+    pos = ex(u.MaterialExpressionParticlePositionWS, -900, 600)
+    cam = ex(u.MaterialExpressionCameraPositionWS, -900, 720)
+    dist = ex(u.MaterialExpressionDistance, -700, 640)
+    assert MEL.connect_material_expressions(pos, '', dist, 'A') and MEL.connect_material_expressions(cam, '', dist, 'B')
+    near0 = ex(u.MaterialExpressionScalarParameter, -700, 780, parameter_name='NearFadeStart',
+               default_value=FLAKE_FADE[0])
+    near1 = ex(u.MaterialExpressionScalarParameter, -700, 880, parameter_name='NearFadeEnd',
+               default_value=FLAKE_FADE[1])
+    fade = ex(u.MaterialExpressionSmoothStep, -500, 700)
+    assert (MEL.connect_material_expressions(near0, '', fade, 'Min') and
+            MEL.connect_material_expressions(near1, '', fade, 'Max') and
+            MEL.connect_material_expressions(dist, '', fade, 'Value'))
+    mul = ex(u.MaterialExpressionMultiply, -250, 500)
+    assert MEL.connect_material_expressions(src, src_out, mul, 'A') and MEL.connect_material_expressions(fade, '', mul, 'B')
+    assert MEL.connect_material_property(mul, '', prop)
+    MEL.recompile_material(mat)
+    EA.save_asset(FLAKE, only_if_is_dirty=False)
+    row = {'path': FLAKE, 'from': FLAKE_SRC, 'near_fade_cm': FLAKE_FADE, 'expressions': MEL.get_num_material_expressions(mat),
+           'opacity_input': MEL.get_material_property_input_node(mat, prop).get_name(),
+           'blend_mode': str(mat.get_editor_property('blend_mode')),
+           'used_with_particle_sprites': mat.get_editor_property('used_with_particle_sprites')}
+    try:
+        row['compile_errors'] = u.HoverAuthoring.material_compile_errors(mat)
+    except Exception as e:  # noqa: BLE001
+        row['compile_errors'] = 'n/a: %s' % e
+    R['material']['flake'] = row
+    log('flake', json.dumps(row, default=str))
+    return mat
+
+
+def build_rain_instance(parent):
+    if EA.does_asset_exist(RAIN_MI):
+        EA.delete_asset(RAIN_MI)
+    mi = u.AssetToolsHelpers.get_asset_tools().create_asset('MI_WeatherRainDrop', FOLDER, u.MaterialInstanceConstant,
+                                                            u.MaterialInstanceConstantFactoryNew())
+    MEL.set_material_instance_parent(mi, parent)
+    MEL.set_material_instance_scalar_parameter_value(mi, 'NearFadeStart', RAIN_FADE[0])
+    MEL.set_material_instance_scalar_parameter_value(mi, 'NearFadeEnd', RAIN_FADE[1])
+    MEL.update_material_instance(mi)
+    EA.save_asset(RAIN_MI, only_if_is_dirty=False)
+    row = {'path': RAIN_MI, 'parent': mi.get_editor_property('parent').get_path_name(),
+           'near_fade_cm': [MEL.get_material_instance_scalar_parameter_value(mi, n) for n in ('NearFadeStart',
+                                                                                              'NearFadeEnd')]}
+    assert row['near_fade_cm'] == list(RAIN_FADE), row
+    R['material']['rain_drop'] = row
+    log('rain_drop', json.dumps(row))
+    return mi
+
+
 def tuned_copies():
     out = {}
+    # The copies reference M_WeatherFlake / MI_WeatherRainDrop: remove them before the materials are rebuilt.
+    for name in VARIANTS:
+        if EA.does_asset_exist(FOLDER + '/' + name):
+            EA.delete_asset(FOLDER + '/' + name)
+    if EA.does_asset_exist(RAIN_MI):
+        EA.delete_asset(RAIN_MI)
+    flake = build_flake_material()
+    drop = build_rain_instance(flake)
     for name, (src, tune) in VARIANTS.items():
         dst = FOLDER + '/' + name
-        if EA.does_asset_exist(dst):
-            EA.delete_asset(dst)
         ps = EA.duplicate_asset(src, dst)
         assert ps, 'duplicate failed ' + dst
         row = {}
@@ -263,6 +356,13 @@ def tuned_copies():
                     v = u.Vector(*v)
                 obj.set_editor_property(k, v)
             row[sub] = {k: str(obj.get_editor_property(k)) for k in props}
+        req = u.find_object(None, '%s.%s:ParticleModuleRequired_0' % (dst, name))
+        assert req, 'no required module in ' + dst
+        want = drop if name.startswith('P_Rain') else flake
+        req.set_editor_property('material', want)
+        row['ParticleModuleRequired_0.Material'] = req.get_editor_property('material').get_path_name()
+        assert row['ParticleModuleRequired_0.Material'] == want.get_path_name(), row['ParticleModuleRequired_0.Material']
+        ps.modify()
         EA.save_asset(dst, only_if_is_dirty=False)
         out[name] = row
     R['material']['rain_variants'] = out
@@ -341,7 +441,20 @@ try:
                                 for k in ('sun_light', 'sky_light', 'height_fog', 'atmosphere')})
             R['verify']['start_weather'] = str(w.get_editor_property('start_weather'))
             R['verify']['label'] = w.get_actor_label()
-        R['ok'] = len(actors) == R['verify']['expected'] and len(ws) == 1
+        # Fix round 2: the particle copies draw with M_WeatherFlake / MI_WeatherRainDrop, the pack's
+        # M_RadialGradient is left to the pack's own P_Rain / P_Snow.
+        # (The registry's referencer list for the brand-new material comes back empty in the same session, so each
+        # copy's required module is read back; a fresh editor process lists the copies as its users.)
+        R['verify']['flake_users'] = {}
+        for n in VARIANTS:
+            req = u.find_object(None, '%s/%s.%s:ParticleModuleRequired_0' % (FOLDER, n, n))
+            R['verify']['flake_users'][n] = req.get_editor_property('material').get_path_name() if req else None
+        R['verify']['radial_gradient_users'] = sorted(str(x) for x in EA.find_package_referencers_for_asset(FLAKE_SRC,
+                                                                                                          False))
+        flake_ok = (all(v == (RAIN_MI + '.MI_WeatherRainDrop' if n.startswith('P_Rain') else FLAKE + '.M_WeatherFlake')
+                        for n, v in R['verify']['flake_users'].items()) and
+                    not any(x.startswith(FOLDER) for x in R['verify']['radial_gradient_users']))
+        R['ok'] = len(actors) == R['verify']['expected'] and len(ws) == 1 and flake_ok
     else:
         R['ok'] = True
 except Exception:

@@ -92,7 +92,27 @@ map's lighting to the map:
   `P_Snow_AFS` (400 flakes/s over 18 x 18 m, spawned 2.5-11 m above the camera) / `P_Snow_AFS_Far` (850/s over
   32 x 32 m, spawned 1.5-12 m above the camera, 2.5-3.5 s life), 2.5-6 cm flakes. Spawning across the height (not
   at one fixed height) is what keeps the air full where a volume has just moved to. The pack's originals are the
-  fallback. `fx.MaxCPUParticlesPerEmitter` (a global, 1000 by default, which capped the first snow at exactly
+  fallback.
+  **Lens fade (fix round 2, 2026-11-03):** with the near snow 2 m ahead and spawned through the full height, flakes
+  passed right in front of the lens and drew as big soft white discs, up to ~100 px (review: `fix1/frames/
+  v05_to_snow_player_0059.png`, `_0060.png`); rain drops did the same as wide soft pillars. The copies no longer use
+  the pack's sprite material `M_RadialGradient` (lit translucent, opacity = particle alpha x radial gradient) but
+  `M_WeatherFlake`, a copy of it whose opacity also fades with the PARTICLE's distance from the camera (its centre,
+  so a flake fades as a whole; scalar parameters `NearFadeStart` / `NearFadeEnd`): snow 0 inside 1 m, full from 2 m;
+  rain through the instance `MI_WeatherRainDrop`, 0 inside 1.5 m, full from 3.5 m (its 60-90 cm streaks were still
+  20-25 px wide soft pillars with the snow's 1-2 m). No spawn change and no C++ change: the spheres it empties are a
+  tiny part of the volumes (snow flakes in view within 15 m / 7 m standing 391 / 75 vs fix round 1's 426 / 68, run
+  to run noise; live flakes ~1,000 + 2,590 as before). The pack's `M_RadialGradient` stays as shipped (its own P_Rain
+  / P_Snow still use it). Receipts `D:/AFS_Comparisons/Weather_20261101/fix2/`: `lens_before_after.png` (the
+  reviewer's two frames, a rain street frame and the snow / rain player stills, fix1 | fix2),
+  `lens_before_after_moving.png`, `lensdisc_fix1.json` / `lensdisc_fix2.json` (still-camera segments: pixels 20
+  levels brighter than the median of the +-3 neighbouring frames, blobs >= ~20 px across: snow blend v05 32 frames
+  with one, max ~108 px -> 16, max 48 px (a corner streak left from the storm, no disc); snow street 19, max 56 ->
+  8, max 32; rain streaks are long, so their numbers are streak lengths: frames with a >= 40 px blob v03 30 -> 6,
+  v04 23 -> 9), `pass1/` (the first pass, rain at 1-2 m), `import_receipt.json`, `verify_flake_fresh.json` (a fresh
+  editor process: the snow copies draw with `M_WeatherFlake`, the rain copies with `MI_WeatherRainDrop`),
+  `import_files_written.txt` (the map and the seven `/Game/HoverPrototype/Weather/` assets, nothing else).
+  `fx.MaxCPUParticlesPerEmitter` (a global, 1000 by default, which capped the first snow at exactly
   1,000 flakes) is raised to 6000 only while rain or snow runs and put back to its old value at the end of the
   blend to a dry weather and in EndPlay (log `HOVER_WEATHER particle cap ...`; `DescribeState` prints `cap=`).
   Splashes: the pack's `P_Rain_Ground` on the near rain's collision events, at most 40/s within 18 m (was 90/s
@@ -128,8 +148,9 @@ map's lighting to the map:
 
 ## Scripts
 
-- `Scripts/ImportWeather.py` (nullrhi): builds `M_WeatherSurface`, the tuned particle copies, places/re-wires the
-  one actor in `L_NYC_Survival`, saves, reloads and checks the actor count (4,429 -> 4,430). Re-runnable.
+- `Scripts/ImportWeather.py` (nullrhi): builds `M_WeatherSurface`, `M_WeatherFlake` + `MI_WeatherRainDrop` (the
+  near-camera fade), the tuned particle copies, places/re-wires the one actor in `L_NYC_Survival`, saves, reloads
+  and checks the actor count (4,429 -> 4,430; re-runs keep 4,430) and each copy's material. Re-runnable.
 - `Scripts/ProveWeather.py` (RenderOffscreen PIE): stills from Vexa's view, a raised street camera and a low
   close camera for Clear / Rain / Storm (with a thunder flash) / Snow / Cloudy / Clear again, through the real
   F6 key path (F6, Up, Right, Enter) and the exec; a blood decal (`MI_BloodDecal`) on Vexa and on a zombie in rain
@@ -145,8 +166,8 @@ map's lighting to the map:
 
 ## Cost (offscreen PIE, 1280x720, this machine; rough)
 
-**Fix round 1 (2026-11-03), player moving.** Receipts in `D:\AFS_Comparisons\Weather_20261101/fix1\`:
-`perf\perf.json` (`ProveWeather.py` with `WEATHER_PERF=1`: Vexa runs a circle with scripted W + L3 and the camera
+**Fix round 1 (2026-11-03), player moving.** Receipts in `D:/AFS_Comparisons/Weather_20261101/fix1/`:
+`perf/perf.json` (`ProveWeather.py` with `WEATHER_PERF=1`: Vexa runs a circle with scripted W + L3 and the camera
 turning 40 deg/s, from the same start every window; Clear / Rain / Clear / Snow / Clear / Storm twice, instant
 switches, 4 s settle + 4 s window; `stat unit` game thread and GPU through `HoverAuthoring.GetThreadTimesMs`, one
 `profilegpu` per window in `logs\perf.log`). No other Unreal, cook or game process was running for that run (a

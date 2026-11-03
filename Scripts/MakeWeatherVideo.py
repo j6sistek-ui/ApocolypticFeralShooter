@@ -6,7 +6,7 @@ existed, ProveWeather.py with WEATHER_BASELINE=1):
   python M:/UnrealProjects/AFS/Scripts/MakeWeatherVideo.py [root] [out]
 
 root (stills/, frames/ of a ProveWeather.py run) defaults to D:/AFS_Comparisons/Weather_20261101; out (where the
-video, sheet and check go) defaults to root. Fix round 1: root = <main>/fix1, out = <main>. The Clear baseline is
+video, sheet and check go) defaults to root. Fix rounds: root = <main>/fix1 or <main>/fix2, out = <main>. The Clear baseline is
 <root>/baseline or, failing that, <out>/baseline. Writes to out:
   weather_nyc.mp4            1280x720, 30 fps, the recorded segments in order (Clear player / street, the menu
                              switch to Rain through its blend, rain street, Vexa running in the rain, the switch
