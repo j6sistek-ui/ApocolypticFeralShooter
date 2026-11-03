@@ -40,6 +40,8 @@ tell which is newer.
 - **Weather:** Dreamrise Multiplayer Dynamic Weather System is the chosen system (own project on M), not the free one.
 - **This chat is AFS.** SpaceSurvival work goes to its own chat. (2026-10-31)
 
+- NYC Survival stragglers return to an eligible entrance at full round-scaled health. Keep their existing wave slot and only heal after a successful relocation. (Owner, 2026-11-03.)
+
 ## Operational rules
 
 - **Never build while an editor is open.** `UnrealEditor.exe` locks `UnrealEditor-HoverFlight.dll`; check `tasklist`

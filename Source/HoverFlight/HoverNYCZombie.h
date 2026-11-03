@@ -60,6 +60,13 @@ class HOVERFLIGHT_API AHoverNYCZombie : public AHoverCyberZombie
     }
     // Every gate PerformAttack applies before asking for a token (cooldown, vendor reset, swing).
     bool CanStartAttack() const;
+    // Called for a tagged vendor birth during the base BeginPlay. The NYC mesh and capsule are finalized later.
+    void RequestGroundEntry()
+    {
+        bGroundEntryRequested = true;
+    }
+    static const FName GroundEntryTag;
+    UPROPERTY(BlueprintReadOnly) bool bGroundEntryActive = false;
     // Releases the slot, token and swing timers. The NYC mode calls this after RelocateZombie
     // teleports the zombie, and the downed-player grace window calls it through the AI.
     void ReleaseCrowdClaims();
@@ -95,6 +102,10 @@ class HOVERFLIGHT_API AHoverNYCZombie : public AHoverCyberZombie
     virtual bool ShouldPlayDataAssetSounds() const override;
 
     void ApplyVariation();
+    bool StartGroundEntry();
+    void EndGroundEntry(UAnimMontage *Montage, bool bInterrupted);
+    UPROPERTY() TObjectPtr<UAnimMontage> DefaultGroundRise;
+    bool bGroundEntryRequested = false;
     // AFS 2026-10-31 (review): applies the definition's authored MeshYawOffset (bAlignMeshYaw only).
     void AlignMeshFacing();
     void UpdateFacing(APawn *Target, float DeltaSeconds);

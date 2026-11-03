@@ -1,5 +1,6 @@
 #include "HoverSpawnDirector.h"
 #include "HoverNYCSurvival.h"
+#include "HoverNYCZombie.h"
 #include "HoverPilot.h"
 #include "HoverTestController.h"
 #include "AIController.h"
@@ -11,10 +12,49 @@
 #include "Kismet/GameplayStatics.h"
 #include "Navigation/PathFollowingComponent.h"
 #include "NavigationSystem.h"
+#include "NavigationData.h"
+#include "Survival/ZE_SurvivalComponent.h"
 #include "Zombies/ZE_ZombieAIController.h"
 #include "Components/SceneComponent.h"
 #include "NavAreas/NavArea_Null.h"
 #include "NavModifierComponent.h"
+
+namespace
+{
+// First inward crossing of the 8 m circle around the target, in path traversal order.
+int32 IncomingSide(const FNavPathSharedPtr &Path, const FVector &Entrance, const FVector &Target)
+{
+    constexpr double RadiusSq = 800.0 * 800.0;
+    FVector2D Bearing(Entrance - Target);
+    if (Path)
+    {
+        const auto &Points = Path->GetPathPoints();
+        for (int32 I = 1; I < Points.Num(); ++I)
+        {
+            const FVector2D Start(Points[I - 1].Location - Target);
+            const FVector2D Step(Points[I].Location - Points[I - 1].Location);
+            const double Outside = Start.SizeSquared() - RadiusSq;
+            const double Toward = -FVector2D::DotProduct(Start, Step);
+            if (Outside < 0.0 || Toward <= 0.0)
+                continue; // Already inside, stationary in XY, or heading away.
+
+            const double RadiusTerm = RadiusSq * Step.SizeSquared();
+            const double Disc = RadiusTerm - FMath::Square(FVector2D::CrossProduct(Start, Step));
+            if (Disc <= 1.e-12 * RadiusTerm)
+                continue; // Misses and tangencies have no inward crossing.
+            // Stable smaller root. A long segment may enter and leave with both endpoints outside.
+            const double T = Outside / (Toward + FMath::Sqrt(Disc));
+            if (T <= 1.0 + 1.e-12)
+            {
+                Bearing = Start + FMath::Min(T, 1.0) * Step;
+                break;
+            }
+        }
+    }
+    const double Degrees = FMath::RadiansToDegrees(FMath::Atan2(Bearing.Y, Bearing.X));
+    return (FMath::FloorToInt((Degrees + 45.0) / 90.0) + 4) % 4; // E, N, W, S
+}
+} // namespace
 
 UWorld *UHoverSpawnDirector::GetWorld() const
 {
@@ -72,6 +112,7 @@ void UHoverSpawnDirector::BeginRound(int32 InRound, EHoverRoundKind InKind, int3
     Round = InRound;
     Kind = InKind;
     Quota = InQuota;
+    ServedApproaches.Reset();
     for (FHoverSpawnerState &State : Spawners)
         State.UsesThisRound = 0;
     Credit = 0.f;
@@ -218,20 +259,23 @@ bool UHoverSpawnDirector::IsVisible(const FHoverSpawnTarget &Target, const FVect
            !IsOccluded(Target, Point, Ignore);
 }
 
-bool UHoverSpawnDirector::CanReachCached(AZE_ZombieSpawnPoint *Point, const FHoverSpawnTarget &Target)
+int32 UHoverSpawnDirector::GetApproachSideCached(AZE_ZombieSpawnPoint *Point, const FHoverSpawnTarget &Target)
 {
     const float Time = Now();
     if (Time >= NextReachReset || FVector::DistSquared(Target.Location, ReachTarget) > FMath::Square(200.f))
     {
-        Reachable.Reset();
+        ApproachSides.Reset();
         ReachTarget = Target.Location;
         NextReachReset = Time + 1.f;
     }
-    if (const bool *Cached = Reachable.Find(Point))
+    if (const int32 *Cached = ApproachSides.Find(Point))
         return *Cached;
-    const bool bReachable = Mode->CanReachPoint(Point, Target.Location, Target.Extent, Target.Pawn);
-    Reachable.Add(Point, bReachable);
-    return bReachable;
+    FNavPathSharedPtr Path;
+    const bool bReachable = Mode->CanReachPoint(Point, Target.Location, Target.Extent, Target.Pawn,
+                                                Settings->DirectionalSpawnBias > 0.f ? &Path : nullptr);
+    const int32 Side = bReachable ? IncomingSide(Path, Point->GetActorLocation(), Target.Location) : INDEX_NONE;
+    ApproachSides.Add(Point, Side);
+    return Side;
 }
 
 FHoverSpawnerState *UHoverSpawnDirector::FindState(const AZE_ZombieSpawnPoint *Point)
@@ -251,7 +295,7 @@ void UHoverSpawnDirector::EnableOnly(AZE_ZombieSpawnPoint *Point)
 }
 
 AZE_ZombieSpawnPoint *UHoverSpawnDirector::Pick(const FHoverSpawnTarget &Target, bool bRelax, bool bPackReuse,
-                                                int32 &OutCandidates)
+                                                int32 &OutCandidates, bool bBalanceApproaches)
 {
     OutCandidates = 0;
     if (!Target.bValid || !Settings || !Mode)
@@ -271,6 +315,7 @@ AZE_ZombieSpawnPoint *UHoverSpawnDirector::Pick(const FHoverSpawnTarget &Target,
         FHoverSpawnerState *State;
         float Weight;
         float Distance;
+        int32 Side;
         bool bCapped;
         bool bRecent;
     };
@@ -313,6 +358,9 @@ AZE_ZombieSpawnPoint *UHoverSpawnDirector::Pick(const FHoverSpawnTarget &Target,
                 continue;
             Weight *= Settings->OccludedWeight;
         }
+        // Re-entry teleports the capsule above the marker; an otherwise hidden floor may expose that destination.
+        if (!bBalanceApproaches && IsVisible(Target, Position + FVector(0, 0, 50), Point))
+            continue;
         // AFS 2026-10-31 (kid swarm): a new horde pack favours entrances away from the last pack's bearing
         // (x .35 on the same bearing up to x 1 opposite), so a swarm arrives from several sides when the gates
         // allow it.
@@ -325,28 +373,94 @@ AZE_ZombieSpawnPoint *UHoverSpawnDirector::Pick(const FHoverSpawnTarget &Target,
         if (Weight <= 0.f)
             continue;
         // Reachability is always required (last, because it is the most expensive gate).
-        if (!CanReachCached(Point, Target))
+        const int32 Side = GetApproachSideCached(Point, Target);
+        if (Side == INDEX_NONE)
             continue;
-        List.Add({&State, Weight, Distance, !bPackReuse && State.UsesThisRound >= RoundCap,
+        List.Add({&State, Weight, Distance, Side, !bPackReuse && State.UsesThisRound >= RoundCap,
                   !bPackReuse && Recent.Contains(State.Point)});
     }
     OutCandidates = List.Num();
-    // Boss release: the farthest reachable entrance, so the boss walks in rather than appearing.
-    if (bBossArmed && !bPackReuse && List.Num())
+    if (List.IsEmpty())
+        return nullptr;
+    const bool bBossPick = bBossArmed && !bPackReuse;
+    if (!bBossPick)
+    {
+        // The per-round cap and the distinct-recent rule only apply while other entrances exist.
+        if (List.ContainsByPredicate([](const FCandidate &C) { return !C.bCapped; }))
+            List.RemoveAll([](const FCandidate &C) { return C.bCapped; });
+        if (List.Num() >= 3 && List.ContainsByPredicate([](const FCandidate &C) { return !C.bRecent; }))
+            List.RemoveAll([](const FCandidate &C) { return C.bRecent; });
+    }
+
+    const bool bHaveRouteSides = Settings->DirectionalSpawnBias > 0.f;
+    const bool bAllowPathAhead = bHaveRouteSides && !bPackReuse && !bBossPick;
+    const FVector2D TravelVelocity(Target.Pawn->GetVelocity());
+    float ForwardWeights[4] = {1.f, 1.f, 1.f, 1.f};
+    if (bBalanceApproaches)
+    {
+        ChosenEligibleSides = 0;
+        if (bHaveRouteSides)
+            for (const FCandidate &Candidate : List)
+                ChosenEligibleSides |= 1 << Candidate.Side;
+        ChosenTravelVelocity = TravelVelocity;
+    }
+    auto Select = [&](const FCandidate &Candidate) {
+        if (bBalanceApproaches)
+        {
+            ChosenApproachSide = bHaveRouteSides ? Candidate.Side : INDEX_NONE;
+            ChosenForwardWeight = ForwardWeights[Candidate.Side];
+        }
+        return Candidate.State->Point.Get();
+    };
+
+    if (bBossPick)
     {
         const FCandidate *Farthest = &List[0];
         for (const FCandidate &Candidate : List)
             if (Candidate.Distance > Farthest->Distance)
                 Farthest = &Candidate;
-        return Farthest->State->Point.Get();
+        return Select(*Farthest);
     }
-    // The per-round cap and the distinct-recent rule only apply while other entrances exist.
-    if (List.ContainsByPredicate([](const FCandidate &C) { return !C.bCapped; }))
-        List.RemoveAll([](const FCandidate &C) { return C.bCapped; });
-    if (List.Num() >= 3 && List.ContainsByPredicate([](const FCandidate &C) { return !C.bRecent; }))
-        List.RemoveAll([](const FCandidate &C) { return C.bRecent; });
-    if (List.IsEmpty())
-        return nullptr;
+
+    // Balance lanes independently of entrance count. Within each surviving lane keep the original weights.
+    if (bBalanceApproaches && bAllowPathAhead && List.Num() > 1 && FMath::FRand() < Settings->DirectionalSpawnBias)
+    {
+        int32 LastServed[4] = {INDEX_NONE, INDEX_NONE, INDEX_NONE, INDEX_NONE};
+        for (int32 I = 0; I < ServedApproaches.Num(); ++I)
+            if (AZE_ZombieSpawnPoint *Used = ServedApproaches[I].Get())
+            {
+                const int32 Side = GetApproachSideCached(Used, Target);
+                if (Side != INDEX_NONE)
+                    LastServed[Side] = I;
+            }
+        float SideTotals[4] = {};
+        int32 Oldest = MAX_int32;
+        for (const FCandidate &Candidate : List)
+        {
+            SideTotals[Candidate.Side] += Candidate.Weight;
+            Oldest = FMath::Min(Oldest, LastServed[Candidate.Side]);
+        }
+        List.RemoveAll([&](const FCandidate &Candidate) { return LastServed[Candidate.Side] != Oldest; });
+        for (FCandidate &Candidate : List)
+            Candidate.Weight /= SideTotals[Candidate.Side];
+    }
+    // Apply this after normalization: even two equally recent lanes with one entrance each retain the preference.
+    // The pawn's horizontal velocity includes on-foot and mounted movement. Camera motion never enters this term.
+    // Straggler re-entry gets this same travel preference without serving a lane or changing birth evidence.
+    if (bAllowPathAhead)
+    {
+        const double Speed = TravelVelocity.Size();
+        if (Speed > 20.0)
+        {
+            const FVector2D Heading = TravelVelocity / Speed;
+            const double Gain = Settings->PathAheadSpawnBias * FMath::Clamp((Speed - 20.0) / 180.0, 0.0, 1.0);
+            const double Alignment[4] = {Heading.X, Heading.Y, -Heading.X, -Heading.Y};
+            for (int32 Side = 0; Side < 4; ++Side)
+                ForwardWeights[Side] += float(Gain * FMath::Max(0.0, Alignment[Side]));
+            for (FCandidate &Candidate : List)
+                Candidate.Weight *= ForwardWeights[Candidate.Side];
+        }
+    }
     float Total = 0.f;
     for (const FCandidate &Candidate : List)
         Total += Candidate.Weight;
@@ -355,9 +469,9 @@ AZE_ZombieSpawnPoint *UHoverSpawnDirector::Pick(const FHoverSpawnTarget &Target,
     {
         Roll -= Candidate.Weight;
         if (Roll <= 0.f)
-            return Candidate.State->Point.Get();
+            return Select(Candidate);
     }
-    return List.Last().State->Point.Get();
+    return Select(List.Last());
 }
 
 void UHoverSpawnDirector::Rescore()
@@ -487,6 +601,12 @@ void UHoverSpawnDirector::OnSpawned(AHoverCyberZombie &Zombie, bool bVendorSpawn
     if (Point)
     {
         const TWeakObjectPtr<AZE_ZombieSpawnPoint> Used(Point);
+        if (!bBossArmed && (Kind != EHoverRoundKind::Horde || PackRemaining <= 0))
+        {
+            if (ServedApproaches.Num() == 4)
+                ServedApproaches.RemoveAt(0);
+            ServedApproaches.Add(Used);
+        }
         Recent.Remove(Used);
         Recent.Insert(Used, 0);
         if (Recent.Num() > Settings->RecentCount)
@@ -510,7 +630,14 @@ void UHoverSpawnDirector::OnSpawned(AHoverCyberZombie &Zombie, bool bVendorSpawn
     bRelaxCone = false;
     // Jitter: a reachable point near the entrance and +-60 degrees of yaw, so a door never
     // produces a conga line on one exact XY. The vendor spawn already succeeded either way.
-    if (Settings->JitterRadius > 0.f)
+    // A ground entry plays at its checked footprint; jitter could move its rise behind a wall or off the curb.
+    const bool bGroundEntry = Point && Point->ActorHasTag(AHoverNYCZombie::GroundEntryTag);
+    if (bGroundEntry)
+    {
+        if (auto *NYCZombie = Cast<AHoverNYCZombie>(&Zombie))
+            NYCZombie->RequestGroundEntry();
+    }
+    else if (Settings->JitterRadius > 0.f)
         if (auto *Navigation = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()))
         {
             FNavLocation Out;
@@ -521,13 +648,16 @@ void UHoverSpawnDirector::OnSpawned(AHoverCyberZombie &Zombie, bool bVendorSpawn
         }
     Zombie.AddActorWorldRotation(FRotator(0, FMath::FRandRange(-60.f, 60.f), 0));
     const APawn *Player = UGameplayStatics::GetPlayerPawn(Mode, 0);
+    const TCHAR SideLabel = ChosenApproachSide != INDEX_NONE ? TEXT("ENWS")[ChosenApproachSide] : TEXT('-');
     UE_LOG(LogTemp, Display,
            TEXT("HOVER_SPAWN time=%.2f round=%d spawner=%s distance=%.0f tier=%.0f interval=%.2f pressure=%.2f "
-                "credit=%.2f candidates=%d relaxCone=%d zombie=%s role=%s"),
+                "credit=%.2f candidates=%d relaxCone=%d zombie=%s role=%s approachSide=%c eligibleMask=%u "
+                "travelXY=%.1f,%.1f forwardWeight=%.3f"),
            Time, Round, *GetNameSafe(Point),
            Player ? FVector::Dist2D(Player->GetActorLocation(), Zombie.GetActorLocation()) : -1.f, Zombie.SpeedTier,
            LastInterval, LastPressure, Credit, Candidates, bWasRelaxed ? 1 : 0, *Zombie.GetName(),
-           *UEnum::GetValueAsString(Zombie.GetRole()));
+           *UEnum::GetValueAsString(Zombie.GetRole()), SideLabel, uint32(ChosenEligibleSides), ChosenTravelVelocity.X,
+           ChosenTravelVelocity.Y, ChosenForwardWeight);
     RateJitter = FMath::FRandRange(Settings->RateJitterMin, Settings->RateJitterMax);
     // Re-pick at once, so the next spawn can use a different entrance in the same tick window.
     if (Mode && Mode->GetZombiesRemaining() - Live.Num() > 0)
@@ -557,20 +687,23 @@ bool UHoverSpawnDirector::RelocateZombie(AHoverCyberZombie &Zombie)
         return false;
     const FHoverSpawnTarget Target = GetTarget();
     int32 Found = 0;
-    AZE_ZombieSpawnPoint *Point = Pick(Target, false, false, Found);
+    AZE_ZombieSpawnPoint *Point = Pick(Target, false, false, Found, false);
     if (!Point)
+        return false;
+    const FVector Destination = Point->GetActorLocation() + FVector(0, 0, 50);
+    if (!Zombie.SetActorLocation(Destination, false, nullptr, ETeleportType::TeleportPhysics))
         return false;
     auto *AI = Cast<AAIController>(Zombie.GetController());
     if (AI)
         AI->StopMovement();
     if (auto *Movement = Zombie.GetCharacterMovement())
         Movement->StopMovementImmediately();
-    Zombie.SetActorLocation(Point->GetActorLocation() + FVector(0, 0, 50), false, nullptr,
-                            ETeleportType::TeleportPhysics);
+    if (Zombie.SurvivalComponent)
+        Zombie.SurvivalComponent->SetHealth(Zombie.SurvivalComponent->GetMaxHealth());
     if (AI)
         if (auto *Board = AI->GetBlackboardComponent())
             Board->SetValueAsVector(AZE_ZombieAIController::Key_LastKnownLocation, Target.Location);
-    // No relocation limit: health is kept and the zombie stays in the vendor ZombiesAlive.
+    // A successful re-entry heals to the individual's current wave-scaled maximum without creating a new wave member.
     ++Zombie.RelocationCount;
     Zombie.UnreachableSince = -1.f;
     Zombie.SpawnerUsed = Point;

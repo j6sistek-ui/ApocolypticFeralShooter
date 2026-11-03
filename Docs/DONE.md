@@ -97,6 +97,10 @@ Receipts and stills live under `D:\AFS_Comparisons\` (local, not in git).
   on characters during rain and snow. Cost, player running, quiet machine: snow +1.2 ms game thread, rain/storm about
   +2-3.7 ms game thread, GPU under +0.5 ms. Video `D:/AFS_Comparisons/Weather_20261101/weather_nyc.mp4`.
 
+- [ ] **18. Directional spawns and full-health re-entry** (2026-11-03). New waves favor underused reachable approach routes and give extra weight to the player's travel direction. Two marked street sites use the authored ground-rise montage.
+  *Check:* stand at the survival start, then run away from the horde. Watch for an eastern approach, a grounded rise followed by pursuit, and wounded stragglers returning out of sight at full health.
+  *Proof:* fixed-step rendered rounds 1–2 produced one eastern 8 m arrival at the start where the baseline had none. At the three-arm intersection all 14 reached 3 m in both runs and eight arrived from the north in both. The moving test stranded one of six zombies 170 m away at 73/100 HP. The same actor returned at 100/100 after 5.2 game seconds and resumed pursuit. Counts and kills held. Receipts under `D:/AFS_Comparisons/DirectionalSpawns_20261103/`.
+
 ## Confirmed by the owner
 
 - [x] **15. Headhunter perk machine in NYC Exploration** (2026-11-01). Your Painter textures (Unreal export, full 4K)

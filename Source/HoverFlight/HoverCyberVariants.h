@@ -415,6 +415,13 @@ class HOVERFLIGHT_API UHoverNYCEncounterSettings : public UHoverCyberEncounterSe
     float EdgeWeight = .3f;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Placement", meta = (ClampMin = "0", ClampMax = "1"))
     float OccludedWeight = .8f;
+    // Chance to choose among the least recently served incoming lanes before rolling an entrance.
+    // Zero retains the original weighted entrance selection.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Placement", meta = (ClampMin = "0", ClampMax = "1"))
+    float DirectionalSpawnBias = .85f;
+    // Extra weight for the lane ahead of a moving pawn, after lane balancing. Idle and rear/side lanes stay neutral.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Placement", meta = (ClampMin = "0", ClampMax = "1"))
+    float PathAheadSpawnBias = .4f;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Placement", meta = (ClampMin = "0"))
     float CooldownMin = 4.f;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AFS|Placement", meta = (ClampMin = "0"))

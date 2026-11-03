@@ -141,8 +141,14 @@ void UHoverNYCNavigationSystem::PostInitProperties()
 // ---------------------------------------------------------------------------------------------
 // AHoverNYCZombie
 
+const FName AHoverNYCZombie::GroundEntryTag(TEXT("AFS_GroundEntry"));
+
 AHoverNYCZombie::AHoverNYCZombie()
 {
+    // This owned, contact-notify-free montage uses the Feral Reanimate clip registered with the roster rigs.
+    static ConstructorHelpers::FObjectFinderOptional<UAnimMontage> Rise(
+        TEXT("/Game/HoverPrototype/NYC/Zombies/AM_NYC_Kid_Rise.AM_NYC_Kid_Rise"));
+    DefaultGroundRise = Rise.Get();
     AIControllerClass = AHoverNYCZombieAI::StaticClass();
     // BP_CyberZombie supplied the vendor AnimClass. The native class must too: without an anim
     // instance the mesh sits in its reference pose, PlayAnimMontage returns 0 and the vendor
@@ -207,8 +213,8 @@ bool AHoverNYCZombie::IsUsingVendorTree() const
 bool AHoverNYCZombie::CanStartAttack() const
 {
     const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
-    return !bIsDead && !bIsAttacking && !bSwingPending && !bRoaring && ZombieData && Now >= NextAttackTime &&
-           Now >= VendorResetAt;
+    return !bIsDead && !bIsAttacking && !bSwingPending && !bRoaring && !bGroundEntryActive && ZombieData &&
+           Now >= NextAttackTime && Now >= VendorResetAt;
 }
 
 void AHoverNYCZombie::BeginPlay()
@@ -277,6 +283,62 @@ void AHoverNYCZombie::BeginPlay()
     // capsule. Re-apply the agent settings now that the capsule has its final size.
     if (auto *AI = Cast<AHoverNYCZombieAI>(GetController()))
         AI->ApplyCrowdSettings();
+    if (bGroundEntryRequested && !StartGroundEntry())
+        UE_LOG(LogTemp, Warning, TEXT("HOVER_GROUND_ENTRY fallback zombie=%s"), *GetName());
+}
+
+bool AHoverNYCZombie::StartGroundEntry()
+{
+    bGroundEntryRequested = false;
+    UAnimInstance *Anim = GetMesh()->GetAnimInstance();
+    UAnimMontage *Montage = DefaultGroundRise;
+    if (const auto *Definition = GetNYCDefinition())
+        if (const auto *Override = Definition->SpecialMontages.Find(TEXT("Rise")); Override && !Override->IsNull())
+            Montage = Override->LoadSynchronous();
+    if (!Anim || !Montage || bIsDead)
+        return false;
+
+    // The vendor deliberately spawns 50 cm high. Seat the final, scaled capsule on the actual walkable floor.
+    // Keep it solid and available to weapon traces for the whole animation.
+    UCapsuleComponent *Capsule = GetCapsuleComponent();
+    UCharacterMovementComponent *Movement = GetCharacterMovement();
+    const FVector Center = GetActorLocation();
+    const FCollisionShape Shape = Capsule->GetCollisionShape();
+    FCollisionQueryParams Query(SCENE_QUERY_STAT(HoverGroundEntry), false, this);
+    FHitResult Floor;
+    if (!GetWorld()->SweepSingleByObjectType(Floor, Center + FVector::UpVector * 100.f,
+                                             Center - FVector::UpVector * 250.f, FQuat::Identity,
+                                             FCollisionObjectQueryParams(ECC_WorldStatic), Shape, Query) ||
+        Floor.bStartPenetrating || !Movement->IsWalkable(Floor))
+        return false;
+    const FVector Grounded = Floor.Location + FVector::UpVector * 2.f;
+    if (GetWorld()->OverlapBlockingTestByProfile(Grounded, FQuat::Identity, Capsule->GetCollisionProfileName(), Shape,
+                                                 Query))
+        return false;
+
+    if (Anim->Montage_PlayWithBlendIn(Montage, FAlphaBlendArgs(0.f)) <= 0.f)
+        return false;
+    SetActorLocation(Grounded, false, nullptr, ETeleportType::TeleportPhysics);
+    bGroundEntryActive = true;
+    Movement->DisableMovement();
+    SetCrowdSimulation(true);
+    FOnMontageEnded Ended;
+    Ended.BindUObject(this, &AHoverNYCZombie::EndGroundEntry);
+    Anim->Montage_SetEndDelegate(Ended, Montage);
+    UE_LOG(LogTemp, Display, TEXT("HOVER_GROUND_ENTRY start zombie=%s montage=%s"), *GetName(), *GetNameSafe(Montage));
+    return true;
+}
+
+void AHoverNYCZombie::EndGroundEntry(UAnimMontage *Montage, bool bInterrupted)
+{
+    bGroundEntryActive = false;
+    if (!bIsDead)
+    {
+        GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+        SetCrowdSimulation(false);
+    }
+    UE_LOG(LogTemp, Display, TEXT("HOVER_GROUND_ENTRY end zombie=%s montage=%s interrupted=%d dead=%d"), *GetName(),
+           *GetNameSafe(Montage), bInterrupted, bIsDead);
 }
 
 void AHoverNYCZombie::AlignMeshFacing()
@@ -379,7 +441,7 @@ APawn *AHoverNYCZombie::GetChaseTarget() const
 void AHoverNYCZombie::Tick(float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
-    if (bIsDead || !ZombieData || DeltaSeconds <= 0.f)
+    if (bIsDead || bGroundEntryActive || !ZombieData || DeltaSeconds <= 0.f)
         return;
     const float Now = GetWorld()->GetTimeSeconds();
     APawn *Target = GetChaseTarget();
@@ -819,7 +881,7 @@ float AHoverNYCZombie::TakeDamage(float Damage, const FDamageEvent &Event, ACont
         const float MaxHealth = FMath::Max(1.f, SurvivalComponent->GetMaxHealth());
         const float Windup = Definition ? Definition->WindupSeconds : .5f;
         const bool bInWindup = bSwingPending || (bIsAttacking && Now - AttackStartTime <= Windup);
-        const bool bEligible = bHasReactions && Damage < SurvivalComponent->GetHealth() &&
+        const bool bEligible = !bGroundEntryActive && bHasReactions && Damage < SurvivalComponent->GetHealth() &&
                                (!Definition || Definition->bFlinchOnHit) &&
                                Damage >= (Definition ? Definition->FlinchDamageFraction : .1f) * MaxHealth &&
                                Now - LastMontageFlinch >= (Definition ? Definition->FlinchMontageCooldown : .35f) &&
@@ -1027,7 +1089,7 @@ void AHoverNYCZombieAI::Tick(float DeltaSeconds)
     Super::Tick(DeltaSeconds);
     auto *Zombie = Cast<AHoverNYCZombie>(GetPawn());
     auto *Board = GetBlackboardComponent();
-    if (!Zombie || Zombie->IsKilled() || !Board || !Zombie->ZombieData)
+    if (!Zombie || Zombie->IsKilled() || Zombie->bGroundEntryActive || !Board || !Zombie->ZombieData)
         return;
 
     // 1. Target.

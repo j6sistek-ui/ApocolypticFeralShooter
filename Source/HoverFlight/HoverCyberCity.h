@@ -104,7 +104,7 @@ class HOVERFLIGHT_API AHoverCyberCityGameMode : public AZE_ZombieWaveGameMode, p
     // Uncached complete-path test from a spawn point or zombie to a target location.
     // Public so the NYC spawn director can share the base's navigation query.
     bool CanReachPoint(AActor *From, const FVector &Target, const FVector &TargetExtent,
-                       const UObject *Querier = nullptr) const;
+                       const UObject *Querier = nullptr, FNavPathSharedPtr *OutPath = nullptr) const;
 
   private:
     float SpeedBonusUntil = 0;

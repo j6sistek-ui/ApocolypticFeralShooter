@@ -59,6 +59,8 @@ Play NYC Survival from the launcher or the editor: `/Game/HoverPrototype/Maps/L_
 
 ## State on 2026-11-03 (hand-off)
 
+**NYC spawn playtest pass (2026-11-03 evening).** The local survival map contains 25 regular entrances and two ground entries. On a checkout with the old native map, run `Scripts/AuthorNYCSurvival.py --ground-only` in a clean Unreal editor to add just those two markers. `ProveNYCDirectionalSpawns.py` measures the first approach inside 8 m independently of the entrance bearing. The baseline and after receipts, rendered frames, and pre-change map backup live in `D:/AFS_Comparisons/DirectionalSpawns_20261103/`. See DONE 18 for measured behavior and the pending owner check.
+
 Everything below is committed and pushed (last code commit `58fa70c`); `Docs/DONE.md` lists what waits on the
 owner's in-game check (items 1-17), `Docs/BACKLOG.md` the ranked open work.
 
