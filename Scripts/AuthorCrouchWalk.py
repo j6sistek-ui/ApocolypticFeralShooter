@@ -17,6 +17,14 @@ DIRECTIONS = ('Fwd', 'Bwd', 'Left', 'Right')
 SLOW_SPEED = 120.0
 SAMPLE_HZ = 30
 TAG = 'AFS_CrouchWalkRecipe'
+SPEED_CURVES = {'footspeed_l', 'footspeed_r', 'movedata_speed'}
+# Only these four generated packages predate curve retiming; refuse to overwrite a locally edited copy.
+V1_HASHES = {
+    'QA_Crouch_SlowWalk_Fwd': '6e6c5895b85fe1d0e420a38d21d5003b60bc05dc171b9a86b651832ccbcc2169',
+    'QA_Crouch_SlowWalk_Bwd': '85540bfe9e6110bf23fce130573e1ae3777a17e60c96da286bf4ec230a41df81',
+    'QA_Crouch_SlowWalk_Left': 'f00945e3046461ff3550abc800f7556c108ca593f5bd97b0df1942ac2efdad43',
+    'QA_Crouch_SlowWalk_Right': '7944284e0d25231b10c03ffdaca1c066a15c57da874041db481e9ca7a45b5372',
+}
 
 
 def native_hash(asset_path):
@@ -29,17 +37,54 @@ def root_motion_sample(sequence, at, options):
     return pose.get_bone_pose('root', u.AnimPoseSpaces.WORLD).translation
 
 
+def retime_curves(source, controller, frames):
+    """Retain the source curve's knot times and sample between them when stretching the walk."""
+    types = u.RawCurveTrackTypes
+    source_duration = source.get_play_length()
+    duration = frames / SAMPLE_HZ
+    value_at = u.AnimationLibrary.get_float_value_at_time
+    for name in u.AnimationLibrary.get_animation_curve_names(source, types.RCT_FLOAT):
+        # The Foot Placement node consumes joint speed, so it varies inversely with cycle duration.
+        # Untouched constant timecodes have neither a phase nor a speed to adjust.
+        scale = source_duration / duration if str(name).lower() in SPEED_CURVES else 1.
+        times, values = u.AnimationLibrary.get_float_keys(source, name)
+        if not values or min(values) == max(values) and (scale == 1. or not values[0]):
+            continue
+        identifier = u.AnimationCurveIdentifier()
+        identifier.set_curve_identifier(name, types.RCT_FLOAT)
+        knots = sorted({0., source_duration, *(t for t in times if 0. < t < source_duration)})
+        # Keep sharp peaks at their authored key times. Intermediate readings preserve cubic source curves.
+        samples = [a + (b-a)*i/4 for a,b in zip(knots, knots[1:]) for i in range(4)] + [source_duration]
+        keys = [u.RichCurveKey(time=t * duration / source_duration, value=scale * value_at(source, name, t),
+                               interp_mode=u.RichCurveInterpMode.RCIM_LINEAR) for t in samples]
+        if not controller.set_curve_keys(identifier, keys, False):
+            raise RuntimeError(f'Could not retime {name} from {source.get_name()}')
+
+
 def slow_clip(source_path, dest_path):
     source = u.load_asset(source_path)
     if not source:
         raise RuntimeError('Missing owned walk ' + source_path)
     library = u.EditorAssetLibrary
-    recipe = f'v1/{SLOW_SPEED}/{native_hash(source_path)}'
+    fingerprint = f'/{SLOW_SPEED}/{native_hash(source_path)}'
+    recipe = 'v2' + fingerprint
     if library.does_asset_exist(dest_path):
         existing = u.load_asset(dest_path)
-        if str(library.get_metadata_tag(existing, TAG)) == recipe:
+        tag = str(library.get_metadata_tag(existing, TAG))
+        if tag == recipe:
             return existing
-        raise RuntimeError('Existing slow walk has a different recipe or source: ' + dest_path)
+        if tag != 'v1' + fingerprint or native_hash(dest_path) != V1_HASHES.get(existing.get_name()):
+            raise RuntimeError('Existing slow walk has a different recipe or source: ' + dest_path)
+        controller = u.HoverAuthoring.get_local_animation_controller(existing)
+        controller.open_bracket('Update slow-walk curve timing', False)
+        try:
+            retime_curves(source, controller, round(existing.get_play_length() * SAMPLE_HZ))
+        finally:
+            controller.close_bracket(False)
+        library.set_metadata_tag(existing, TAG, recipe)
+        if not library.save_loaded_asset(existing, False):
+            raise RuntimeError('Could not save updated curves on ' + dest_path)
+        return existing
 
     options = u.AnimPoseEvaluationOptions()
     options.set_editor_property('should_retarget', False)
@@ -50,8 +95,9 @@ def slow_clip(source_path, dest_path):
     if not 275 <= distance / duration <= 325:
         raise RuntimeError(f'Unexpected source speed {distance / duration:.2f} on {source_path}')
     # These owned derivatives contain bone animation. Do not silently retime a future event-bearing source.
-    if u.AnimationLibrary.get_animation_notify_events(source) or u.AnimationLibrary.get_animation_sync_markers(source):
-        raise RuntimeError('The source now has timed markers or notifies: ' + source_path)
+    if (u.AnimationLibrary.get_animation_notify_events(source) or u.AnimationLibrary.get_animation_sync_markers(source)
+            or u.AnimationLibrary.get_animation_curve_names(source, u.RawCurveTrackTypes.RCT_TRANSFORM)):
+        raise RuntimeError('The source now has timed events, markers or transform curves: ' + source_path)
     frames = round(distance / SLOW_SPEED * SAMPLE_HZ)
     tracks = u.AnimationLibrary.get_animation_track_names(source)
     samples = [u.AnimPoseExtensions.get_anim_pose_at_time(source, duration * i / frames, options)
@@ -69,6 +115,7 @@ def slow_clip(source_path, dest_path):
                 bone, [k.translation for k in keys], [k.rotation for k in keys], [k.scale3d for k in keys], False
             ):
                 raise RuntimeError(f'Failed to retime {dest_path}: {bone}')
+        retime_curves(source, controller, frames)
     finally:
         controller.close_bracket(False)
     if abs(slow.get_play_length() - frames / SAMPLE_HZ) > .02:
