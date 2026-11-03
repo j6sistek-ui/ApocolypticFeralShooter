@@ -83,19 +83,34 @@ map's lighting to the map:
   the blend; when they stop, drops already falling finish and whatever is left is removed at the end of the blend.
 - **Precipitation** follows the view (camera manager), each kind in a near volume that is traced against the city
   (no rain or snow under the roof Vexa stands under, rain splash events) and a far volume that is not (cheap; its
-  drops expire around street level): rain near 7 m / far 26 m ahead of the camera, snow near 5 m / far 26 m.
-  Assets are AFS-tuned copies of the pack's Cascade systems in `/Game/HoverPrototype/Weather/`: `P_Rain_AFS` /
-  `P_Rain_AFS_Far` (2,200 drops/s each, longer streaks; far 1.25 s life), `P_Snow_AFS` (450 flakes/s over
-  18 x 18 m) / `P_Snow_AFS_Far` (900/s over 32 x 32 m, 4.5-6 s life), 2.5-6 cm flakes. The pack's originals are
-  the fallback. `fx.MaxCPUParticlesPerEmitter` is raised to 6000 on the first change (Cascade's default 1000 capped
-  the first snow at exactly 1,000 flakes).
-  Splashes: the pack's `P_Rain_Ground` on the near rain's collision events, at most 90/s within 30 m.
+  drops expire around street level): rain near 7 m / far 26 m ahead of the camera, snow near 2 m / far 10 m.
+  All four also lead the VIEW TARGET's smoothed horizontal velocity (Vexa running or gliding; a still camera actor
+  gets none): rain by 0.6 s, snow by 1.5 s, at most 15 m (`RainLeadSeconds`, `SnowLeadSeconds`, `MaxLead`), so a
+  running player meets air that already holds drops / flakes at eye level.
+  Assets are AFS-tuned copies of the pack's Cascade systems in `/Game/HoverPrototype/Weather/`: `P_Rain_AFS`
+  (1,800 drops/s from 12 m above the camera) / `P_Rain_AFS_Far` (2,200/s from 20 m, 1.25 s life), longer streaks;
+  `P_Snow_AFS` (400 flakes/s over 18 x 18 m, spawned 2.5-11 m above the camera) / `P_Snow_AFS_Far` (850/s over
+  32 x 32 m, spawned 1.5-12 m above the camera, 2.5-3.5 s life), 2.5-6 cm flakes. Spawning across the height (not
+  at one fixed height) is what keeps the air full where a volume has just moved to. The pack's originals are the
+  fallback. `fx.MaxCPUParticlesPerEmitter` (a global, 1000 by default, which capped the first snow at exactly
+  1,000 flakes) is raised to 6000 only while rain or snow runs and put back to its old value at the end of the
+  blend to a dry weather and in EndPlay (log `HOVER_WEATHER particle cap ...`; `DescribeState` prints `cap=`).
+  Splashes: the pack's `P_Rain_Ground` on the near rain's collision events, at most 40/s within 18 m (was 90/s
+  within 30 m: ~1 ms of game thread on its own, see Cost).
 - **Wet streets / snow cover:** NYC's materials do not read the pack's MPC (wiring the pack's MF_ functions into
   every NYC master material is the expensive route, not taken). Instead `M_WeatherSurface` (deferred decal, built
-  by `ImportWeather.py`) is projected straight down in a 90 x 90 x 30 m box around the camera: up-facing surfaces
+  by `ImportWeather.py`) is projected straight down in a 300 x 300 x 60 m box around the camera: up-facing surfaces
   only (normal from screen derivatives), the pack's perlin noise for patches; `Wetness` = dark + glossy,
-  `SnowCover` = white + rough. Characters and what they hold opt out of decals while it shows (a world-aligned
-  layer would swim on them) and get their own setting back after.
+  `SnowCover` = white + rough. It fades with horizontal distance from the camera, full to 90 m and gone at 145 m
+  (`SurfaceFadeStart` / `SurfaceFadeEnd` -> material `FadeStart` / `FadeEnd`), so no edge slides with the view
+  (the first build's 90 m box ended in a hard square edge ~45 m out).
+  Characters (and what is attached to them) must not get the world-aligned layer (it would swim on them), but
+  must keep blood / impact decals: while the layer shows, their meshes draw into custom depth
+  (`SetRenderCustomDepth`, only on meshes that were not already doing so, restored when the layer goes) and
+  `M_WeatherSurface` drops every pixel whose custom depth equals the scene depth (the visible surface is a
+  character). A character behind a wall does not mask the wall. Needs `r.CustomDepth` 1 and custom depth rendered
+  before the DBuffer decals (`r.CustomDepth.Order` 2, the default with `r.DBuffer` 1; both checked in the proof).
+  Other decals (`SortOrder` above the layer's -10) land on characters as normal.
 - **Sound:** the pack's `Rain_Cue` and `Starter_Wind05_Cue` loops (2D, volume follows the blend), thunder from
   `BP_Thunder`. The NYC wind bed from the 2026-10-31 audio pass keeps playing under them.
 - **MPC:** Rain phase / Ground Wetness / Wind Intensity / Season are set too (pack materials only).
@@ -117,17 +132,46 @@ map's lighting to the map:
   one actor in `L_NYC_Survival`, saves, reloads and checks the actor count (4,429 -> 4,430). Re-runnable.
 - `Scripts/ProveWeather.py` (RenderOffscreen PIE): stills from Vexa's view, a raised street camera and a low
   close camera for Clear / Rain / Storm (with a thunder flash) / Snow / Cloudy / Clear again, through the real
-  F6 key path (F6, Up, Right, Enter) and the exec; video frames; frame-time windows; `profilegpu`.
-  `WEATHER_QUICK=1` stills only (~2 min); `WEATHER_BASELINE=1` the Clear stills without the actor.
-- `Scripts/MakeWeatherVideo.py` (plain Python + Pillow + ffmpeg): `weather_nyc.mp4`, `weather_contact_sheet.png`,
-  `clear_check.json` (pixel difference of Clear against the pre-weather baseline).
+  F6 key path (F6, Up, Right, Enter) and the exec; a blood decal (`MI_BloodDecal`) on Vexa and on a zombie in rain
+  and snow; the moving-camera test in rain and snow (Vexa still / running with scripted W + L3 / camera turning
+  90 deg/s / running a circle, drops and flakes within 15 m and 7 m inside a 40 deg cone counted every frame);
+  `fx.MaxCPUParticlesPerEmitter` read before, during and after; video frames. `WEATHER_QUICK=1` stills only;
+  `WEATHER_BASELINE=1` the Clear stills without the actor; `WEATHER_MOVE=1` only the moving test (`move.json`,
+  with `WEATHER_LEGACY=1` the pre-fix placement); `WEATHER_PERF=1` the cost windows with the player moving
+  (`perf.json`); `WEATHER_OUT` the output folder.
+- `Scripts/MakeWeatherVideo.py <root> [<out>]` (plain Python + Pillow + ffmpeg): `weather_nyc.mp4` (with the
+  moving-camera segments), `weather_contact_sheet.png` (plus a moving row and a blood-decal row), `clear_check.json`
+  (pixel difference of Clear against the pre-weather baseline).
 
 ## Cost (offscreen PIE, 1280x720, this machine; rough)
 
-Receipts: `D:\AFS_Comparisons\Weather_20261101\perf.json` (`ProveWeather.py` with `WEATHER_PERF=1`: Clear / Rain
-/ Clear / Snow / Clear / Storm twice, 4 s windows, instant switches) and `logsinal_perf.log` (`profilegpu`).
-The machine was busy with an unrelated SpaceSurvival cook writing ~38 MB/s to D:, so absolute times are inflated;
-compare neighbouring windows (second pass, after the first pass settled):
+**Fix round 1 (2026-11-03), player moving.** Receipts in `D:\AFS_Comparisons\Weather_20261101/fix1\`:
+`perf\perf.json` (`ProveWeather.py` with `WEATHER_PERF=1`: Vexa runs a circle with scripted W + L3 and the camera
+turning 40 deg/s, from the same start every window; Clear / Rain / Clear / Snow / Clear / Storm twice, instant
+switches, 4 s settle + 4 s window; `stat unit` game thread and GPU through `HoverAuthoring.GetThreadTimesMs`, one
+`profilegpu` per window in `logs\perf.log`). No other Unreal, cook or game process was running for that run (a
+Codex agent session was open; a 140 GB robocopy M: -> D: and a Call of Duty session it ran had ended; earlier
+runs that overlapped them are kept as `perf_*` for the record). Window-to-window noise is about +-1 ms on the game
+thread, so the deltas are against the neighbouring Clear windows and read as rough:
+
+| Weather | Live particles (near traced + far) | Game thread vs Clear | GPU (stat unit) vs Clear |
+|---|---|---|---|
+| Clear | 0 | 13.4-15.1 ms (mean 14.3) | 9.94-10.02 ms |
+| Rain | ~1,120 + 2,820 drops, splashes <= 40/s | +3.7 (after the first window) / +2.0 ms | +0.46 ms |
+| Storm | same + a strike every 6-14 s | +2.1 / +3.1 ms | +0.47 ms |
+| Snow | ~1,000 + 2,550 flakes | +1.3 / +1.2 ms | ~0 |
+
+The real frame (22-29 ms mean in every window, Clear included) is the offscreen harness and editor, not the
+weather. Render / RHI thread times read 0 through `GetThreadTimesMs` (not filled in this mode).
+What changed to get there (same harness, before): snow was +2.2 to +3.7 ms (1,100 traced + 3,950 far flakes; the far
+ones spawned at eye level spent most of their life under the street) -> far 1,300 -> 850/s spawned 1.5-12 m up,
+near 450 -> 400/s. Rain was ~+2.5 ms; an in-run A/B (`WEATHER_PERF_SEQ='Clear,Rain,Clear,Rain/nosplash,...'`,
+`perf_splash_ab\`) put the 90/s splashes at ~1 ms on their own (rain +2.5 with, +1.45 without) -> 40/s within 18 m,
+and the traced drops 2,200 -> 1,800/s.
+
+**First build (2026-11-01), camera still.** `D:\AFS_Comparisons\Weather_20261101\perf.json` and
+`logs/final_perf.log`; the machine was busy with an unrelated SpaceSurvival cook writing ~38 MB/s to D:, so
+absolute times are inflated:
 
 | Weather | Live particles (near traced + far) | Real frame, mean | GPU frame (one profilegpu) |
 |---|---|---|---|
@@ -141,7 +185,7 @@ Before the snow was split, 6,000 all-traced flakes cost ~3x the rain in the same
 per-particle collision traces are the expensive part, hence one traced volume near the camera only.
 
 Clear costs nothing (no particles, decal hidden, nothing ticks but a pointer check). Most of the rain/snow cost is
-CPU: Cascade traces every near drop and flake against the city each frame.
+CPU: Cascade traces every near drop and flake against the city each frame, and the rain's splashes.
 
 ## Known limits and open choices
 
@@ -152,8 +196,13 @@ CPU: Cascade traces every near drop and flake against the city each frame.
   decals in NYC draw on top of the snow (they read as leaves on snow).
 - The pack's own 60 s transitions and random weather cycling are not used; the menu choice stays until changed and
   is not saved: every load of NYC Survival starts Clear (`StartWeather` on "AFS Weather" changes that).
-- Falling snow reads lightly from the raised street camera (2.5-6 cm flakes); the snow cover carries it there.
-  Denser snow costs CPU in the traced volume.
+- Falling snow reads lightly from the raised street camera and even from Vexa's view (2.5-6 cm flakes); the snow
+  cover carries it. Denser snow costs CPU in the traced volume.
+- Moving camera (fix round 1, `fix1\prove.json` "move", flakes / drops within 15 m inside a 40 deg cone, mean):
+  snow standing 426 / running 349 (-18 %) / turning 90 deg/s 384 (-10 %) / running a circle 252 (-41 %); before the
+  fix (`fix1\legacy_move\move.json`) 425 / 303 (-29 %) / 303 (-29 %) / 96 (-77 %). Rain 170 / 219 / 157 / 136
+  (before 221 / 345 / 195 / 174: fewer traced drops after the cost pass, same ratios). The circle runs along the
+  building by the spawn, where much of the view is wall and fence, so part of its drop is the place, not the lead.
 - Rain is lit translucency: in Storm it is darker and less visible than in Rain.
 - Weather is per level: only NYC Survival has the actor (test pads untouched). Single-player: `AHoverWeather` does
   not replicate (the pack's multiplayer events are not used).

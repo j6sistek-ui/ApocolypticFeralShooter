@@ -90,6 +90,14 @@ class HOVERFLIGHT_API AHoverWeather : public AActor
     // One line for logs and proofs: weather, blend, applied multipliers, live particle counts.
     UFUNCTION(BlueprintCallable, Category = "AFS|Weather") FString DescribeState() const;
     UFUNCTION(BlueprintCallable, Category = "AFS|Weather") int32 GetLiveParticleCount() const;
+    // Proofs: live drops / flakes (all four volumes) within Range of the camera and HalfAngleDeg of its view axis,
+    // i.e. what the player actually sees near them.
+    UFUNCTION(BlueprintCallable, Category = "AFS|Weather") int32 CountParticlesInView(float Range = 1500, float HalfAngleDeg = 40) const;
+    // Proofs: the view target's smoothed horizontal velocity the volumes lead by (cm/s).
+    UFUNCTION(BlueprintCallable, Category = "AFS|Weather") FVector GetViewVelocity() const
+    {
+        return ViewVelocity;
+    }
     UFUNCTION(BlueprintPure, Category = "AFS|Weather", meta = (WorldContext = "WorldContext"))
     static AHoverWeather *FindWeather(const UObject *WorldContext);
     static const TCHAR *WeatherName(EHoverWeatherKind Weather);
@@ -105,16 +113,34 @@ class HOVERFLIGHT_API AHoverWeather : public AActor
     UPROPERTY(EditAnywhere, Category = "Weather|Level") TObjectPtr<AActor> HeightFog;
     UPROPERTY(EditAnywhere, Category = "Weather|Level") TObjectPtr<AActor> Atmosphere;
     // Precipitation follows the view: centred this far ahead of the camera (flat), near and far rain volumes.
+    // Fix round 1 (2026-11-01 review): the near snow sat 5 m ahead, so a half turn moved its 18 m box by 10 m and the
+    // flakes (spawned 15 m up, falling 2.5-5 m/s) took seconds to reach eye level again: now 2 m ahead. The far snow
+    // (32 x 32 m) sat 26 m ahead and swung at ~40 m/s through a 90 deg/s turn, always into empty air (the moving proof:
+    // flakes within 15 m in view -33 % while turning); 10 m ahead its old box still covers the new view direction.
     UPROPERTY(EditAnywhere, Category = "Weather|Precipitation") float RainNearAhead = 700;
     UPROPERTY(EditAnywhere, Category = "Weather|Precipitation") float RainFarAhead = 2600;
-    UPROPERTY(EditAnywhere, Category = "Weather|Precipitation") float SnowAhead = 500;
-    UPROPERTY(EditAnywhere, Category = "Weather|Precipitation") float SnowFarAhead = 2600;
+    UPROPERTY(EditAnywhere, Category = "Weather|Precipitation") float SnowAhead = 200;
+    UPROPERTY(EditAnywhere, Category = "Weather|Precipitation") float SnowFarAhead = 1000;
+    // The volumes lead the view target's horizontal velocity (smoothed) by this long, so a running player meets air that
+    // already holds drops / flakes at eye level instead of the empty column behind the spawn (review finding B).
+    UPROPERTY(EditAnywhere, Category = "Weather|Precipitation") float RainLeadSeconds = .6f;
+    UPROPERTY(EditAnywhere, Category = "Weather|Precipitation") float SnowLeadSeconds = 1.5f;
+    UPROPERTY(EditAnywhere, Category = "Weather|Precipitation") float MaxLead = 1500;
+    // Cascade's fx.MaxCPUParticlesPerEmitter (1000 by default) is raised to this while rain or snow runs and put back
+    // when the precipitation is over (end of the blend to a dry weather, EndPlay).
     UPROPERTY(EditAnywhere, Category = "Weather|Precipitation") int32 MaxParticlesPerEmitter = 6000;
-    UPROPERTY(EditAnywhere, Category = "Weather|Precipitation") float MaxSplashesPerSecond = 90;
-    UPROPERTY(EditAnywhere, Category = "Weather|Precipitation") float SplashRange = 3000;
+    // P_Rain_Ground splashes on the near rain's collision events. Cost pass 2026-11-03 (finding F, in-run A/B with the
+    // player running): 90/s within 30 m cost ~1 ms of game thread on their own (rain +2.5 ms with, +1.45 without);
+    // 40/s within 18 m keeps about the same splash density on the ground around the player.
+    UPROPERTY(EditAnywhere, Category = "Weather|Precipitation") float MaxSplashesPerSecond = 40;
+    UPROPERTY(EditAnywhere, Category = "Weather|Precipitation") float SplashRange = 1800;
     UPROPERTY(EditAnywhere, Category = "Weather|Precipitation") FVector2D ThunderInterval = FVector2D(6, 14);
-    // Half extents of the surface decal box (X = vertical projection depth).
-    UPROPERTY(EditAnywhere, Category = "Weather|Surface") FVector SurfaceDecalSize = FVector(1500, 4500, 4500);
+    // Half extents of the surface decal box (X = vertical projection depth). Fix round 1: was 45 m, whose square
+    // edge slid with the camera (dry far plaza under rain); now 150 m with a radial fade (M_WeatherSurface
+    // FadeStart / FadeEnd, horizontal distance from the camera) that reaches 0 inside the box.
+    UPROPERTY(EditAnywhere, Category = "Weather|Surface") FVector SurfaceDecalSize = FVector(3000, 15000, 15000);
+    UPROPERTY(EditAnywhere, Category = "Weather|Surface") float SurfaceFadeStart = 9000;
+    UPROPERTY(EditAnywhere, Category = "Weather|Surface") float SurfaceFadeEnd = 14500;
 
     // AFS-tuned copies of the pack's P_Rain (Scripts/ImportWeather.py: denser, wider streaks; the far one without
     // collision). Empty or missing = the pack's own P_Rain.
@@ -157,14 +183,21 @@ class HOVERFLIGHT_API AHoverWeather : public AActor
     float BlendTime = 0, BlendDuration = 0;
     bool bApplying = false;
     float SplashBudget = 0, NextThunder = 0, Flash = 0, DecalSweep = 0, RecaptureTimer = -1;
-    TArray<TWeakObjectPtr<UPrimitiveComponent>> DecalExcluded;
+    // Characters (and what is attached to them) drawn into custom depth while the surface decal shows; the decal
+    // material skips pixels whose custom depth matches the scene depth, so other decals still land on them.
+    TArray<TWeakObjectPtr<UPrimitiveComponent>> CustomDepthAdded;
+    FVector ViewVelocity = FVector::ZeroVector;
+    int32 SavedParticleCap = -1; // fx.MaxCPUParticlesPerEmitter before it was raised; -1 = not raised
 
     void CaptureLevelLighting();
     void Advance(float DeltaSeconds);
     void ApplyLook(const FHoverWeatherLook &Look, float FlashBoost);
     void UpdatePrecipitation(const FHoverWeatherLook &Look);
+    void TrackView(float DeltaSeconds);
     void FollowView();
-    void UpdateCharacterDecals(bool bSurfaceActive);
+    void UpdateCharacterMask(bool bSurfaceActive);
+    void RaiseParticleCap();
+    void RestoreParticleCap();
     void SpawnThunder();
     UFUNCTION() void HandleRainCollide(FName EventName, float EmitterTime, int32 ParticleTime, FVector Location,
                                        FVector Velocity, FVector Direction, FVector Normal, FName BoneName,

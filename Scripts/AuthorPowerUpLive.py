@@ -32,6 +32,10 @@ Medkit / Max Ammo capped at 1.15x and half as bright; Nuke trefoil / seams a lit
 over the grass; the pop's smoke puff is OFF (POP_PUFF = False): it rendered but could not be made to read in front
 of the black casing in 3 tries; bigger Niagara pools (C++). Before placing, the old Nuke's item is
 hidden and the map saved through PreSave: the reload must show it (the hidden-phase save bug, fixed in C++).
+2026-11-03 (owner: "it's a nuke ... should be twice as big as it was, and a little bit more sparky on the idle
+phase"): Nuke item_scale 2, events every 1.6-2.6 s (was 2.4-3.6, first 1.2 s), both bursts at 50 %, dribble every 0.8 s;
+sparks / pops start on casing points measured on the mesh (casing_points()), glint / pops / spark sprites x1.5, label
+152 cm; the C++ display scales the key light offset / radius (and its intensity, linearly) with item_scale.
 Usage: UnrealEditor-Cmd.exe AFS.uproject -unattended -nullrhi -stdout -FullStdOutLogOutput
        -DisablePlugins=NwiroIntegrationKit -ExecutePythonScript=M:/UnrealProjects/AFS/Scripts/AuthorPowerUpLive.py
 Env: PU_LIVE_PLACE=0 builds the assets only (no map change).
@@ -73,6 +77,9 @@ GROUND_PREFIXES = ('SM_Ground', 'SM_Ivy', 'SM_Leaves', 'SM_Poster', 'Decal')
 ORDER = ['Nuke', 'Medkit', 'MaxAmmo']           # left to right as seen from the start
 LABELS = {'Nuke': 'NUKE', 'Medkit': 'MEDKIT', 'MaxAmmo': 'MAX AMMO'}
 SEEDS = {'Nuke': 17, 'Medkit': 29, 'MaxAmmo': 41}
+# label above the item (cm from the ground): the Nuke's (no neon) sits ~30 cm over its top, 30 + 45 x item_scale
+# (2026-11-03: 118 -> 152 for the doubled Nuke, whose top is at 120 cm); the others over their neon icons
+LABEL_HEIGHT = {'Nuke': 152.0, 'Medkit': 172.0, 'MaxAmmo': 172.0}
 
 WHITEHOT = (1.0, 0.92, 0.85)
 KEYW = (1.0, 0.9, 0.8)
@@ -172,7 +179,8 @@ SPARK = {
     'AddVelocityInCone.Cone Angle': '55', 'AddVelocityInCone.Cone Axis': '0,0,1',
     'RandomRangeFloat002.Minimum': '140', 'RandomRangeFloat002.Maximum': '330',
     'InitializeParticle.Lifetime Min': '0.45', 'InitializeParticle.Lifetime Max': '0.95',
-    'InitializeParticle.Sprite Size Min': '0.25,0.8', 'InitializeParticle.Sprite Size Max': '0.4,1.2',
+    # x1.5 for the doubled Nuke (2026-11-03; was 0.25,0.8 / 0.4,1.2): at 2x the casing the sparks read as hairlines
+    'InitializeParticle.Sprite Size Min': '0.38,1.2', 'InitializeParticle.Sprite Size Max': '0.6,1.8',
     'ScaleSpriteSizeBySpeed.Min Scale Factor': '1,1', 'ScaleSpriteSizeBySpeed.Max Scale Factor': '1,4',
     'ScaleSpriteSizeBySpeed.Velocity Threshold': '320', 'GravityForce.Gravity': '0,0,-750',
     'InitializeParticle.Color': '1,1,1,1', 'SpawnBurst_Instantaneous.Spawn Count': '6',
@@ -228,20 +236,24 @@ SPRITE_MATS = {
 COMMON = dict(hover_cm=30.0, bob_cm=2.0, bob_hz=0.5, item_scale=1.0, life_seconds=30.0, spawn_in_seconds=0.35,
               fade_out_seconds=0.5, respawn_delay_seconds=2.0, warning_seconds=5.0)
 LOOKS = {
-    'Nuke': dict(COMMON, spin_deg_per_sec=30.0, item_color=NUKE_C,
+    # AFS 2026-11-01 owner: the Nuke read much smaller than the medkit and ammo; twice as big, a bit more sparky idling
+    'Nuke': dict(COMMON, item_scale=2.0, spin_deg_per_sec=30.0, item_color=NUKE_C,
                  key_light_color=(1.0, 0.72, 0.42), key_light_intensity=4.0, key_light_radius=220.0,
                  key_light_offset=(26, 0, 30),
                  # N4 Geiger stutter ticks throughout
                  geiger_ticks=True, tick_mean_interval=1.6, tick_min_interval=0.35, tick_max_interval=3.5,
                  tick_triple_chance=0.3, tick_triple_gap=0.09, tick_flash_seconds=0.07, tick_emblem_glow=9.0,
                  tick_seam_glow=7.0, tick_white_hot=WHITEHOT, tick_shudder_cm=2.4, tick_shudder_hz=30.0,
-                 flash_emblem_glow_max=8.0, flash_seam_glow_max=7.0, glint_size_cm=9.0,
+                 # 2026-11-03 doubled Nuke: the glint and pop sizes are world cm (C++), x1.5 so they still read on
+                 # the 2x casing without turning into fireworks (were 9 / 3.5 / 18 / 12 / 0.7)
+                 flash_emblem_glow_max=8.0, flash_seam_glow_max=7.0, glint_size_cm=13.0,
                  glint_intensity=1.0, tick_light_kick=2.5,
                  # N1 sparks alternating with N2 pops, calm pace over the 30 s
-                 event_interval_min=2.4, event_interval_max=3.6, first_event_seconds=1.6,
+                 event_interval_min=1.6, event_interval_max=2.6, first_event_seconds=1.2,
+                 # the seam rings; casing_points (mesh space) are measured on the mesh from these by casing_points()
                  seam_height_fractions=[0.2, 0.5, 0.8],
-                 spark_bursts=True, spark_both_chance=0.35, dribble_mean_interval=1.3, spark_light_kick=3.0,
-                 pops=True, pop_core_cm=3.5, pop_glow_cm=18.0, pop_ray_length_cm=12.0, pop_ray_width_cm=0.7,
+                 spark_bursts=True, spark_both_chance=0.5, dribble_mean_interval=0.8, spark_light_kick=3.0,
+                 pops=True, pop_core_cm=5.0, pop_glow_cm=27.0, pop_ray_length_cm=18.0, pop_ray_width_cm=1.0,
                  pop_rays_min=4, pop_rays_max=6, pop_core_seconds=0.05, pop_glow_seconds=0.16, pop_ray_seconds=0.06,
                  pop_light_intensity=12.0, pop_light_radius=220.0, pop_light_color=(1.0, 0.75, 0.45),
                  pop_jolt_cm=1.2, pop_jolt_seconds=0.12, pop_smoke_offset_cm=6.0,
@@ -540,6 +552,89 @@ def build_niagara(sprite_mats):
     return out
 
 
+def mesh_triangles(mesh):
+    """LOD0 render vertices (mesh space) and triangle index triples (ProceduralMeshComponent's library, an engine
+    default plugin)."""
+    vs, tris = [], []
+    for sec in range(mesh.get_num_sections(0)):
+        res = u.ProceduralMeshLibrary.get_section_from_static_mesh(mesh, 0, sec)
+        verts, idx = res[0], res[1]
+        base = len(vs)
+        vs += [(p.x, p.y, p.z) for p in verts]
+        tris += [(base + idx[i], base + idx[i + 1], base + idx[i + 2]) for i in range(0, len(idx) - 2, 3)]
+    return vs, tris
+
+
+def slice_points(vs, tris, zh):
+    """Where the mesh surface crosses the plane z = zh: the end points of every triangle's cut segment (plus the segment
+    midpoint), so a low-poly casing gives its true outline, not the nearest vertices."""
+    out = []
+    for t in tris:
+        ps = [vs[i] for i in t]
+        cut = []
+        for a, b in ((ps[0], ps[1]), (ps[1], ps[2]), (ps[2], ps[0])):
+            if (a[2] - zh) * (b[2] - zh) < 0:
+                f = (zh - a[2]) / (b[2] - a[2])
+                cut.append((a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f))
+        if len(cut) == 2:
+            out += [cut[0], cut[1], ((cut[0][0] + cut[1][0]) / 2, (cut[0][1] + cut[1][1]) / 2)]
+    return out
+
+
+def casing_points(key, mesh, fractions, bins=24, inset=0.97, caps=12):
+    """AFS 2026-11-03 (doubled Nuke): the sparks and pops start on the casing itself. The bounds rings (C++ fallback:
+    radius 0.92 x the smaller half-width) sat ~3 cm inside the 31.7 x 27.1 cm egg on its wide side and outside it near
+    the rounded top and bottom, and item_scale 2 doubles that. Here each seam ring is the mesh cut at that height: the
+    outermost surface point per 15 deg bin (x inset), plus `caps` points on the lid (C++ gives z > top - 1 an up
+    normal). Returns [] (C++ falls back to the bounds rings) if the mesh cannot be read."""
+    try:
+        vs, tris = mesh_triangles(mesh)
+    except Exception as e:  # noqa: BLE001
+        warn('%s casing points: mesh unreadable (%s); bounds rings used' % (key, e))
+        return []
+    bb = mesh.get_bounding_box()
+    mn, mx = bb.min, bb.max
+    if len(tris) < 50:
+        warn('%s casing points: only %d triangles; bounds rings used' % (key, len(tris)))
+        return []
+    vz0, vz1 = min(v[2] for v in vs), max(v[2] for v in vs)
+    if abs((vz1 - vz0) - (mx.z - mn.z)) > 0.02 * (mx.z - mn.z):
+        warn('%s casing points: render height %.1f != bounds %.1f; bounds rings used' % (key, vz1 - vz0, mx.z - mn.z))
+        return []
+    cx, cy = (mn.x + mx.x) / 2, (mn.y + mx.y) / 2
+
+    def outline(xy, nbins):
+        best = {}
+        for x, y in xy:
+            a = math.atan2(y - cy, x - cx)
+            r = math.hypot(x - cx, y - cy)
+            k = int((a + math.pi) / (2 * math.pi) * nbins) % nbins
+            if r > best.get(k, (0, 0))[0]:
+                best[k] = (r, a)
+        return best
+
+    pts, rings = [], {}
+    for h in fractions:
+        zh = mn.z + (mx.z - mn.z) * h
+        best = outline(slice_points(vs, tris, zh), bins)
+        for k, (r, a) in sorted(best.items()):
+            pts.append((cx + r * inset * math.cos(a), cy + r * inset * math.sin(a), zh))
+        rr = [r for r, _ in best.values()]
+        rings[str(h)] = {'z': round(zh, 1), 'bins': len(best), 'r_min': round(min(rr), 1) if rr else None,
+                         'r_max': round(max(rr), 1) if rr else None}
+    ztop = mx.z - 0.5
+    cap = outline(slice_points(vs, tris, mx.z - 1.0), caps)
+    for k, (r, a) in sorted(cap.items()):
+        pts.append((cx + r * 0.6 * math.cos(a), cy + r * 0.6 * math.sin(a), ztop))
+    R.setdefault('casing_points', {})[key] = {
+        'triangles': len(tris), 'points': len(pts), 'cap_points': len(cap),
+        'cap_r_max': round(max([r for r, _ in cap.values()] or [0]), 1), 'rings': rings,
+        'bounds_half_width': [round((mx.x - mn.x) / 2, 1), round((mx.y - mn.y) / 2, 1)],
+        'old_ring_radius': round(min(mx.x - mn.x, mx.y - mn.y) / 2 * 0.92, 1)}
+    log('casing points', key, R['casing_points'][key])
+    return [u.Vector(*p) for p in pts]
+
+
 def build_looks(niagara):
     parents = {k: u.load_asset('%s/M_PU_%s' % (MATS, k)) for k in ('ItemFX2', 'Shell', 'PropSimple', 'GlowAdditive')}
     for k, v in parents.items():
@@ -576,6 +671,7 @@ def build_looks(niagara):
         props = dict(spec)
         props.update(item_mesh=mesh, item_material=skin, shells=shells)
         if key == 'Nuke':
+            props['casing_points'] = casing_points(key, mesh, spec.get('seam_height_fractions') or [0.2, 0.5, 0.8])
             props.update(spark_burst_a=niagara.get('SparkA'), spark_burst_b=niagara.get('SparkB'),
                          spark_single=niagara.get('SparkSingle'), pop_sparks=niagara.get('PopSparks'),
                          pop_smoke=niagara.get('PopPuff'))
@@ -603,6 +699,8 @@ def build_looks(niagara):
                 da.set_editor_property(k, v)
             except Exception as e:  # noqa: BLE001
                 err('%s.%s: %s' % (da_path, k, e))
+            if k == 'casing_points':
+                v = '%d points' % len(v)
             rec[k] = v.get_path_name() if hasattr(v, 'get_path_name') else (str(v) if not isinstance(v, (int, float, list)) else v)
         EAL.save_loaded_asset(da)
         R['looks'][key] = {'asset': da_path, 'props': {k: (x if isinstance(x, (int, float)) else str(x)) for k, x in rec.items()}}
@@ -757,7 +855,7 @@ def place(looks):
         a.set_editor_property('seed', SEEDS[key])
         a.set_editor_property('show_label', True)
         a.set_editor_property('label', u.Text(LABELS[key]) if hasattr(u, 'Text') else LABELS[key])
-        a.set_editor_property('label_height_cm', 118.0 if key == 'Nuke' else 172.0)
+        a.set_editor_property('label_height_cm', LABEL_HEIGHT[key])
         a.set_editor_property('label_size_cm', 9.0)
         try:
             a.rerun_construction_scripts()

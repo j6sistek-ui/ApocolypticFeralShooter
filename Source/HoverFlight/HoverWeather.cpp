@@ -5,6 +5,7 @@
 #include "Components/DirectionalLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Components/SkyAtmosphereComponent.h"
+#include "Components/MeshComponent.h"
 #include "Components/SkyLightComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -218,6 +219,11 @@ void AHoverWeather::BeginPlay()
         Surface->SetDecalMaterial(Material);
         Surface->DecalSize = SurfaceDecalSize;
         SurfaceMID = Surface->CreateDynamicMaterialInstance();
+        // Radial fade (fix round 1): the layer thins out with horizontal distance from the camera and is gone
+        // before the box ends, so no square edge slides with the view.
+        SurfaceMID->SetScalarParameterValue(TEXT("FadeStart"), SurfaceFadeStart);
+        SurfaceMID->SetScalarParameterValue(
+            TEXT("FadeEnd"), FMath::Min(SurfaceFadeEnd, FMath::Min(SurfaceDecalSize.Y, SurfaceDecalSize.Z) - 100.f));
     }
     Current = To = From = Looks.FindRef(EHoverWeatherKind::Clear);
     if (StartWeather != EHoverWeatherKind::Clear)
@@ -226,7 +232,8 @@ void AHoverWeather::BeginPlay()
 
 void AHoverWeather::EndPlay(const EEndPlayReason::Type Reason)
 {
-    UpdateCharacterDecals(false);
+    UpdateCharacterMask(false);
+    RestoreParticleCap();
     for (UAudioComponent *Audio : {RainAudio.Get(), WindAudio.Get()})
         if (IsValid(Audio))
             Audio->Stop();
@@ -239,12 +246,6 @@ void AHoverWeather::CaptureLevelLighting()
         return;
     bCaptured = true;
     UWorld *World = GetWorld();
-    // Cascade caps every CPU emitter at fx.MaxCPUParticlesPerEmitter (1000 by default): the first proof's snow sat at
-    // exactly 1000 flakes and the denser rain could never pass it. Raise the cap (never lower it) for this level
-    // (on the first weather change, like everything else here).
-    if (IConsoleVariable *Cap = IConsoleManager::Get().FindConsoleVariable(TEXT("fx.MaxCPUParticlesPerEmitter")))
-        if (Cap->GetInt() < MaxParticlesPerEmitter)
-            Cap->Set(MaxParticlesPerEmitter, ECVF_SetByCode);
     // The sun: the explicit actor, else the atmosphere sun, else the brightest. Every other directional light is
     // scaled by the same factor so a fill light does not stay at full strength under a storm.
     UDirectionalLightComponent *Main = SunLight ? SunLight->FindComponentByClass<UDirectionalLightComponent>() : nullptr;
@@ -408,8 +409,35 @@ void AHoverWeather::ApplyLook(const FHoverWeatherLook &Look, float FlashBoost)
     Loop(WindAudio, WindSound, Look.WindVolume);
 }
 
+void AHoverWeather::RaiseParticleCap()
+{
+    // Cascade caps every CPU emitter at fx.MaxCPUParticlesPerEmitter (1000 by default): the first proof's snow sat at
+    // exactly 1000 flakes and the denser rain could never pass it. Raised (never lowered) only while rain or snow
+    // runs; RestoreParticleCap puts the old value back (review finding C: it used to stay raised for the session).
+    IConsoleVariable *Cap = IConsoleManager::Get().FindConsoleVariable(TEXT("fx.MaxCPUParticlesPerEmitter"));
+    if (!Cap || SavedParticleCap >= 0 || Cap->GetInt() >= MaxParticlesPerEmitter)
+        return;
+    SavedParticleCap = Cap->GetInt();
+    Cap->Set(MaxParticlesPerEmitter, ECVF_SetByCode);
+    UE_LOG(LogTemp, Display, TEXT("HOVER_WEATHER particle cap %d -> %d"), SavedParticleCap, Cap->GetInt());
+}
+
+void AHoverWeather::RestoreParticleCap()
+{
+    if (SavedParticleCap < 0)
+        return;
+    if (IConsoleVariable *Cap = IConsoleManager::Get().FindConsoleVariable(TEXT("fx.MaxCPUParticlesPerEmitter")))
+    {
+        Cap->Set(SavedParticleCap, ECVF_SetByCode);
+        UE_LOG(LogTemp, Display, TEXT("HOVER_WEATHER particle cap restored %d"), Cap->GetInt());
+    }
+    SavedParticleCap = -1;
+}
+
 void AHoverWeather::UpdatePrecipitation(const FHoverWeatherLook &Look)
 {
+    if (Look.bRain || Look.bSnow)
+        RaiseParticleCap();
     // Starting precipitation begins with the blend; stopping lets the drops already in the air finish falling.
     auto Switch = [](UParticleSystemComponent *FX, bool bOn, const TCHAR *Emitter) {
         if (!FX || !FX->Template)
@@ -429,6 +457,24 @@ void AHoverWeather::UpdatePrecipitation(const FHoverWeatherLook &Look)
     Switch(SnowFar, Look.bSnow, TEXT("Snow"));
 }
 
+void AHoverWeather::TrackView(float DeltaSeconds)
+{
+    const APlayerController *PC = GetWorld()->GetFirstPlayerController();
+    if (!PC || !PC->PlayerCameraManager || DeltaSeconds <= 0)
+        return;
+    // The VIEW TARGET's velocity (Vexa running, gliding, a vehicle), not the camera's: a third-person camera
+    // swinging around her at 90 deg/s moves ~4.5 m/s sideways, and leading by that pushed the near snow box out of
+    // the view during a turn (fix round 1 moving-camera proof: flakes in view -45 % while turning on the spot).
+    // A camera actor (street / test views) is still and gets no lead; above 40 m/s (a teleport) the lead resets.
+    const AActor *Target = PC->PlayerCameraManager->GetViewTarget();
+    FVector Velocity = Target ? Target->GetVelocity() : FVector::ZeroVector;
+    Velocity.Z = 0;
+    if (Velocity.SizeSquared() > FMath::Square(4000.f))
+        ViewVelocity = FVector::ZeroVector;
+    else
+        ViewVelocity = FMath::Lerp(ViewVelocity, Velocity, FMath::Clamp(DeltaSeconds * 4.f, 0.f, 1.f));
+}
+
 void AHoverWeather::FollowView()
 {
     const APlayerController *PC = GetWorld()->GetFirstPlayerController();
@@ -438,10 +484,14 @@ void AHoverWeather::FollowView()
     FVector Ahead = PC->PlayerCameraManager->GetCameraRotation().Vector();
     Ahead.Z = 0;
     Ahead = Ahead.GetSafeNormal();
-    RainNear->SetWorldLocation(Eye + Ahead * RainNearAhead);
-    RainFar->SetWorldLocation(Eye + Ahead * RainFarAhead);
-    Snow->SetWorldLocation(Eye + Ahead * SnowAhead);
-    SnowFar->SetWorldLocation(Eye + Ahead * SnowFarAhead);
+    // World-space drops and flakes stay where they spawned; the volumes move ahead of a moving camera so the air it
+    // runs into is already full (fix round 1, finding B).
+    const FVector RainLead = (ViewVelocity * RainLeadSeconds).GetClampedToMaxSize(MaxLead);
+    const FVector SnowLead = (ViewVelocity * SnowLeadSeconds).GetClampedToMaxSize(MaxLead);
+    RainNear->SetWorldLocation(Eye + Ahead * RainNearAhead + RainLead);
+    RainFar->SetWorldLocation(Eye + Ahead * RainFarAhead + RainLead);
+    Snow->SetWorldLocation(Eye + Ahead * SnowAhead + SnowLead);
+    SnowFar->SetWorldLocation(Eye + Ahead * SnowFarAhead + SnowLead);
     Surface->SetWorldLocation(Eye);
 }
 
@@ -455,6 +505,7 @@ void AHoverWeather::Advance(float DeltaSeconds)
 {
     if (!bCaptured)
         return; // nothing has changed the weather yet: the level is exactly as authored
+    TrackView(DeltaSeconds);
     FollowView();
     SplashBudget = FMath::Min(SplashBudget + DeltaSeconds * MaxSplashesPerSecond, MaxSplashesPerSecond * .25f);
     if (Current.bThunder || To.bThunder)
@@ -485,6 +536,8 @@ void AHoverWeather::Advance(float DeltaSeconds)
                                    TPair<UParticleSystemComponent *, bool>(SnowFar, To.bSnow)})
                 if (!bOn && FX)
                     FX->KillParticlesForced();
+            if (!To.bRain && !To.bSnow)
+                RestoreParticleCap();
         }
     }
     else if (bFlashing)
@@ -498,20 +551,23 @@ void AHoverWeather::Advance(float DeltaSeconds)
     if ((DecalSweep -= DeltaSeconds) <= 0)
     {
         DecalSweep = .5f;
-        UpdateCharacterDecals(Surface->IsVisible());
+        UpdateCharacterMask(Surface->IsVisible());
     }
 }
 
-void AHoverWeather::UpdateCharacterDecals(bool bSurfaceActive)
+void AHoverWeather::UpdateCharacterMask(bool bSurfaceActive)
 {
-    // The surface decal is world-aligned; on moving characters (and what they hold) it would swim, so they opt out
-    // while it shows and get their own setting back when it goes.
+    // The surface decal is world-aligned; on moving characters (and what they hold) it would swim. Fix round 1
+    // (finding D): they used to opt out of ALL decals while it showed, so blood / impact decals could not land on
+    // Vexa or the zombies in rain or snow. Now their meshes draw into custom depth instead, and M_WeatherSurface
+    // drops every pixel whose custom depth equals the scene depth (the visible surface is a character); other decals
+    // are untouched. A character hidden behind a wall does not mask the wall (its custom depth is farther).
     if (!bSurfaceActive)
     {
-        for (const auto &Weak : DecalExcluded)
+        for (const auto &Weak : CustomDepthAdded)
             if (UPrimitiveComponent *Primitive = Weak.Get())
-                Primitive->SetReceivesDecals(true);
-        DecalExcluded.Reset();
+                Primitive->SetRenderCustomDepth(false);
+        CustomDepthAdded.Reset();
         return;
     }
     for (TActorIterator<ACharacter> It(GetWorld()); It; ++It)
@@ -521,10 +577,10 @@ void AHoverWeather::UpdateCharacterDecals(bool bSurfaceActive)
         Attached.Add(*It);
         for (AActor *Actor : Attached)
             for (UActorComponent *Component : Actor->GetComponents())
-                if (auto *Primitive = Cast<UPrimitiveComponent>(Component); Primitive && Primitive->bReceivesDecals)
+                if (auto *Mesh = Cast<UMeshComponent>(Component); Mesh && Mesh->bReceivesDecals && !Mesh->bRenderCustomDepth)
                 {
-                    Primitive->SetReceivesDecals(false);
-                    DecalExcluded.Add(Primitive);
+                    Mesh->SetRenderCustomDepth(true);
+                    CustomDepthAdded.Add(Mesh);
                 }
     }
 }
@@ -567,6 +623,30 @@ void AHoverWeather::SpawnThunder()
     UE_LOG(LogTemp, Display, TEXT("HOVER_WEATHER thunder at %s"), *Strike.ToCompactString());
 }
 
+int32 AHoverWeather::CountParticlesInView(float Range, float HalfAngleDeg) const
+{
+    const APlayerController *PC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+    if (!PC || !PC->PlayerCameraManager)
+        return 0;
+    const FVector Eye = PC->PlayerCameraManager->GetCameraLocation();
+    const FVector Axis = PC->PlayerCameraManager->GetCameraRotation().Vector();
+    const double CosHalf = FMath::Cos(FMath::DegreesToRadians(HalfAngleDeg)), RangeSq = double(Range) * Range;
+    int32 Count = 0;
+    for (UParticleSystemComponent *FX : {RainNear.Get(), RainFar.Get(), Snow.Get(), SnowFar.Get()})
+        if (FX)
+            for (FParticleEmitterInstance *Emitter : FX->EmitterInstances)
+                if (Emitter && !Emitter->UseLocalSpace())
+                    for (int32 I = 0; I < Emitter->ActiveParticles; ++I)
+                        if (const FBaseParticle *Particle = Emitter->GetParticle(I))
+                        {
+                            const FVector Offset = Particle->Location - Eye;
+                            const double DistSq = Offset.SizeSquared();
+                            if (DistSq <= RangeSq && DistSq > 1 && FVector::DotProduct(Offset, Axis) >= CosHalf * FMath::Sqrt(DistSq))
+                                ++Count;
+                        }
+    return Count;
+}
+
 int32 AHoverWeather::GetLiveParticleCount() const
 {
     return LiveParticles(RainNear) + LiveParticles(RainFar) + LiveParticles(Snow) + LiveParticles(SnowFar);
@@ -574,10 +654,13 @@ int32 AHoverWeather::GetLiveParticleCount() const
 
 FString AHoverWeather::DescribeState() const
 {
+    const IConsoleVariable *Cap = IConsoleManager::Get().FindConsoleVariable(TEXT("fx.MaxCPUParticlesPerEmitter"));
     return FString::Printf(TEXT("weather=%s blend=%.2f sun=%.2f sky=%.2f fog=%.2f wet=%.2f snow=%.2f rainVol=%.2f "
-                                "windVol=%.2f particles rain=%d+%d snow=%d+%d decal=%d suns=%d splashes=%d"),
+                                "windVol=%.2f particles rain=%d+%d snow=%d+%d decal=%d suns=%d splashes=%d masked=%d cap=%d "
+                                "lead=%.0f"),
                            WeatherName(TargetWeather), GetBlendAlpha(), Current.Sun, Current.SkyLight, Current.FogDensity,
                            Current.Wetness, Current.SnowCover, Current.RainVolume, Current.WindVolume,
                            LiveParticles(RainNear), LiveParticles(RainFar), LiveParticles(Snow), LiveParticles(SnowFar),
-                           Surface && Surface->IsVisible() ? 1 : 0, Suns.Num(), SplashCount);
+                           Surface && Surface->IsVisible() ? 1 : 0, Suns.Num(), SplashCount, CustomDepthAdded.Num(),
+                           Cap ? Cap->GetInt() : -1, ViewVelocity.Size());
 }

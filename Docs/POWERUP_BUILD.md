@@ -88,13 +88,19 @@ row 1.5 m apart, about 3 m ahead of the player start: NUKE, MEDKIT, MAX AMMO. In
 - Heartbeat swell 12 %, dub at 0.6 of the lub.
 
 **Nuke:**
+- Twice the size (item_scale 2, 2026-11-03, owner: "should be twice as big"): 90 cm tall from 30 cm up, label at
+  152 cm. The display scales the key light offset and radius with item_scale and its intensity linearly (4 cd reads as
+  8 cd). Pop, glint and spark sizes are world cm and went up 1.5x, not 2x.
 - Spin 30°/s, key light 4 cd, emblem and seam glow 1.5. No echo shell: it read as a floating ghost lid.
 - Geiger ticks every 1.6 s on average (0.35-3.5 s apart); 30 % are triples, 0.09 s apart. Each tick flashes 0.07 s
-  (trefoil +9, seams +7, capped at 8 / 7 when it lands on a heartbeat flash), shudders 2.4 cm and adds a 9 cm glint.
-- One event every 2.4-3.6 s from 1.6 s, alternating spark burst and pop.
-- Spark bursts: 6 or 7, with a 13 at 35 %. A single spark about every 1.3 s. Cone 55-65°, speed 140-330, life
-  0.45-0.95 s.
-- Pops: core 3.5 cm, glow 18 cm, 4-6 rays (12 x 0.7 cm), light 12 cd, 3 or 6 sparks, jolt 1.2 cm. The decided
+  (trefoil +9, seams +7, capped at 8 / 7 when it lands on a heartbeat flash), shudders 2.4 cm and adds a 13 cm glint.
+- One event every 1.6-2.6 s from 1.2 s, alternating spark burst and pop (was 2.4-3.6 s from 1.6 s; 2026-11-03,
+  "a little bit more sparky on the idle phase").
+- Sparks and pops start on 84 casing points measured on the mesh (`casing_points()`: the seam rings at 20 / 50 / 80 %
+  height cut from the mesh, plus 12 on the lid), picked on the side the viewer sees (within 75°).
+- Spark bursts: 6 or 7, with a 13 at 50 % (was 35 %). A single spark about every 0.8 s (was 1.3 s). Cone 55-65°,
+  speed 140-330, life 0.45-0.95 s, sprites 0.38-0.6 x 1.2-1.8 cm.
+- Pops: core 5 cm, glow 27 cm, 4-6 rays (18 x 1 cm), light 12 cd, 3 or 6 sparks, jolt 1.2 cm. The decided
   dark smoke puff is **off** (`POP_PUFF = False`): it rendered but could not be made to read against the black
   casing.
 - Warning: heartbeat and arc crawl share one 3 s ease-in. The beat speeds up from 1.0 to 2.4 Hz (power 1.4), with a
@@ -119,7 +125,8 @@ row 1.5 m apart, about 3 m ahead of the player start: NUKE, MEDKIT, MAX AMMO. In
 **Open (owner's eye):**
 - No smoke puff on the pops.
 - Max Ammo's haze is still a little yellow on one edge.
-- The Nuke reads small from the start.
+- The Nuke reads small from the start: doubled 2026-11-03 (stills `D:/AFS_Comparisons/PowerUps_20261031/Live/
+  stills_nuke2x/`), owner to judge live.
 - Each tick that lands on a heartbeat is capped, so it shows less.
 
 ## Parked for a later trial

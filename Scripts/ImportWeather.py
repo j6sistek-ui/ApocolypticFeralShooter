@@ -13,16 +13,19 @@ What it does (and nothing else):
      straight down around the camera: up-facing surfaces only (normal from screen derivatives of the world
      position), the pack's T_Perlin_Noise_M for patches. Scalar parameters Wetness (dark, glossy: wet streets) and
      SnowCover (white, rough: snow cover). Opacity 0 when both are 0, and the decal is hidden then anyway.
+     Fix round 1: a radial fade with horizontal distance from the camera (FadeStart / FadeEnd, no square edge) and
+     no layer where custom depth equals scene depth (characters, drawn into custom depth by AHoverWeather).
   2. Places ONE AHoverWeather actor labelled "AFS Weather" in L_NYC_Survival (moves/re-wires it if it exists),
      StartWeather Clear, driving the map's OWN sun (the atmosphere-sun directional light), sky light, height fog
      and sky atmosphere (NYC keeps them in the Lighting_Main sublevel, so they are found at runtime; the receipt
      names them). It adds no light, sky or fog actor. Saves the map.
-  2b. Tuned copies of the pack's Cascade particles in the same folder: P_Rain_AFS (2200 drops/s, longer streaks,
-     collision kept), P_Rain_AFS_Far (same, never traced, 1.25 s life), P_Snow_AFS (450 flakes/s over 18 x 18 m,
-     2.5-6 cm flakes, traced) and P_Snow_AFS_Far (900/s over 32 x 32 m, never traced, 4.5-6 s life). The pack's
-     assets stay as shipped.
+  2b. Tuned copies of the pack's Cascade particles in the same folder: P_Rain_AFS (1800 drops/s from 12 m above the
+     camera, longer streaks, collision kept), P_Rain_AFS_Far (same from 20 m, never traced, 1.25 s life), P_Snow_AFS
+     (400 flakes/s over 18 x 18 m, 2.5-11 m above the camera, 2.5-6 cm flakes, traced) and P_Snow_AFS_Far (850/s
+     over 32 x 32 m, 1.5-12 m up, never traced, 2.5-3.5 s life). The pack's assets stay as shipped.
   3. Reloads the map and checks: actor count = before + (0 or 1), exactly one AHoverWeather, its references.
-Receipt: D:/AFS_Comparisons/Weather_20261101/import_receipt.json. WEATHER_DRY=1 reports without saving.
+Receipt: D:/AFS_Comparisons/Weather_20261101/import_receipt.json (WEATHER_OUT overrides the folder). WEATHER_DRY=1
+reports without saving.
 """
 import json
 import os
@@ -36,7 +39,7 @@ FOLDER = '/Game/HoverPrototype/Weather'
 MAT = FOLDER + '/M_WeatherSurface'
 NOISE = '/Game/MultiplayerDynamicWeatherSystem/Textures/T_Perlin_Noise_M'
 LABEL = 'AFS Weather'
-OUT = Path('D:/AFS_Comparisons/Weather_20261101')
+OUT = Path(os.environ.get('WEATHER_OUT', 'D:/AFS_Comparisons/Weather_20261101'))
 OUT.mkdir(parents=True, exist_ok=True)
 DRY = os.environ.get('WEATHER_DRY') == '1'
 R = {'ok': False, 'errors': [], 'material': {}, 'placement': {}, 'verify': {}, 'dry': DRY}
@@ -121,9 +124,47 @@ def build_material():
     mx = ex(u.MaterialExpressionMax, -150, 450)
     link(wm, mx, 'A')
     link(sm, mx, 'B')
-    op = ex(u.MaterialExpressionMultiply, 0, 300)
-    link(mx, op, 'A')
-    link(up, op, 'B')
+    cover = ex(u.MaterialExpressionMultiply, 0, 300)
+    link(mx, cover, 'A')
+    link(up, cover, 'B')
+    # Fix round 1 (review finding A): the 45 m box ended in a hard square edge that slid with the camera. The box is
+    # now 150 m and the layer fades with horizontal distance from the camera (AHoverWeather sits the decal on the
+    # camera): full to FadeStart, gone at FadeEnd (set by AHoverWeather from SurfaceFadeStart / SurfaceFadeEnd).
+    cam = ex(u.MaterialExpressionCameraPositionWS, -1700, 1000)
+    camxy = ex(u.MaterialExpressionComponentMask, -1500, 1000, r=True, g=True, b=False, a=False)
+    link(cam, camxy)
+    dist = ex(u.MaterialExpressionDistance, -1300, 1000)
+    link(xy, dist, 'A')
+    link(camxy, dist, 'B')
+    fs = ex(u.MaterialExpressionScalarParameter, -1300, 1150, parameter_name='FadeStart', default_value=9000.0)
+    fe = ex(u.MaterialExpressionScalarParameter, -1300, 1250, parameter_name='FadeEnd', default_value=14500.0)
+    fstep = ex(u.MaterialExpressionSmoothStep, -1100, 1050)
+    link(fs, fstep, 'Min')
+    link(fe, fstep, 'Max')
+    link(dist, fstep, 'Value')
+    fade = ex(u.MaterialExpressionOneMinus, -950, 1050)
+    link(fstep, fade)
+    # Fix round 1 (finding D): characters no longer opt out of all decals; AHoverWeather draws them into custom
+    # depth while the layer shows, and the layer skips pixels whose custom depth equals the scene depth (the visible
+    # surface IS a character). A character behind a wall leaves the wall alone (custom depth farther than the wall).
+    # |difference| rather than a sign test, so an empty / unbound custom depth (far or near) never masks the world.
+    cd = ex(u.MaterialExpressionSceneTexture, -1700, 1400, scene_texture_id=u.SceneTextureId.PPI_CUSTOM_DEPTH)
+    cdr = ex(u.MaterialExpressionComponentMask, -1500, 1400, r=True, g=False, b=False, a=False)
+    link(cd, cdr, '', 'Color')
+    pd = ex(u.MaterialExpressionPixelDepth, -1500, 1500)
+    dd = ex(u.MaterialExpressionSubtract, -1300, 1400)
+    link(cdr, dd, 'A')
+    link(pd, dd, 'B')
+    ad = ex(u.MaterialExpressionAbs, -1150, 1400)
+    link(dd, ad)
+    keep = ex(u.MaterialExpressionSmoothStep, -1000, 1400, const_min=4.0, const_max=16.0)
+    link(ad, keep, 'Value')
+    fk = ex(u.MaterialExpressionMultiply, -800, 1200)
+    link(fade, fk, 'A')
+    link(keep, fk, 'B')
+    op = ex(u.MaterialExpressionMultiply, 150, 300)
+    link(cover, op, 'A')
+    link(fk, op, 'B')
     snow01 = ex(u.MaterialExpressionSaturate, -450, 800)
     link(snow, snow01)
     col = ex(u.MaterialExpressionLinearInterpolate, 0, -100)
@@ -161,21 +202,37 @@ RAIN_TUNE = {
 SNOW_SRC = '/Game/MultiplayerDynamicWeatherSystem/Particles/Snow/P_Snow'
 # Full run: 6,000 traced flakes cost ~3x the rain, so the snow is split like the rain: a traced near volume (no snow
 # under roofs where Vexa stands) and an untraced far one whose flakes simply expire around street level.
+# Fix round 1 (review finding B, moving camera): the flakes all started 15 m above the camera and fall 2.5-5 m/s, so
+# air the camera moved or turned into stayed empty at eye level for 3-6 s. The near (traced) flakes now start 2.5-11 m
+# above the camera (above the awnings Vexa stands under; same flakes per metre of height, fewer above the view, so
+# fewer traces) and the far ones anywhere from eye level to 12 m up with a 2.5-3.5 s life, so a region the far
+# volume moves into fills within ~3 s at every height. AHoverWeather also leads both by the view target's velocity.
+# Cost pass (finding F, 2026-11-03): with the far box moved to 10 m ahead it overlaps the near one, and the far flakes
+# spawned at eye level spent most of their 3 s below the street; snow cost +2.2..3.7 ms game thread vs ~1.5 for rain.
+# Near 450 -> 400/s, far 1300 -> 850/s spawned 1.5-12 m above the camera (not from eye level): ~30 % fewer live flakes.
 SNOW_TUNE = {
-    'ParticleModuleSpawn_0.RequiredDistributionSpawnRate': {'constant': 450.0},
+    'ParticleModuleSpawn_0.RequiredDistributionSpawnRate': {'constant': 400.0},
     'ParticleModuleSize_0.DistributionStartSize': {'min': (2.5, 2.5, 0.0), 'max': (6.0, 6.0, 0.0)},
-    'ParticleModuleLocation_0.DistributionStartLocation': {'min': (-900.0, -900.0, 1500.0),
-                                                           'max': (900.0, 900.0, 1500.0)},
+    'ParticleModuleLocation_0.DistributionStartLocation': {'min': (-900.0, -900.0, 250.0),
+                                                           'max': (900.0, 900.0, 1100.0)},
 }
 SNOW_FAR_TUNE = dict(SNOW_TUNE, **{
-    'ParticleModuleSpawn_0.RequiredDistributionSpawnRate': {'constant': 900.0},
-    'ParticleModuleLocation_0.DistributionStartLocation': {'min': (-1600.0, -1600.0, 1500.0),
-                                                           'max': (1600.0, 1600.0, 1500.0)},
+    'ParticleModuleSpawn_0.RequiredDistributionSpawnRate': {'constant': 850.0},
+    'ParticleModuleLocation_0.DistributionStartLocation': {'min': (-1600.0, -1600.0, 150.0),
+                                                           'max': (1600.0, 1600.0, 1200.0)},
     'ParticleModuleCollision_0.DistributionDelayAmount': {'constant': 100.0},
-    'ParticleModuleLifetime_0.DistributionLifetime': {'min': 4.5, 'max': 6.0},
+    'ParticleModuleLifetime_0.DistributionLifetime': {'min': 2.5, 'max': 3.5},
 })
 VARIANTS = {
-    'P_Rain_AFS': (RAIN_SRC, RAIN_TUNE),   # near the camera: keeps collision (roofs, underpass, splash events)
+    # Near the camera: keeps collision (roofs, underpass, splash events). Fix round 1: drops start 12 m above the
+    # camera instead of 20 m (they reach eye level in ~0.5 s after a turn; ~35 % fewer traced drops alive). Cost pass
+    # (finding F): rain + storm measured ~2.0 ms game thread over Clear with the player running, so the traced drops
+    # go 2200 -> 1800/s (the far, untraced curtain stays at 2200).
+    'P_Rain_AFS': (RAIN_SRC, dict(RAIN_TUNE, **{
+        'ParticleModuleSpawn_0.RequiredDistributionSpawnRate': {'constant': 1800.0},
+        'ParticleModuleLocation_0.DistributionStartLocation': {'min': (-1000.0, -1000.0, 1200.0),
+                                                               'max': (1000.0, 1000.0, 1200.0)},
+    })),
     'P_Rain_AFS_Far': (RAIN_SRC, dict(RAIN_TUNE, **{   # 26 m ahead: no traces, dies just below street level
         # Cascade modules are not exposed to Python (bEnabled, MaxCollisionDistance), their distributions are: a
         # collision delay longer than the emitter's 1 s loop means the far drops are never traced.
@@ -183,7 +240,7 @@ VARIANTS = {
         'ParticleModuleLifetime_0.DistributionLifetime': {'min': 1.25, 'max': 1.25},
     })),
     'P_Snow_AFS': (SNOW_SRC, SNOW_TUNE),          # near: traced
-    'P_Snow_AFS_Far': (SNOW_SRC, SNOW_FAR_TUNE),  # 26 m ahead: never traced, 4.5-6 s life
+    'P_Snow_AFS_Far': (SNOW_SRC, SNOW_FAR_TUNE),  # 10 m ahead (fix round 1): never traced, 2.5-3.5 s life
 }
 
 

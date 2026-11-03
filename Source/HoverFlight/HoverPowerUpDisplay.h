@@ -63,6 +63,10 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item") float SpinDegPerSec = 40.f;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item") float BobCm = 2.f;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item") float BobHz = .5f;
+    // Uniform item size. AFS 2026-11-03: the item-relative offsets scale with it (spark / pop / glint seam points are in
+    // mesh space; KeyLightOffset, KeyLightRadius and MoteOffset are multiplied by it, the key light intensity
+    // (KeyLightIntensity and its kicks) linearly so the bigger item is not left dim). Effect sizes stay in world cm
+    // (pops, glint, sparks, shudder, jolt) and HoverCm stays the gap under the item.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item") float ItemScale = 1.f;
 
     // ---------------------------------------------------------------- life
@@ -77,6 +81,7 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Light") FLinearColor KeyLightColor = FLinearColor(1.f, .7f, .45f);
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Light") float KeyLightIntensity = 3.f; // candela
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Light") float KeyLightRadius = 220.f;
+    // From the item base (HoverCm up), x ItemScale.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Light") FVector KeyLightOffset = FVector(0, 0, 34);
     // Slow breathing of the key light (Hz, fraction).
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Light") float KeyLightPulseHz = 0.f;

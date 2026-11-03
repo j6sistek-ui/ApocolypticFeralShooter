@@ -449,19 +449,21 @@ FVector AHoverPowerUpDisplay::RandomCasingPoint(FRandomStream &Rng, bool bAllowC
     }
     if (Look->CasingPoints.Num() > 0)
     {
-        // the authored point nearest the viewer side out of three random picks
-        FVector Best = Look->CasingPoints[Rng.RandRange(0, Look->CasingPoints.Num() - 1)];
-        float BestScore = -2.f;
-        for (int32 K = 0; K < 3; ++K)
+        // AFS 2026-11-03: a random authored point on the side the viewer sees (within 75 deg, as the bounds rings
+        // below; the old best-of-three pick put about one burst in eight behind the item), the cap only if allowed
+        const FVector2D V(FMath::Cos(FMath::DegreesToRadians(ViewAngle)), FMath::Sin(FMath::DegreesToRadians(ViewAngle)));
+        const float MinDot = FMath::Cos(FMath::DegreesToRadians(75.f));
+        TArray<int32, TInlineAllocator<128>> Near;
+        for (int32 I = 0; I < Look->CasingPoints.Num(); ++I)
         {
-            const FVector P = Look->CasingPoints[Rng.RandRange(0, Look->CasingPoints.Num() - 1)];
-            const FVector2D D = FVector2D(P.X - C.X, P.Y - C.Y).GetSafeNormal();
-            const float Score = FVector2D::DotProduct(D, FVector2D(FMath::Cos(FMath::DegreesToRadians(ViewAngle)),
-                                                                   FMath::Sin(FMath::DegreesToRadians(ViewAngle))));
-            if (Score > BestScore)
-                BestScore = Score, Best = P;
+            const FVector &P = Look->CasingPoints[I];
+            if (!bAllowCap && P.Z > ItemBounds.Max.Z - 1.f)
+                continue;
+            if (FVector2D::DotProduct(FVector2D(P.X - C.X, P.Y - C.Y).GetSafeNormal(), V) >= MinDot)
+                Near.Add(I);
         }
-        return Best;
+        return Look->CasingPoints[Near.Num() ? Near[Rng.RandRange(0, Near.Num() - 1)]
+                                             : Rng.RandRange(0, Look->CasingPoints.Num() - 1)];
     }
     const float Radius = FMath::Min(Ext.X, Ext.Y) * .92f;
     if (bAllowCap && Rng.FRand() < .3f)
@@ -822,10 +824,13 @@ void AHoverPowerUpDisplay::UpdateAnimation(float Dt)
     // ---- key light
     {
         const float Pulse = 1.f + L.KeyLightPulseAmount * FMath::Sin(UE_TWO_PI * L.KeyLightPulseHz * Clock);
-        const float I = L.KeyLightIntensity * LifeGlow * Pulse + LightKick + L.BeatLightKick * WarnAmount * Beat +
-                        L.DischargeLightKick * DischargeFlash * LifeGlow;
-        KeyLight->SetRelativeLocation(FVector(0, 0, L.HoverCm) + L.KeyLightOffset);
-        KeyLight->SetAttenuationRadius(L.KeyLightRadius);
+        // AFS 2026-11-03: a scaled item keeps its key light outside the casing (offset x ItemScale; at 1x the doubled
+        // Nuke had the light 6 cm inside its 32 cm half-width) and lit (intensity x ItemScale for the doubled distance)
+        const float K = FMath::Max(L.ItemScale, .01f);
+        const float I = (L.KeyLightIntensity * LifeGlow * Pulse + LightKick + L.BeatLightKick * WarnAmount * Beat +
+                         L.DischargeLightKick * DischargeFlash * LifeGlow) * K;
+        KeyLight->SetRelativeLocation(FVector(0, 0, L.HoverCm) + L.KeyLightOffset * K);
+        KeyLight->SetAttenuationRadius(L.KeyLightRadius * K);
         KeyLight->SetLightColor(FMath::Lerp(L.KeyLightColor, L.DischargeLightColor, FMath::Min(DischargeFlash, 1.f)));
         KeyLight->SetIntensity(I);
     }
@@ -866,7 +871,7 @@ void AHoverPowerUpDisplay::UpdateAnimation(float Dt)
     if (L.MoteSystem && LifeTime >= NextMoteBurst && LifeTime < Life)
     {
         NextMoteBurst = LifeTime + L.MoteBurstInterval;
-        FireFx(FxMotes, ItemPivot->GetComponentTransform().TransformPosition(L.MoteOffset), FVector::UpVector);
+        FireFx(FxMotes, ItemMesh->GetComponentTransform().TransformPosition(L.MoteOffset), FVector::UpVector); // x ItemScale
     }
 
     // ---- evaluation label

@@ -17,6 +17,15 @@ Env PU_LIVE_PLAN=fix (fix round 2026-10-31) takes the shorter check set instead,
   nuke_27_5, medkit_28_2, nuke_28_9     the last 3 s (heartbeat, arc crawl; no echo ghost on the Nuke)
   and records, at the first PIE frame, whether every display's item and neon are visible (the hidden-phase bug), and
   the particle counts of one spark burst (and of the pop's smoke puff, if the look has one) in capture.json 'puff'.
+Env PU_LIVE_PLAN=nuke2 (2026-11-03, the doubled Nuke) takes the row next to the medkit and ammo, into stills_nuke2x/:
+  row_start_04 / _15 / _26 / _29_5      from the player start (eye height): idle and the last 5 s
+  row_04_7, row_burst_a/_b, row_27, row_28_5   the row from about 3.5 m, idle (one at a spark burst) and the last 5 s
+  row_start_pop                         from the start at a pop
+  nuke_burst_a/_b, nuke_pop_a/_b        the Nuke close (framed for its 2x size) at a burst and a pop after 15 s
+  nuke_burst_c/_d                       the Nuke close at up to two more bursts (before 14.2 s / 25 s)
+  nuke_27_6, nuke_29_0                  the Nuke close in the warning
+  (run with "-ExecCmds=DisableAllScreenMessages, ..." so the NUKE label is not under the level's light warning)
+  and the Nuke's event counts (bursts, pops, single sparks, ticks) over the idle phase in capture.json 'idle_counts'.
 Out: D:/AFS_Comparisons/PowerUps_20261031/Live/stills/*.png + capture.json
 Usage: UnrealEditor-Cmd.exe AFS.uproject -unattended -RenderOffscreen -nosplash -ResX=1280 -ResY=720 -stdout
        -FullStdOutLogOutput -DisablePlugins=NwiroIntegrationKit -ExecutePythonScript=<this>
@@ -34,9 +43,9 @@ MAP = '/Game/HoverPrototype/Maps/L_NYC_Explore'
 TAG = 'AFS_PowerUpTrial'
 OUT = Path('D:/AFS_Comparisons/PowerUps_20261031/Live')
 PLAN = os.environ.get('PU_LIVE_PLAN', 'full')
-STILLS = OUT / os.environ.get('PU_LIVE_STILLS', 'stills_fix' if PLAN == 'fix' else 'stills')
+STILLS = OUT / os.environ.get('PU_LIVE_STILLS', {'fix': 'stills_fix', 'nuke2': 'stills_nuke2x'}.get(PLAN, 'stills'))
 STILLS.mkdir(parents=True, exist_ok=True)
-CAPTURE_JSON = STILLS / 'capture.json' if PLAN == 'fix' else OUT / 'capture.json'
+CAPTURE_JSON = STILLS / 'capture.json' if PLAN in ('fix', 'nuke2') else OUT / 'capture.json'
 WIDTH, HEIGHT = 1280, 720
 ROW_DIST, EYE = 350.0, 165.0
 R = {'ok': True, 'errors': [], 'frames': [], 'displays': {}, 'time': time.strftime('%Y-%m-%d %H:%M:%S')}
@@ -158,9 +167,46 @@ def build_plan_fix():
     return sorted(P, key=lambda x: x[0])
 
 
+def build_plan_nuke2():
+    sched = R['nuke_schedule']
+    idle = 25.0
+    R['idle_counts'] = {n: sum(1 for t, k, c in sched if k == kind and t < idle)
+                        for kind, n in ((0, 'ticks'), (1, 'spark_bursts'), (2, 'pops'), (3, 'single_sparks'))}
+    R['idle_counts']['bursts_of_13'] = sum(1 for t, k, c in sched if k == 1 and c == 13 and t < idle)
+    b1 = next(t for t, k, c in sched if k == 1 and t > 5.6)
+    p1 = next(t for t, k, c in sched if k == 2 and t > b1 + 1.0)
+    b2 = next(t for t, k, c in sched if k == 1 and t > 15.8)
+    p2 = next(t for t, k, c in sched if k == 2 and t > b2 + 1.0)
+    if p1 > 14.0 or p2 > 25.0:
+        raise RuntimeError('schedule does not fit the plan: %s' % [b1, p1, b2, p2])
+    # more close bursts (which seam point a burst takes is random: a cap burst sprays up, a far-side one is hidden)
+    more = [t for t, k, c in sched if k == 1 and (p1 + .5 < t < 14.2 or p2 + .8 < t < 24.8)][:2]
+    # the doubled Nuke is 90 cm tall from 30 cm up: framed from 2.6 m, aimed at its middle
+    nuke = lambda: view_item('Nuke', 260, 120, 75, 50)
+    P = [(3.6, view_start), (4.0, lambda: capture('row_start_04')),
+         (4.3, view_row), (4.7, lambda: capture('row_04_7')),
+         (b1 - .4, view_row), (b1 + .08, lambda: capture('row_burst_a')), (b1 + .3, lambda: capture('row_burst_b')),
+         (p1 - .4, view_start), (p1 + .04, lambda: capture('row_start_pop')),
+         (14.6, view_start), (15.0, lambda: capture('row_start_15')),
+         (b2 - .4, nuke), (b2 + .07, lambda: capture('nuke_burst_a')), (b2 + .3, lambda: capture('nuke_burst_b')),
+         (p2 - .4, nuke), (p2 + .04, lambda: capture('nuke_pop_a')), (p2 + .25, lambda: capture('nuke_pop_b')),
+         (25.6, view_start), (26.0, lambda: capture('row_start_26')),
+         (26.6, view_row), (27.0, lambda: capture('row_27')),
+         (27.2, nuke), (27.6, lambda: capture('nuke_27_6')),
+         (28.1, view_row), (28.5, lambda: capture('row_28_5')),
+         (28.6, nuke), (29.0, lambda: capture('nuke_29_0')),
+         (29.1, view_start), (29.5, lambda: capture('row_start_29_5')), (29.7, finish)]
+    for i, b in enumerate(more):
+        P += [(b - .3, nuke), (b + .07, lambda i=i: capture('nuke_burst_%s' % 'cd'[i]))]
+    R['plan_times'] = {'burst_row': b1, 'pop_start': p1, 'burst_close': b2, 'pop_close': p2, 'more_bursts': more}
+    return sorted(P, key=lambda x: x[0])
+
+
 def build_plan():
     if PLAN == 'fix':
         return build_plan_fix()
+    if PLAN == 'nuke2':
+        return build_plan_nuke2()
     sched = R['nuke_schedule']
     burst = next(t for t, k, c in sched if k == 1 and t > 7.6)
     pop = next(t for t, k, c in sched if k == 2 and t > burst + 1.2)

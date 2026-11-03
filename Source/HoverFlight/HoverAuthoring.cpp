@@ -16,6 +16,8 @@
 #include "UnrealClient.h"
 #include "Misc/App.h"
 #if WITH_EDITOR
+#include "DynamicRHI.h"
+#include "RenderTimer.h"
 #include "NiagaraSystem.h"
 #include "Animation/BlendSpace.h"
 #include "Animation/AnimMontage.h"
@@ -2286,6 +2288,16 @@ bool UHoverAuthoring::SetSupportHandOverride(AHoverPilot *Pilot, bool bEnabled, 
     return true;
 #else
     return false;
+#endif
+}
+
+FVector4 UHoverAuthoring::GetThreadTimesMs()
+{
+#if WITH_EDITOR
+    return FVector4(FPlatformTime::ToMilliseconds(GGameThreadTime), FPlatformTime::ToMilliseconds(GRenderThreadTime),
+                    FPlatformTime::ToMilliseconds(GRHIThreadTime), FPlatformTime::ToMilliseconds(RHIGetGPUFrameCycles(0)));
+#else
+    return FVector4(0, 0, 0, 0);
 #endif
 }
 

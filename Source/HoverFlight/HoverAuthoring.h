@@ -133,6 +133,9 @@ class HOVERFLIGHT_API UHoverAuthoring : public UBlueprintFunctionLibrary
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static FString InspectActiveEffects(const FString &AssetContains);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static void CapturePlaytest(const FString &Filename);
     UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static void CaptureWorldFrame(const FString &Filename);
+    // AFS 2026-11-01 (Scripts/ProveWeather.py cost windows): the engine's last "stat unit" numbers in ms as
+    // (game thread, render thread, RHI thread, GPU frame); 0 where the platform does not measure it.
+    UFUNCTION(BlueprintCallable, Category = "Hover|Editor") static FVector4 GetThreadTimesMs();
     // Raw (parent-space, editor source data) transform of Sequence's track for Bone at each time in seconds, for
     // clip verification scripts; empty when the sequence, skeleton or bone is missing. Translation is in the
     // parent bone's space, so under a root bone that carries the FBX x100 scale it reads in metres. A bone the
