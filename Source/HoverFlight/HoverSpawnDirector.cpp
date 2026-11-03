@@ -21,6 +21,11 @@
 
 namespace
 {
+FVector ReentryLocation(const AZE_ZombieSpawnPoint &Point)
+{
+    return Point.GetActorLocation() + FVector(0, 0, 50);
+}
+
 // First inward crossing of the 8 m circle around the target, in path traversal order.
 int32 IncomingSide(const FNavPathSharedPtr &Path, const FVector &Entrance, const FVector &Target)
 {
@@ -295,11 +300,12 @@ void UHoverSpawnDirector::EnableOnly(AZE_ZombieSpawnPoint *Point)
 }
 
 AZE_ZombieSpawnPoint *UHoverSpawnDirector::Pick(const FHoverSpawnTarget &Target, bool bRelax, bool bPackReuse,
-                                                int32 &OutCandidates, bool bBalanceApproaches)
+                                                int32 &OutCandidates, const AHoverCyberZombie *ReturningZombie)
 {
     OutCandidates = 0;
     if (!Target.bValid || !Settings || !Mode)
         return nullptr;
+    const bool bBalanceApproaches = ReturningZombie == nullptr;
     const float Time = Now();
     const float Cooldown = FMath::Max(Settings->CooldownMin, 2.f * GetSpawnInterval());
     const int32 RoundCap = FMath::Max(1, FMath::CeilToInt(Quota / 3.f));
@@ -358,9 +364,13 @@ AZE_ZombieSpawnPoint *UHoverSpawnDirector::Pick(const FHoverSpawnTarget &Target,
                 continue;
             Weight *= Settings->OccludedWeight;
         }
-        // Re-entry teleports the capsule above the marker; an otherwise hidden floor may expose that destination.
-        if (!bBalanceApproaches && IsVisible(Target, Position + FVector(0, 0, 50), Point))
-            continue;
+        if (ReturningZombie)
+        {
+            // Reject a blocked destination before selection so another eligible entrance can still win.
+            const FVector Destination = ReentryLocation(*Point);
+            if (IsVisible(Target, Destination, Point) || !ReturningZombie->CanOccupyCapsuleAt(Destination))
+                continue;
+        }
         // AFS 2026-10-31 (kid swarm): a new horde pack favours entrances away from the last pack's bearing
         // (x .35 on the same bearing up to x 1 opposite), so a swarm arrives from several sides when the gates
         // allow it.
@@ -402,6 +412,7 @@ AZE_ZombieSpawnPoint *UHoverSpawnDirector::Pick(const FHoverSpawnTarget &Target,
         if (bHaveRouteSides)
             for (const FCandidate &Candidate : List)
                 ChosenEligibleSides |= 1 << Candidate.Side;
+        ChosenDrawSides = ChosenEligibleSides;
         ChosenTravelVelocity = TravelVelocity;
     }
     auto Select = [&](const FCandidate &Candidate) {
@@ -419,6 +430,8 @@ AZE_ZombieSpawnPoint *UHoverSpawnDirector::Pick(const FHoverSpawnTarget &Target,
         for (const FCandidate &Candidate : List)
             if (Candidate.Distance > Farthest->Distance)
                 Farthest = &Candidate;
+        if (bBalanceApproaches && bHaveRouteSides)
+            ChosenDrawSides = 1 << Farthest->Side;
         return Select(*Farthest);
     }
 
@@ -441,8 +454,12 @@ AZE_ZombieSpawnPoint *UHoverSpawnDirector::Pick(const FHoverSpawnTarget &Target,
             Oldest = FMath::Min(Oldest, LastServed[Candidate.Side]);
         }
         List.RemoveAll([&](const FCandidate &Candidate) { return LastServed[Candidate.Side] != Oldest; });
+        ChosenDrawSides = 0;
         for (FCandidate &Candidate : List)
+        {
             Candidate.Weight /= SideTotals[Candidate.Side];
+            ChosenDrawSides |= 1 << Candidate.Side;
+        }
     }
     // Apply this after normalization: even two equally recent lanes with one entrance each retain the preference.
     // The pawn's horizontal velocity includes on-foot and mounted movement. Camera motion never enters this term.
@@ -652,12 +669,12 @@ void UHoverSpawnDirector::OnSpawned(AHoverCyberZombie &Zombie, bool bVendorSpawn
     UE_LOG(LogTemp, Display,
            TEXT("HOVER_SPAWN time=%.2f round=%d spawner=%s distance=%.0f tier=%.0f interval=%.2f pressure=%.2f "
                 "credit=%.2f candidates=%d relaxCone=%d zombie=%s role=%s approachSide=%c eligibleMask=%u "
-                "travelXY=%.1f,%.1f forwardWeight=%.3f"),
+                "travelXY=%.1f,%.1f forwardWeight=%.3f drawMask=%u"),
            Time, Round, *GetNameSafe(Point),
            Player ? FVector::Dist2D(Player->GetActorLocation(), Zombie.GetActorLocation()) : -1.f, Zombie.SpeedTier,
            LastInterval, LastPressure, Credit, Candidates, bWasRelaxed ? 1 : 0, *Zombie.GetName(),
            *UEnum::GetValueAsString(Zombie.GetRole()), SideLabel, uint32(ChosenEligibleSides), ChosenTravelVelocity.X,
-           ChosenTravelVelocity.Y, ChosenForwardWeight);
+           ChosenTravelVelocity.Y, ChosenForwardWeight, uint32(ChosenDrawSides));
     RateJitter = FMath::FRandRange(Settings->RateJitterMin, Settings->RateJitterMax);
     // Re-pick at once, so the next spawn can use a different entrance in the same tick window.
     if (Mode && Mode->GetZombiesRemaining() - Live.Num() > 0)
@@ -687,10 +704,10 @@ bool UHoverSpawnDirector::RelocateZombie(AHoverCyberZombie &Zombie)
         return false;
     const FHoverSpawnTarget Target = GetTarget();
     int32 Found = 0;
-    AZE_ZombieSpawnPoint *Point = Pick(Target, false, false, Found, false);
+    AZE_ZombieSpawnPoint *Point = Pick(Target, false, false, Found, &Zombie);
     if (!Point)
         return false;
-    const FVector Destination = Point->GetActorLocation() + FVector(0, 0, 50);
+    const FVector Destination = ReentryLocation(*Point);
     if (!Zombie.SetActorLocation(Destination, false, nullptr, ETeleportType::TeleportPhysics))
         return false;
     auto *AI = Cast<AAIController>(Zombie.GetController());

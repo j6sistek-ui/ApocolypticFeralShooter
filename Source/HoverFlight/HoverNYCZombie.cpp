@@ -312,8 +312,7 @@ bool AHoverNYCZombie::StartGroundEntry()
         Floor.bStartPenetrating || !Movement->IsWalkable(Floor))
         return false;
     const FVector Grounded = Floor.Location + FVector::UpVector * 2.f;
-    if (GetWorld()->OverlapBlockingTestByProfile(Grounded, FQuat::Identity, Capsule->GetCollisionProfileName(), Shape,
-                                                 Query))
+    if (!CanOccupyCapsuleAt(Grounded))
         return false;
 
     if (Anim->Montage_PlayWithBlendIn(Montage, FAlphaBlendArgs(0.f)) <= 0.f)

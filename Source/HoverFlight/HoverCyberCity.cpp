@@ -480,6 +480,17 @@ void AHoverCyberZombie::InitializeZombieStats()
     }
 }
 
+bool AHoverCyberZombie::CanOccupyCapsuleAt(const FVector &Center) const
+{
+    const UCapsuleComponent *Capsule = GetCapsuleComponent();
+    FCollisionQueryParams Query(SCENE_QUERY_STAT(HoverZombieClearance), false, this);
+    FCollisionResponseParams Response;
+    Capsule->InitSweepCollisionParams(Query, Response);
+    return !GetWorld()->OverlapBlockingTestByChannel(Center, Capsule->GetComponentQuat(),
+                                                     Capsule->GetCollisionObjectType(), Capsule->GetCollisionShape(),
+                                                     Query, Response);
+}
+
 AHoverCyberZombie::AHoverCyberZombie()
 {
     Trousers = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("CyberTrousers"));

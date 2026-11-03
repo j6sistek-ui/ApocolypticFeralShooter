@@ -139,6 +139,7 @@ class HOVERFLIGHT_API AHoverCyberZombie : public AZE_ZombieCharacter
         return bIsAttacking || bIsDead;
     }
     UFUNCTION(BlueprintCallable) bool StompImpact();
+    bool CanOccupyCapsuleAt(const FVector &Center) const;
     UPROPERTY(BlueprintReadOnly) int32 StompCount = 0;
     UPROPERTY(BlueprintReadOnly) int32 StompKnockdowns = 0;
     // Spawn-time state written by the game mode's OnZombieSpawned. HealthScale 0 means

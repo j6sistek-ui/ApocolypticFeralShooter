@@ -32,6 +32,45 @@ def wave_state(mode, actors):
             "total_kills": mode.get_total_zombies_killed(), "living": sorted(z.get_path_name() for z in actors)}
 
 
+def block_entrances(world, victim):
+    # Match an older zombie capsule's blocking channel. These stand-ins do not count as
+    # wave members, fresh zombies or WorldStatic/WorldDynamic sight occluders.
+    mesh = state["blocker_mesh"]
+    capsule = victim.capsule_component
+    ignore = capsule.get_collision_response_to_channel(u.CollisionChannel.ECC_CAMERA)
+    block = capsule.get_collision_response_to_channel(u.CollisionChannel.ECC_PAWN)
+    receipt["fixture_channel_responses"] = {"others": str(ignore), "pawn": str(block)}
+    if "IGNORE" not in str(ignore).upper() or "BLOCK" not in str(block).upper():
+        raise RuntimeError("Expected live zombie capsules to ignore Camera and block Pawn")
+    blocks = []
+    for point in GAME.get_all_actors_with_tag(world, "AFS_NYCSpawn"):
+        center = point.get_actor_location() + u.Vector(0, 0, 50)
+        actor = AUTHOR.spawn_playtest_actor(u.StaticMeshActor, u.Transform(location=center))
+        component = actor.static_mesh_component
+        component.set_mobility(u.ComponentMobility.MOVABLE)
+        if not component.set_static_mesh(mesh) or component.static_mesh != mesh:
+            raise RuntimeError(f"Could not attach blocker geometry at {point.get_name()}")
+        actor.set_actor_scale3d(u.Vector(0.25, 0.25, 0.25))
+        component.set_collision_enabled(u.CollisionEnabled.QUERY_ONLY)
+        component.set_collision_object_type(u.CollisionChannel.ECC_PAWN)
+        component.set_collision_response_to_all_channels(ignore)
+        component.set_collision_response_to_channel(u.CollisionChannel.ECC_PAWN, block)
+        blocks.append((actor, center))
+    if not blocks:
+        raise RuntimeError("No spawn entrances to obstruct")
+    return blocks
+
+
+def verify_blocks(world, blocks):
+    # Verify the registered physics bodies on a later tick, before moving or injuring anyone.
+    for actor, center in blocks:
+        overlaps = u.SystemLibrary.sphere_overlap_actors(
+            world, center, 15, [u.ObjectTypeQuery.OBJECT_TYPE_QUERY3], u.StaticMeshActor, [])
+        if not overlaps or actor not in overlaps:
+            raise RuntimeError(f"No pawn-channel blocker at {center} for {actor.get_name()}")
+    receipt["verified_blockers"] = len(blocks)
+
+
 def strand(world, player, mode, actors, now):
     victim = min(actors, key=lambda z: z.get_name())
     # Real map floor surveyed north of the survival start, behind the held player's view.
@@ -78,6 +117,9 @@ def tick(_delta):
             raise RuntimeError("Timed out waiting for a full first wave, native re-entry, or a live pawn")
         if not state["play"]:
             if elapsed > 3:
+                state["blocker_mesh"] = u.load_asset("/Engine/BasicShapes/Cube.Cube")
+                if not state["blocker_mesh"]:
+                    raise RuntimeError("Could not load the engine cube before PIE")
                 AUTHOR.configure_offscreen_display(976, 640)
                 AUTHOR.start_playtest(960, 572)
                 state["play"] = True
@@ -104,12 +146,27 @@ def tick(_delta):
                   if z.get_component_by_class(u.ZE_SurvivalComponent).get_health() > 0]
         if "victim" not in state:
             if mode.get_current_wave() == 1 and actors and len(actors) == mode.get_round_quota():
+                if "blocks" not in state:
+                    state["blocks"] = block_entrances(world, actors[0])
+                    receipt["obstructed_entrances"] = len(state["blocks"])
+                    return
+                verify_blocks(world, state["blocks"])
                 strand(world, player, mode, actors, now)
             return
         victim = state["victim"]
         if victim not in actors:
             raise RuntimeError("The original wave actor died or was replaced")
-        if victim.get_editor_property("relocation_count") <= state["initial_relocations"]:
+        count = victim.get_editor_property("relocation_count")
+        if "blocks" in state:
+            if count != state["initial_relocations"] or state["health"].get_health() != receipt["injured_hp"]:
+                raise RuntimeError("The stranded actor relocated or healed while every entrance was occupied")
+            if now - receipt["stranded_at_s"] < 12:
+                return
+            for block, _center in state.pop("blocks"):
+                block.destroy_actor()
+            receipt["unblocked_at_s"] = now
+            return
+        if count <= state["initial_relocations"]:
             return
         remaining_cm = distance(victim.get_actor_location(), player.get_actor_location())
         if "reentry_at_s" not in receipt:

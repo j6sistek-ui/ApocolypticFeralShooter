@@ -83,7 +83,7 @@ class HOVERFLIGHT_API UHoverSpawnDirector : public UObject
     float GetSpawnInterval() const;
     // Full gate pipeline. bPackReuse tests only Chosen without cooldown/cap/recent gates.
     AZE_ZombieSpawnPoint *Pick(const FHoverSpawnTarget &Target, bool bRelax, bool bPackReuse, int32 &OutCandidates,
-                               bool bBalanceApproaches = true);
+                               const AHoverCyberZombie *ReturningZombie = nullptr);
     void Rescore();
     void EnableOnly(AZE_ZombieSpawnPoint *Point);
     FHoverSpawnerState *FindState(const AZE_ZombieSpawnPoint *Point);
@@ -111,6 +111,7 @@ class HOVERFLIGHT_API UHoverSpawnDirector : public UObject
     // Evidence from the winning round-spawn pick, before any later relocation or rescore.
     int32 ChosenApproachSide = INDEX_NONE;
     uint8 ChosenEligibleSides = 0; // bits 0..3 = E, N, W, S
+    uint8 ChosenDrawSides = 0;     // after lane balancing, or the single deterministic boss lane
     FVector2D ChosenTravelVelocity = FVector2D::ZeroVector;
     float ChosenForwardWeight = 1.f;
     TMap<TWeakObjectPtr<AZE_ZombieSpawnPoint>, int32> ApproachSides;
