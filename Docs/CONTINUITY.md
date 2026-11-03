@@ -59,7 +59,7 @@ Play NYC Survival from the launcher or the editor: `/Game/HoverPrototype/Maps/L_
 
 ## State on 2026-11-03 (hand-off)
 
-Everything below is committed and pushed (last code commit `7f0041c`); `Docs/DONE.md` lists what waits on the
+Everything below is committed and pushed (last code commit `58fa70c`); `Docs/DONE.md` lists what waits on the
 owner's in-game check (items 1-17), `Docs/BACKLOG.md` the ranked open work.
 
 Done 2026-11-01 to 11-03:
@@ -74,10 +74,11 @@ Done 2026-11-01 to 11-03:
   confirmed the look); Lifeblood's PERK MACHINE subtitle repainted at 4K (in Unreal; renders with dark doubled edges,
   see Bugs). Machines go in NYC Survival, never side by side (`PERKS.md`).
 - **Nuke display** doubled and sparkier (DONE 14 note).
+- **Open topics for the owner** are at the top of the backlog's "Waiting on the owner" list (2026-11-03).
 - **Texture caps audited** (2026-11-01): headless stills used to show low mips; capture scripts now force full
   textures. Real 2K caps remain on the M4A1 (16 maps), zombie variants (38) and grenades (owner to decide on 4K).
 
-Being finished when this was written: a small weather round that stops snowflakes drawing as big discs at the lens.
+- **Weather lens fix (`58fa70c`):** flakes and rain drops fade out within 1-3.5 m of the camera (no lens discs).
 
 Machine notes: Unreal's local cache server holds about 999 saved sessions and can take ~10 minutes to start; runs
 then wait on it (do not kill it). Two SpaceSurvival editors from other sessions sometimes run alongside; one Unreal
